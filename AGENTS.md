@@ -4,6 +4,8 @@ A Rust tool for a git folder of Markdown that AI agents keep editing. It shows w
 
 **This file is shared by every AI agent.** Claude Code reads it through `CLAUDE.md`. Codex reads it directly. Keep tool-specific notes out of here.
 
+**Shared rules for all projects:** `../_shared/README.md`. Before social media, Codex, video or browser work, read the matching file in `_shared/playbooks/`. 🔒 Locks there can't be overridden here.
+
 ---
 
 ## Start of every session
