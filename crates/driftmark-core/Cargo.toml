@@ -1,0 +1,15 @@
+[package]
+name = "driftmark-core"
+description = "The rules of driftmark: document blocks, change detection and ranking, note anchoring and lint rules. No file, git or network access"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

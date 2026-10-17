@@ -1,0 +1,21 @@
+[package]
+name = "driftmark"
+description = "See what your AI agents changed in your Markdown docs, whether it matters, and answer back with notes"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "driftmark"
+path = "src/main.rs"
+
+[dependencies]
+driftmark-core = { path = "../driftmark-core", version = "0.0.0" }
+
+[lints]
+workspace = true

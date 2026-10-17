@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["crates/driftmark-core", "crates/driftmark"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cj-ways/driftmark"
+keywords = ["markdown", "docs", "diff", "review", "ai-agents"]
+categories = ["command-line-utilities", "text-processing"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+
+# `panic = "abort"` is left out on purpose: the program runs a server, and one
+# failed request must not stop it.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

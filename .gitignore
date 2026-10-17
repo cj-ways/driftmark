@@ -1,3 +1,4 @@
-private/
-STATUS.md
-/target/
+/target
+/mutants.out*
+/STATUS.md
+/private/

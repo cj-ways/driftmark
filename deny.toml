@@ -1,0 +1,24 @@
+# cargo-deny: licences, sources and known advisories of every dependency.
+# A new licence is added here only with a reason, in the same commit as the
+# dependency that needs it.
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+allow = ["MIT", "Apache-2.0"]
+confidence-threshold = 0.9
+
+[bans]
+# A warning, not a refusal as in acctswap: a server, a search index and a
+# Markdown parser pull in large dependency trees where two versions of one
+# crate are common and harmless.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
