@@ -1,0 +1,5 @@
+# Expected-output files are compared byte for byte by the tests, so git must
+# keep their line endings as written on every system (Git for Windows would
+# otherwise check them out with CRLF). Fixtures have their own rule in
+# fixtures/.gitattributes.
+*.expected.txt -text
