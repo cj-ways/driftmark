@@ -39,3 +39,6 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json = "1.0.154"

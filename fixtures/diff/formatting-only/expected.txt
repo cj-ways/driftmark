@@ -1,0 +1,18 @@
+file: Modified
+status: None
+changes: 4, highest: Some(Formatting)
+levels: LevelCounts { decision: 0, rule: 0, fact: 0, wording: 0, formatting: 4 }
+kinds: KindCounts { formatting: 4, edited: 0, added: 0, removed: 0, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0]]
+
+formatting — Formatting [Formatting] — old 1 (line 3), new 1 (line 3)
+    text: This paragraph is wrapped over three lines in the old version.
+
+formatting — Formatting [Formatting] — old 2 (line 7), new 2 (line 5)
+    text: Some emphasis here.
+
+formatting — Formatting [Formatting] — old 3 (line 9), new 3 (line 7)
+    text: one
+
+formatting — Formatting [Formatting] — old 4 (line 10), new 4 (line 8)
+    text: two

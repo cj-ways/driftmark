@@ -105,6 +105,7 @@ Blocks 4 to 10 have the heading path `["Cache pages", "Decision"]`. The title is
 | `containers` | `Arc<[Container]>` | The containers the block sits inside, outermost first. |
 | `parent` | `Option<usize>` | The index of the block of the innermost list item, alert or footnote definition the block sits inside. |
 | `text` | `String` | The plain text: the rendered text without markup, for comparing words. |
+| `spans` | `Vec<TextSpan>` | The stretches of `text` that came from links, images and code spans. |
 | `source_hash` | `u64` | A hash of the exact bytes in `range`. |
 | `content_hash` | `u64` | A hash of the content with formatting removed. |
 
@@ -163,6 +164,19 @@ The plain text is what a reader sees, written without markup.
 - A thematic break has no text.
 - Text has no white space at either end.
 - Repair of a comrak 0.56 bug: comrak keeps the carriage return of a Windows line ending inside a code span (`` `a\r\nb` `` comes out as `a\r b`). driftmark turns it into one space, as Markdown requires.
+
+### `spans`
+
+The plain text drops link targets and code-span backticks. The change view needs both: it keeps a link or a code span whole when it marks changed words, and it compares link targets. So each block lists them.
+
+- A `TextSpan` has a `range`, the bytes of the block's `text` it covers, and a `kind`: `Code`, `Link { target }` or `Image { target }`.
+- A reference link's target is the one its definition gives. An autolink is a link whose text is its address. An image's text is its alt text.
+- Spans come in the order they end, so a code span inside a link comes before the link.
+- A link without text has an empty range; it still counts for the target.
+- Table cells and the paragraphs of a list item count from the start of the block's whole `text`, tabs and empty lines included.
+- Only paragraphs, headings, list items, alerts, footnote definitions and table rows have spans. Most blocks have none.
+
+In ``Use [the guide](a.md) or `cargo doc`.``, the text is `Use the guide or cargo doc.`, and the spans are `4..13` for the link to `a.md` and `17..26` for the code span.
 
 ### `source_hash` and `content_hash`
 
@@ -300,4 +314,4 @@ No range fails to slice, no two blocks overlap, and no character outside a block
 - Comparing two documents comes in wave 2.
 - Blocks carry byte ranges, not line numbers. `LineIndex::line_of` gives the line of a byte.
 - Footnote numbers are not in the plain text, because renumbering would read as an edit.
-- The block list has no `serde` support yet. The part that first sends blocks as JSON adds it.
+- A block itself has no JSON form. Its kind has one, which the change list uses: an object whose `type` names the kind in snake case, with the kind's details beside it, as in `{"type": "heading", "level": 2}`. `docs/features/engine/change-list.md` shows it.

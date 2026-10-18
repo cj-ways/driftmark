@@ -1,0 +1,12 @@
+file: Modified
+status: None
+changes: 2, highest: Some(Wording)
+levels: LevelCounts { decision: 0, rule: 0, fact: 0, wording: 2, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 0, added: 1, removed: 1, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0], [1, 1], [3, 2], [4, 4]]
+
+removed — Wording [Wording] — old 2 (line 5), new @2
+    text: This paragraph goes away in the new version.
+
+added — Wording [Wording] — old @4, new 3 (line 7)
+    text: A fresh paragraph appears here.

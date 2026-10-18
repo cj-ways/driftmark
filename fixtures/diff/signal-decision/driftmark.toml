@@ -1,0 +1,6 @@
+[[type]]
+name = "decision"
+paths = ["*.md"]
+status = { front-matter = "status" }
+current = ["accepted"]
+decision-headings = ["Decision"]

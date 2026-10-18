@@ -1,0 +1,6 @@
+file: Modified
+status: None
+changes: 0, highest: None
+levels: LevelCounts { decision: 0, rule: 0, fact: 0, wording: 0, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 0, added: 0, removed: 0, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0], [1, 1], [2, 2]]

@@ -1,0 +1,14 @@
+file: Modified
+status: None
+changes: 2, highest: Some(Fact)
+levels: LevelCounts { decision: 0, rule: 0, fact: 1, wording: 1, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 2, added: 0, removed: 0, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0]]
+
+edited — Fact [Link] — old 1 (line 3), new 1 (line 3)
+    view: side by side, kept in order 0.75
+    marks: Read the [-setup guide-]{+setup guide+} first.
+
+edited — Wording [Wording] — old 2 (line 5), new 2 (line 5)
+    view: side by side, kept in order 0.667
+    marks: [guide]: https://[-example.com/old-setup-]{+example.com/new-setup+}

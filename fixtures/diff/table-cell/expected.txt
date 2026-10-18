@@ -1,0 +1,11 @@
+file: Modified
+status: None
+changes: 1, highest: Some(Fact)
+levels: LevelCounts { decision: 0, rule: 0, fact: 1, wording: 0, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 1, added: 0, removed: 0, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0], [1, 1], [2, 2]]
+
+edited — Fact [Number, TableCell] — old 3 (line 6), new 3 (line 6)
+    view: side by side, kept in order 0.5
+    cells: [1]
+    marks: Search⇥[-1 hour-]{+2 hours+}⇥web

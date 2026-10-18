@@ -1,0 +1,9 @@
+file: Modified
+status: None
+changes: 1, highest: Some(Wording)
+levels: LevelCounts { decision: 0, rule: 0, fact: 0, wording: 1, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 0, added: 0, removed: 0, moved: 1, moved_edited: 0 }
+unchanged: [[0, 0], [2, 1], [3, 2]]
+
+moved — Wording [Moved] — old 1 (line 3), new 3 (line 7)
+    text: First paragraph about the server.

@@ -8,4 +8,5 @@
 - A document fixture `<name>.md` may have `<name>.expected.txt` beside it: the document model the test expects, written out. Each test run also writes its fresh output under the build folder's `tmp/document-dumps/`, so a deliberate change can be reviewed and copied over.
 - A pair of files `<name>.a.md` and `<name>.b.md` tests one difference between two versions of a document.
 - A folder under `lint/` is named after one writing rule and is a small repository of its own: `pass.md`, which no rule faults; `fail.md`, which only that rule faults; `fail.expected.txt`, its findings; and, when the rule needs them, a `driftmark.toml` and the files its links point to.
+- A folder in `diff/` holds `a.md` (the old version), `b.md` (the new one), an optional `driftmark.toml`, and `expected.txt`, the change list written out. A missing `a.md` or `b.md` means the document was added or removed.
 - `.gitattributes` here keeps every fixture's bytes exactly as written, line endings included, on every system.

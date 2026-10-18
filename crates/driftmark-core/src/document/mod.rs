@@ -19,6 +19,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use comrak::{Arena, parse_document};
+use serde::Serialize;
 
 /// The most block quotes, list items, alerts and footnote definitions a block
 /// may sit inside. Real documents nest a handful deep. The limit keeps a
@@ -59,6 +60,10 @@ pub struct Block {
     pub parent: Option<usize>,
     /// The rendered text without markup, for comparing words.
     pub text: String,
+    /// The stretches of `text` that came from links, images and code spans,
+    /// in the order they end, so a span inside a link comes before the link.
+    /// Most blocks have none.
+    pub spans: Vec<TextSpan>,
     /// A hash of the exact source bytes in `range`.
     pub source_hash: u64,
     /// A hash of the block's content with formatting removed. Two blocks with
@@ -67,8 +72,44 @@ pub struct Block {
     pub content_hash: u64,
 }
 
-/// What a block is.
+/// A stretch of a block's plain text that came from a link, an image or a
+/// code span.
+///
+/// The plain text drops link targets and code-span backticks. The change view
+/// needs both: it keeps such a stretch whole when it marks changed words, and
+/// it compares link targets.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextSpan {
+    /// The bytes of the block's `text` the span covers. It is empty for a link
+    /// without text.
+    pub range: Range<usize>,
+    /// What the span came from.
+    pub kind: SpanKind,
+}
+
+/// What a [`TextSpan`] came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpanKind {
+    /// A code span.
+    Code,
+    /// A link, including an autolink.
+    Link {
+        /// The target. A reference link's target comes from its definition.
+        target: String,
+    },
+    /// An image. Its text is its alt text.
+    Image {
+        /// The image's address.
+        target: String,
+    },
+}
+
+/// What a block is.
+///
+/// In JSON a kind is an object whose `type` names the variant in snake case,
+/// with the variant's details beside it: `{"type": "heading", "level": 2}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum BlockKind {
     /// YAML front matter between `---` lines at the top of the file.
     FrontMatter,
@@ -128,7 +169,7 @@ pub enum BlockKind {
 }
 
 /// The details of a list item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ListItem {
     /// How many list items this item sits inside: 0 for a top-level item.
     pub depth: usize,
@@ -142,7 +183,8 @@ pub struct ListItem {
 }
 
 /// The state of a task list item's checkbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskState {
     /// `[ ]`
     Open,
@@ -151,7 +193,8 @@ pub enum TaskState {
 }
 
 /// The languages driftmark draws as diagrams.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DiagramLanguage {
     /// A fenced block whose info string starts with `mermaid`.
     Mermaid,
@@ -160,7 +203,8 @@ pub enum DiagramLanguage {
 }
 
 /// The five GitHub alert kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AlertKind {
     /// `[!NOTE]`
     Note,
@@ -189,7 +233,7 @@ impl AlertKind {
 }
 
 /// A container a block can sit inside.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Container {
     /// A `>` block quote that is not an alert.
     BlockQuote,

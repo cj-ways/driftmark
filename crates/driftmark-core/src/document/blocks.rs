@@ -19,7 +19,7 @@ use super::content::{
 use super::markdown::Positions;
 use super::{
     AlertKind, Block, BlockKind, Container, DiagramLanguage, ListItem, MAX_DEPTH, ParseError,
-    TaskState,
+    TaskState, TextSpan,
 };
 
 /// One node still to visit, with what it sits inside.
@@ -223,8 +223,10 @@ impl Splitter<'_> {
         let range = self.leaf_range(work.node)?;
         let mut canon = Canon::new(kind_tag, details, range.len());
         let mut text = String::with_capacity(range.len());
-        canon.inline(work.node, &mut text);
-        self.push(kind, range, work, trimmed(text), &canon);
+        let mut spans = Vec::new();
+        canon.inline(work.node, &mut text, &mut spans);
+        let (text, spans) = trimmed(text, spans);
+        self.push_spans(kind, range, work, text, spans, &canon);
         Ok(())
     }
 
@@ -292,14 +294,16 @@ impl Splitter<'_> {
         let size = (start..end).len();
         let mut canon = Canon::new(kind_tag, details, size);
         let mut text = String::with_capacity(size);
+        let mut spans = Vec::new();
         for (index, paragraph) in node.children().take(lead).enumerate() {
             if index > 0 {
                 text.push_str("\n\n");
                 canon.boundary(tag::NEXT_PARAGRAPH);
             }
-            canon.inline(paragraph, &mut text);
+            canon.inline(paragraph, &mut text, &mut spans);
         }
-        let index = self.push(kind, start..end, work, trimmed(text), &canon);
+        let (text, spans) = trimmed(text, spans);
+        let index = self.push_spans(kind, start..end, work, text, spans, &canon);
         if rest > 0 {
             let containers = deeper(work, container)?;
             for child in node.reverse_children().take(rest) {
@@ -327,18 +331,31 @@ impl Splitter<'_> {
             let details = if header { "header" } else { "body" };
             let mut canon = Canon::new(tag::TABLE_ROW, details, range.len());
             let mut cells = Vec::new();
+            let mut text = String::with_capacity(range.len());
+            let mut spans = Vec::new();
             for cell in row.children() {
                 canon.boundary(tag::CELL);
-                let mut text = String::new();
-                canon.inline(cell, &mut text);
-                cells.push(trimmed(text));
+                let mut cell_text = String::new();
+                let mut cell_spans = Vec::new();
+                canon.inline(cell, &mut cell_text, &mut cell_spans);
+                let (cell_text, cell_spans) = trimmed(cell_text, cell_spans);
+                if !cells.is_empty() {
+                    text.push('\t');
+                }
+                let offset = text.len();
+                text.push_str(&cell_text);
+                spans.extend(cell_spans.into_iter().map(|mut span| {
+                    span.range = span.range.start + offset..span.range.end + offset;
+                    span
+                }));
+                cells.push(cell_text);
             }
-            let text = cells.join("\t");
-            self.push(
+            self.push_spans(
                 BlockKind::TableRow { header, cells },
                 range,
                 work,
                 text,
+                spans,
                 &canon,
             );
         }
@@ -393,6 +410,18 @@ impl Splitter<'_> {
         text: String,
         canon: &Canon,
     ) -> usize {
+        self.push_spans(kind, range, work, text, Vec::new(), canon)
+    }
+
+    fn push_spans(
+        &mut self,
+        kind: BlockKind,
+        range: Range<usize>,
+        work: &Work<'_>,
+        text: String,
+        spans: Vec<TextSpan>,
+        canon: &Canon,
+    ) -> usize {
         let source_hash = hash(self.source[range.clone()].as_bytes());
         self.blocks.push(Block {
             kind,
@@ -401,6 +430,7 @@ impl Splitter<'_> {
             containers: work.containers.clone(),
             parent: work.parent,
             text,
+            spans,
             source_hash,
             content_hash: canon.finish(),
         });
@@ -437,6 +467,7 @@ impl Splitter<'_> {
                     source_hash: hash(text.as_bytes()),
                     content_hash: canon.finish(),
                     text: unify_line_endings(text).into_owned(),
+                    spans: Vec::new(),
                     range: gap,
                     heading_path: no_headings.clone(),
                     containers: Arc::from([]),
@@ -480,14 +511,23 @@ impl Splitter<'_> {
     }
 }
 
-/// `text` without white space at either end, reusing its buffer when there
-/// is none, which is nearly always.
-fn trimmed(text: String) -> String {
-    if text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace) {
+/// `text` without white space at either end, with `spans` moved to match. A
+/// span reaching into the white space is cut at the new ends. The buffer is
+/// reused when there is no white space to drop, which is nearly always.
+fn trimmed(text: String, mut spans: Vec<TextSpan>) -> (String, Vec<TextSpan>) {
+    let lead = text.len() - text.trim_start().len();
+    let text = if text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace) {
         text.trim().to_owned()
     } else {
         text
+    };
+    let length = text.len();
+    for span in &mut spans {
+        let start = span.range.start.saturating_sub(lead).min(length);
+        let end = span.range.end.saturating_sub(lead).min(length);
+        span.range = start..end;
     }
+    (text, spans)
 }
 
 /// The containers a child of `work` sits in, or an error when that is deeper
@@ -847,7 +887,70 @@ mod tests {
         let found = blocks("# Title&#32;\n\n&#32;Text\n");
         assert_eq!(found[0].text, "Title");
         assert_eq!(found[1].text, "Text");
-        assert_eq!(trimmed("a b".to_owned()), "a b");
+        assert_eq!(trimmed("a b".to_owned(), Vec::new()).0, "a b");
+    }
+
+    #[test]
+    fn spans_follow_the_trimmed_text() {
+        let span = |range: Range<usize>| TextSpan {
+            range,
+            kind: crate::document::SpanKind::Code,
+        };
+        let (text, spans) = trimmed(
+            "  ab cd  ".to_owned(),
+            vec![span(0..4), span(5..7), span(6..9)],
+        );
+        assert_eq!(text, "ab cd");
+        assert_eq!(spans, [span(0..2), span(3..5), span(4..5)]);
+        let (text, spans) = trimmed("ab ".to_owned(), vec![span(1..3)]);
+        assert_eq!(text, "ab");
+        assert_eq!(spans, [span(1..2)]);
+    }
+
+    #[test]
+    fn blocks_carry_their_spans() {
+        let found = blocks(concat!(
+            "<b> `x` and [y](y.md)</b> ![i](i.png)\n\n",
+            "- `a`\n\n  [b](b.md)\n\n",
+            "| `c` | [d](d.md) |\n|---|---|\n|  | `e` |\n",
+        ));
+        let spans = |index: usize| -> Vec<(String, String)> {
+            let block = &found[index];
+            block
+                .spans
+                .iter()
+                .map(|span| {
+                    let text = block.text[span.range.clone()].to_owned();
+                    let kind = match &span.kind {
+                        crate::document::SpanKind::Code => "code".to_owned(),
+                        crate::document::SpanKind::Link { target }
+                        | crate::document::SpanKind::Image { target } => target.clone(),
+                    };
+                    (text, kind)
+                })
+                .collect()
+        };
+        let pair = |text: &str, kind: &str| (text.to_owned(), kind.to_owned());
+        assert_eq!(found[0].text, "x and y i");
+        assert_eq!(
+            spans(0),
+            [pair("x", "code"), pair("y", "y.md"), pair("i", "i.png")]
+        );
+        assert_eq!(found[1].text, "a\n\nb");
+        assert_eq!(spans(1), [pair("a", "code"), pair("b", "b.md")]);
+        assert_eq!(found[2].text, "c\td");
+        assert_eq!(spans(2), [pair("c", "code"), pair("d", "d.md")]);
+        assert_eq!(found[3].text, "\te");
+        assert_eq!(spans(3), [pair("e", "code")]);
+        assert_eq!(
+            found[1].kind,
+            BlockKind::ListItem(ListItem {
+                depth: 0,
+                ordered: false,
+                number: None,
+                task: None,
+            })
+        );
     }
 
     /// The canonical form of each kind, written out. A change here changes

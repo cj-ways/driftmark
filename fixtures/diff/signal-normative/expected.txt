@@ -1,0 +1,14 @@
+file: Modified
+status: None
+changes: 2, highest: Some(Rule)
+levels: LevelCounts { decision: 0, rule: 2, fact: 0, wording: 0, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 2, added: 0, removed: 0, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0]]
+
+edited — Rule [Normative] — old 1 (line 3), new 1 (line 3)
+    view: inline, kept in order 0.875
+    marks: Agents [-should-]{+must+} run the lint before each commit.
+
+edited — Rule [Normative] — old 2 (line 5), new 2 (line 5)
+    view: inline, kept in order 0.875
+    marks: Agents must {+not +}push to the shared branch.

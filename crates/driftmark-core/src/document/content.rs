@@ -14,6 +14,7 @@ use comrak::nodes::{AstNode, NodeValue};
 use twox_hash::XxHash3_64;
 
 use super::markdown::code_span_text;
+use super::{SpanKind, TextSpan};
 
 /// Starts a mark in the canonical form. UTF-8 text never holds this byte, so
 /// a mark can never be mistaken for text.
@@ -145,10 +146,18 @@ impl Canon {
     /// leave no trace.
     ///
     /// The same walk writes the block's plain text to `text`, by the rules of
-    /// [`super::markdown::push_inline_text`] with soft breaks as spaces: one
-    /// walk instead of two, because parsing speed matters (decision 0008).
+    /// [`super::markdown::push_inline_text`] with soft breaks as spaces, and
+    /// adds a [`TextSpan`] to `spans` for each link, image and code span: one
+    /// walk instead of three, because parsing speed matters (decision 0008).
     /// The walk keeps its own stack.
-    pub(crate) fn inline<'a>(&mut self, node: &'a AstNode<'a>, text: &mut String) {
+    pub(crate) fn inline<'a>(
+        &mut self,
+        node: &'a AstNode<'a>,
+        text: &mut String,
+        spans: &mut Vec<TextSpan>,
+    ) {
+        // Where the text of each link or image still open starts.
+        let mut open = Vec::new();
         for edge in node.traverse() {
             match edge {
                 NodeEdge::Start(inner) => match &inner.data().value {
@@ -159,7 +168,12 @@ impl Canon {
                     NodeValue::Code(code) => {
                         let literal = code_span_text(&code.literal);
                         self.text(&literal);
+                        let start = text.len();
                         text.push_str(&literal);
+                        spans.push(TextSpan {
+                            range: start..text.len(),
+                            kind: SpanKind::Code,
+                        });
                     }
                     NodeValue::SoftBreak => {
                         self.space();
@@ -169,8 +183,14 @@ impl Canon {
                         self.space();
                         text.push('\n');
                     }
-                    NodeValue::Link(_) => self.mark(tag::LINK, ""),
-                    NodeValue::Image(_) => self.mark(tag::IMAGE, ""),
+                    NodeValue::Link(_) => {
+                        self.mark(tag::LINK, "");
+                        open.push(text.len());
+                    }
+                    NodeValue::Image(_) => {
+                        self.mark(tag::IMAGE, "");
+                        open.push(text.len());
+                    }
                     NodeValue::Strikethrough => self.mark(tag::STRIKE, ""),
                     NodeValue::HtmlInline(html) => self.mark(tag::INLINE_HTML, html),
                     NodeValue::FootnoteReference(reference) => {
@@ -179,9 +199,19 @@ impl Canon {
                     _ => {}
                 },
                 NodeEdge::End(inner) => match &inner.data().value {
-                    NodeValue::Link(link) | NodeValue::Image(link) => {
-                        self.mark(tag::TARGET, &link.url);
-                        self.mark(tag::TARGET_TITLE, &link.title);
+                    NodeValue::Link(link) => {
+                        self.target(&link.url, &link.title);
+                        let kind = SpanKind::Link {
+                            target: link.url.clone(),
+                        };
+                        close_span(&mut open, text, spans, kind);
+                    }
+                    NodeValue::Image(link) => {
+                        self.target(&link.url, &link.title);
+                        let kind = SpanKind::Image {
+                            target: link.url.clone(),
+                        };
+                        close_span(&mut open, text, spans, kind);
                     }
                     NodeValue::Strikethrough => self.mark(tag::STRIKE_END, ""),
                     _ => {}
@@ -190,9 +220,26 @@ impl Canon {
         }
     }
 
+    /// Adds the target and title of a link or an image.
+    fn target(&mut self, url: &str, title: &str) {
+        self.mark(tag::TARGET, url);
+        self.mark(tag::TARGET_TITLE, title);
+    }
+
     /// The content hash.
     pub(crate) fn finish(&self) -> u64 {
         hash(&self.bytes)
+    }
+}
+
+/// Ends the span of the innermost open link or image at the end of `text`.
+/// comrak ends every node it starts, so an open start is always there.
+fn close_span(open: &mut Vec<usize>, text: &str, spans: &mut Vec<TextSpan>, kind: SpanKind) {
+    if let Some(start) = open.pop() {
+        spans.push(TextSpan {
+            range: start..text.len(),
+            kind,
+        });
     }
 }
 
@@ -265,7 +312,12 @@ mod tests {
         let root = parse_document(&arena, markdown, &options());
         let mut canon = Canon::new(tag::PARAGRAPH, "", 0);
         let mut text = String::new();
-        canon.inline(root.first_child().expect("a paragraph"), &mut text);
+        let mut spans = Vec::new();
+        canon.inline(
+            root.first_child().expect("a paragraph"),
+            &mut text,
+            &mut spans,
+        );
         canon.finish()
     }
 
@@ -279,9 +331,77 @@ mod tests {
         );
         let paragraph = root.first_child().expect("a paragraph");
         let mut text = String::new();
-        Canon::new(tag::PARAGRAPH, "", 0).inline(paragraph, &mut text);
+        let mut spans = Vec::new();
+        Canon::new(tag::PARAGRAPH, "", 0).inline(paragraph, &mut text, &mut spans);
         assert_eq!(text, crate::document::markdown::inline_text(paragraph));
         assert_eq!(text, "A b c d e f g h\ni j");
+        assert_eq!(
+            spans,
+            [
+                TextSpan {
+                    range: 4..7,
+                    kind: SpanKind::Code
+                },
+                TextSpan {
+                    range: 10..13,
+                    kind: SpanKind::Image {
+                        target: "x.png".to_owned()
+                    }
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn the_inline_walk_records_links_images_and_code_spans() {
+        let arena = Arena::new();
+        let root = parse_document(
+            &arena,
+            "See [the `x` guide](a.md), [![logo](l.png)](b.md), [](c.md) and <https://e.org>.\n",
+            &options(),
+        );
+        let paragraph = root.first_child().expect("a paragraph");
+        let mut text = String::new();
+        let mut spans = Vec::new();
+        Canon::new(tag::PARAGRAPH, "", 0).inline(paragraph, &mut text, &mut spans);
+        assert_eq!(text, "See the x guide, logo,  and https://e.org.");
+        let found: Vec<(&str, &SpanKind)> = spans
+            .iter()
+            .map(|span| (&text[span.range.clone()], &span.kind))
+            .collect();
+        let link = |target: &str| SpanKind::Link {
+            target: target.to_owned(),
+        };
+        let image = SpanKind::Image {
+            target: "l.png".to_owned(),
+        };
+        assert_eq!(
+            found,
+            [
+                ("x", &SpanKind::Code),
+                ("the x guide", &link("a.md")),
+                ("logo", &image),
+                ("logo", &link("b.md")),
+                ("", &link("c.md")),
+                ("https://e.org", &link("https://e.org")),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_span_closes_only_when_one_is_open() {
+        let mut open = vec![2];
+        let mut spans = Vec::new();
+        close_span(&mut open, "abcd", &mut spans, SpanKind::Code);
+        assert_eq!(
+            spans,
+            [TextSpan {
+                range: 2..4,
+                kind: SpanKind::Code
+            }]
+        );
+        close_span(&mut open, "abcd", &mut spans, SpanKind::Code);
+        assert_eq!(spans.len(), 1);
     }
 
     #[test]

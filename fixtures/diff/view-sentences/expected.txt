@@ -1,0 +1,14 @@
+file: Modified
+status: None
+changes: 1, highest: Some(Rule)
+levels: LevelCounts { decision: 0, rule: 1, fact: 0, wording: 0, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 1, added: 0, removed: 0, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0]]
+
+edited — Rule [Normative] — old 1 (line 3), new 1 (line 3)
+    view: sentences, kept in order 0.717
+    | The server reads git when a page opens. 
+    | It parses [-each -]{+every file that +}changed [-file-]{+exactly+} once{+ per visit+}. 
+    | It caches the parsed blocks by blob id. 
+    | A second visit [-reads only -]{+within the hour reads +}the cache{+ and nothing else+}. 
+    | Old entries leave the cache after one day.

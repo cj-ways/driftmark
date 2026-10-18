@@ -1,0 +1,22 @@
+file: Modified
+status: None
+changes: 5, highest: Some(Fact)
+levels: LevelCounts { decision: 0, rule: 0, fact: 4, wording: 1, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 2, added: 2, removed: 1, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0], [2, 2], [4, 4], [6, 5]]
+
+edited — Fact [Heading] — old 1 (line 3), new 1 (line 3)
+    view: rewritten, kept in order 0
+
+edited — Fact [Heading] — old 3 (line 7), new 3 (line 7)
+    view: inline, kept in order 1
+    marks: Details
+
+removed — Fact [Heading] — old 5 (line 11), new @5
+    text: Old part
+
+added — Fact [Heading] — old @7, new 6 (line 13)
+    text: Extra
+
+added — Wording [Wording] — old @7, new 7 (line 15)
+    text: Text four.

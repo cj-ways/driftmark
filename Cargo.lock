@@ -304,6 +304,7 @@ dependencies = [
  "glob",
  "saphyr-parser",
  "serde",
+ "serde_json",
  "toml",
  "twox-hash",
 ]

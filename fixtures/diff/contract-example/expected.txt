@@ -1,0 +1,23 @@
+file: Modified
+status: Some(StatusChange { old: Some("proposed"), new: Some("accepted") })
+changes: 5, highest: Some(Decision)
+levels: LevelCounts { decision: 3, rule: 0, fact: 1, wording: 1, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 2, added: 1, removed: 2, moved: 0, moved_edited: 0 }
+unchanged: [[1, 1], [2, 2]]
+
+edited — Decision [Status] — old 0 (line 1), new 0 (line 1)
+    view: side by side, kept in order 0.5
+    marks: status: [-proposed-]{+accepted+}
+
+edited — Decision [DecisionSection, Number] — old 3 (line 9), new 3 (line 9)
+    view: inline, kept in order 0.9
+    marks: Keep each rendered page in the cache for [-60-]{+90+} minutes.
+
+removed — Fact [Heading] — old 4 (line 11), new @4
+    text: Notes
+
+removed — Wording [Wording] — old 5 (line 13), new @4
+    text: The cache lives in memory.
+
+added — Decision [DecisionSection, Normative] — old @6, new 4 (line 11)
+    text: Never cache a page with open notes.

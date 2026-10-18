@@ -6,6 +6,7 @@
 //! `driftmark` program supplies all of that, so every rule here can be tested
 //! with plain values.
 
+pub mod diff;
 pub mod document;
 pub mod git;
 pub mod lint;
