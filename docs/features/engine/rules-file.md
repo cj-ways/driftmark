@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Rules file
 
-> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset (M4) is a rules file in this same format. An optional `[lint]` table holds the writing check's settings, and an optional `[masthead]` table adds masthead keys to the known ones.
+> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset (M4) is a rules file in this same format. An optional `[lint]` table holds the writing check's settings, an optional `[masthead]` table adds masthead keys to the known ones, and an optional `[compare]` table names the branch `auto` and the home page compare with.
 
 ## Who reads it
 
@@ -75,7 +75,7 @@ What it gives for a few files of that project:
 
 ## The format
 
-The file is TOML. It holds a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes, and one `[masthead]` table. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
+The file is TOML. It holds a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes, one `[masthead]` table and one `[compare]` table. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
 
 ### Keys of a type
 
@@ -147,6 +147,22 @@ keys = ["Deciders", "Feature Branch", "Created"]
 - One list serves every type, because the masthead is read when a document is parsed, before its type is known.
 - A preset for GitHub Spec Kit or MADR 2 lists the keys its layout writes, such as `Created` or `Deciders`, when it needs them as fields. Their `Status` line is read without that, because `Status` is known.
 
+### The default branch
+
+`auto` compares the working tree with the commit where its branch left the default branch, and the home page of `driftmark serve` compares every branch with it (`docs/features/engine/git-ranges.md`). Without a setting, the default branch is the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. A repository whose agents start their branches from another one names it:
+
+```toml
+[compare]
+default-branch = "origin/dev"
+```
+
+- The name is used as written. `dev` is the local branch, `origin/dev` the branch as the remote has it; a local branch is often behind, so a shared rules file usually names the remote one.
+- `--base <branch>` on `driftmark diff` and `driftmark serve` wins over the file.
+- The file is read where `auto` reads it: from the working tree. A bare repository has no working tree, so `driftmark serve` reads it at `HEAD` there.
+- A name that is empty, starts with `-`, holds `..`, white space or a control character cannot name a branch, so it is a `Syntax` error with its line: ``the default branch "a b" cannot name a branch; …``.
+- A name that no branch has is not an error in the file. Comparing then fails with ``the default branch `dev`, named by `--base` or the rules file, does not name a commit``.
+- `rules.default_branch()` returns the name, or `None` without one.
+
 ### Status values and lifecycles
 
 A status value means current, superseded or archived when one of the three lists holds it.
@@ -187,7 +203,7 @@ Here `status: proposed` is allowed and has no lifecycle. `status: draft` gets a 
 
 | Error | When |
 |---|---|
-| `Syntax` | The file is not valid TOML, a key is unknown or missing, a value has the wrong shape, or a `[masthead]` key cannot match a line. The TOML reader's message names the line and column and shows the line. |
+| `Syntax` | The file is not valid TOML, a key is unknown or missing, a value has the wrong shape, a `[masthead]` key cannot match a line, or `default-branch` cannot name a branch. The TOML reader's message names the line and column and shows the line. |
 | `Invalid` | A type is valid TOML but says something impossible. The message names the type by its position and name, as in `the rules file's type 2 ("feature"): it lists no paths`. |
 | `Lint` | The `[lint]` table is valid TOML but names an HTML element that cannot exist, as in ``the rules file's [lint] table: `allowed-html` holds "<b>", …``. An unknown rule id or a limit of 0 is a `Syntax` error instead, because the TOML reader catches it with its line. |
 

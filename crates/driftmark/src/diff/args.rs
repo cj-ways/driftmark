@@ -46,6 +46,9 @@ pub(crate) struct Args {
     /// How many threads read, parse and compare files; `None` means one per
     /// processor core.
     pub threads: Option<NonZeroUsize>,
+    /// The branch `auto` compares with, from `--base`; `None` leaves the
+    /// choice to the rules file, then to the search order.
+    pub base: Option<String>,
 }
 
 /// Reads the arguments after `diff`.
@@ -63,6 +66,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
     let mut repo = None;
     let mut threads = None;
     let mut since = None;
+    let mut base = None;
     let mut words = Vec::new();
     let mut folders = Vec::new();
     let mut args = args.iter();
@@ -109,6 +113,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
             "--repo" => repo = Some(PathBuf::from(value(&mut args, name, inline)?)),
             "--threads" => threads = Some(thread_count(&text_value(&mut args, name, inline)?)?),
             "--since" => since = Some(text_value(&mut args, name, inline)?),
+            "--base" => base = Some(text_value(&mut args, name, inline)?),
             _ if name.len() > 1 && name.starts_with('-') => {
                 return Err(format!("unknown option `{name}`"));
             }
@@ -127,6 +132,11 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
             _ => return Err("give one range; put folders after `--`".to_owned()),
         },
     };
+    if base.is_some() && range != RangeSpec::Auto {
+        return Err(format!(
+            "`--base` names the branch `auto` compares with; `{label}` names its own points"
+        ));
+    }
     Ok(Request::Diff(Args {
         label,
         range,
@@ -135,6 +145,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
         json,
         timings,
         threads,
+        base,
     }))
 }
 
@@ -228,8 +239,19 @@ mod tests {
                 json: None,
                 timings: false,
                 threads: None,
+                base: None,
             }
         );
+    }
+
+    #[test]
+    fn base_names_the_branch_auto_compares_with() {
+        assert_eq!(
+            diff(&["auto", "--base", "origin/dev"]).base.as_deref(),
+            Some("origin/dev")
+        );
+        assert_eq!(diff(&["--base=dev", "auto"]).base.as_deref(), Some("dev"));
+        assert_eq!(diff(&["auto"]).base, None);
     }
 
     #[test]
@@ -284,7 +306,16 @@ mod tests {
 
     #[test]
     fn mistakes_are_named() {
-        let cases: [(&[&str], &str); 17] = [
+        let cases: [(&[&str], &str); 20] = [
+            (
+                &["a...b", "--base", "dev"],
+                "`--base` names the branch `auto` compares with; `a...b` names its own points",
+            ),
+            (
+                &["--since", "2026-10-01", "--base=dev"],
+                "`--since 2026-10-01` names its own points",
+            ),
+            (&["auto", "--base"], "`--base` needs a value"),
             (&[], "give a range, such as `main...feature` or `auto`"),
             (&["main"], "`main` is not a range"),
             (&["a..b", "docs"], "give one range; put folders after `--`"),

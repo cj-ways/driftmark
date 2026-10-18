@@ -22,15 +22,12 @@ Run `driftmark <command> --help` for a command's options.";
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    if args.first().and_then(|arg| arg.to_str()) == Some("serve") {
-        // The server's threads write to standard error themselves, so this
-        // command must not hold it locked.
-        let code =
-            driftmark::serve::run(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
-        return ExitCode::from(code);
-    }
     let mut stdout = std::io::stdout().lock();
-    let mut stderr = std::io::stderr().lock();
+    // Standard error is locked per write, never for the whole command:
+    // worker threads write to it too, such as the git reader saying it
+    // switched from gix to the `git` command. A lock held here would make
+    // such a thread wait forever, and the command with it.
+    let mut stderr = std::io::stderr();
     let code = match args.first().and_then(|arg| arg.to_str()) {
         Some("--version" | "-V") => {
             let _ = writeln!(stdout, "driftmark {}", driftmark_core::version());
@@ -55,6 +52,7 @@ fn main() -> ExitCode {
             &mut stderr,
         ),
         Some("hook") => driftmark::hook::run(&args[1..], &mut stdout, &mut stderr),
+        Some("serve") => driftmark::serve::run(&args[1..], &mut stdout, &mut stderr),
         _ => {
             let _ = writeln!(stderr, "{USAGE}");
             EXIT_USAGE

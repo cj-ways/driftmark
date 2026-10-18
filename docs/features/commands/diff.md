@@ -19,6 +19,7 @@ driftmark diff [<options>] --since <date> [<branch>] [-- <folder>...]
 | `driftmark diff main..feature` | The tip of `main` with the tip of `feature`. |
 | `driftmark diff main...feature` | The tip of `feature` with the commit where it left `main`: what a merge request shows. |
 | `driftmark diff auto` | The files on disk with the commit where this branch left the default branch, so work not committed yet is included. |
+| `driftmark diff auto --base origin/dev` | The same, with `origin/dev` as the default branch. |
 | `driftmark diff --since 2026-10-01` | Everything that reached the current branch from 1 October on. |
 | `driftmark diff --since 2026-10-01 main` | The same on `main`. |
 | `driftmark diff main...feature -- docs` | Only the files under `docs`. |
@@ -30,6 +31,7 @@ driftmark diff [<options>] --since <date> [<branch>] [-- <folder>...]
 | Option | Meaning |
 |---|---|
 | `--repo <path>` | A folder inside the repository. The default is the current folder. |
+| `--base <branch>` | The branch `auto` compares with. It wins over the rules file's `[compare] default-branch`; without either, `auto` takes the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. Only `auto` takes it: every other range names its own points. |
 | `--json` | Print the whole change list as JSON instead of the summary. |
 | `--json=summary` | Print one JSON entry per document instead: its path, what happened to the file, its highest level and its counts. |
 | `--timings` | Print the time of each step on standard error. Standard output does not change. |
@@ -45,7 +47,7 @@ driftmark diff [<options>] --since <date> [<branch>] [-- <folder>...]
 The rules file is `driftmark.toml` at the repository root, read at the newer side of the range:
 
 - at the head commit for `..`, `...` and `--since`;
-- from the disk for `auto`, committed or not.
+- from the disk for `auto`, committed or not. For `auto` it is read first, because its `[compare] default-branch` may name the branch to compare with (`docs/features/engine/rules-file.md`).
 
 Both versions of every document are classified with these same rules. So a change to the rules file inside the range already applies to the documents it changes. A range whose head has no rules file uses the default rules: no types, so no statuses and no decision sections.
 
@@ -184,8 +186,8 @@ driftmark diff: 6 changed files, 8 versions, 7 parsed
 | Code | When |
 |---|---|
 | 0 | It ran, whether or not anything changed. Skipped files do not change this. |
-| 1 | It could not finish: the folder is not inside a git repository, a name leads to no commit, two points share no history, `auto` finds no default branch, the rules file is broken, git cannot be read, or the output cannot be written. The reason goes to standard error. |
-| 2 | The command line is wrong: an unknown option, a missing range or value, text that is not a range, a date in neither form, `--threads` below 1, or a folder that cannot be inside a repository. The reason and the usage text go to standard error. driftmark finds these before it opens anything. |
+| 1 | It could not finish: the folder is not inside a git repository, a name leads to no commit, two points share no history, `auto` finds no default branch or the named one does not exist, the rules file is broken, git cannot be read, or the output cannot be written. The reason goes to standard error. |
+| 2 | The command line is wrong: an unknown option, a missing range or value, text that is not a range, a date in neither form, `--threads` below 1, `--base` with a range other than `auto`, or a folder that cannot be inside a repository. The reason and the usage text go to standard error. driftmark finds these before it opens anything. |
 
 Standard output is empty for codes 1 and 2. A reader that stops early, such as `driftmark diff auto | head`, does not count as a failed write; the code stays 0. Any other code, such as 101, means driftmark crashed, which is a bug.
 

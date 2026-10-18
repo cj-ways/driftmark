@@ -931,3 +931,39 @@ fn without_a_default_branch_nothing_is_compared() {
             .starts_with("`auto` found no default branch")
     );
 }
+
+#[test]
+fn the_rules_file_or_base_names_the_default_branch() {
+    let repo = branch_repo();
+    repo.write(
+        "driftmark.toml",
+        format!("{RULES}\n[compare]\ndefault-branch = \"feature\"\n"),
+    );
+    let server = Server::start(&repo.dir, &[]);
+    let home = server.json("/api/home");
+    assert_eq!(home["default_branch"]["name"], "feature", "{home}");
+    assert_eq!(
+        home["branches"],
+        Value::Array(Vec::new()),
+        "main is merged into feature"
+    );
+    assert_eq!(home["left_out"]["unchanged"], 1);
+    let auto = server.json("/api/changes/auto");
+    assert_eq!(auto["range"]["notes"][0], "compared with `feature`");
+
+    let given = Server::start(&repo.dir, &["--base", "origin/main"]);
+    let home = given.json("/api/home");
+    assert_eq!(home["default_branch"]["name"], "origin/main");
+    assert_eq!(home["branches"][0]["name"], "feature");
+
+    let missing = Server::start(&repo.dir, &["--base", "nope"]);
+    let reply = missing.get("/");
+    assert_eq!(reply.status, 404);
+    assert!(
+        reply.text().contains(
+            "the default branch `nope`, named by `--base` or the rules file, does not name a commit"
+        ),
+        "{}",
+        reply.text()
+    );
+}

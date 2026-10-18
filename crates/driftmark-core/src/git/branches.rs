@@ -8,15 +8,16 @@
 
 use std::collections::HashSet;
 
-use super::range::first_default_branch;
-use super::{CommitInfo, GitRead, ObjectId, RangeError};
+use super::range::default_branch;
+use super::{BaseBranch, CommitInfo, GitRead, ObjectId, RangeError};
 
-/// The branch every other branch is compared with: the first of
-/// [`super::AUTO_BASES`] that exists, the same one `auto` uses.
+/// The branch every other branch is compared with, the same one `auto`
+/// uses: the branch the rules file or the command line names, or the first
+/// of [`super::AUTO_BASES`] that exists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DefaultBranch {
     /// Its name, such as `origin/main`.
-    pub name: &'static str,
+    pub name: String,
     /// The commit at its tip.
     pub tip: ObjectId,
 }
@@ -38,8 +39,9 @@ pub struct OpenBranch {
 /// The branches the home page lists, before their documents are compared.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchInbox {
-    /// The default branch, or `None` when none of [`super::AUTO_BASES`]
-    /// exists. Then nothing is compared and `branches` is empty.
+    /// The default branch, or `None` when no branch was named and none of
+    /// [`super::AUTO_BASES`] exists. Then nothing is compared and `branches`
+    /// is empty.
     pub default: Option<DefaultBranch>,
     /// The local branch `HEAD` points at, when it points at one.
     pub current: Option<String>,
@@ -47,7 +49,8 @@ pub struct BranchInbox {
     pub branches: Vec<OpenBranch>,
 }
 
-/// Lists the branches to compare with the default branch.
+/// Lists the branches to compare with the default branch, which `base`
+/// chooses.
 ///
 /// 1. A branch whose tip is the default branch's tip is left out, because
 ///    nothing differs. This leaves out the default branch itself.
@@ -64,12 +67,13 @@ pub struct BranchInbox {
 /// # Errors
 ///
 /// A git error from listing the branches, resolving the default branch or
-/// reading a tip commit, and [`RangeError::BadCommit`] for a tip whose bytes
-/// are not a commit.
-pub fn inbox(git: &dyn GitRead) -> Result<BranchInbox, RangeError> {
+/// reading a tip commit, [`RangeError::NoSuchBase`] when the named default
+/// branch does not exist, and [`RangeError::BadCommit`] for a tip whose
+/// bytes are not a commit.
+pub fn inbox(git: &dyn GitRead, base: &BaseBranch) -> Result<BranchInbox, RangeError> {
     let all = git.branches()?;
     let current = all.iter().find(|b| b.current).map(|b| b.name.clone());
-    let default = match first_default_branch(git) {
+    let default = match default_branch(git, base) {
         Ok((name, tip)) => DefaultBranch { name, tip },
         Err(RangeError::NoDefaultBranch) => {
             return Ok(BranchInbox {
@@ -140,11 +144,11 @@ mod tests {
             .branch("origin/feature", true, '3')
             .branch("origin/main", true, '1')
             .branch("origin/other", true, '2');
-        let inbox = inbox(&git).unwrap();
+        let inbox = inbox(&git, &BaseBranch::Search).unwrap();
         assert_eq!(
             inbox.default,
             Some(DefaultBranch {
-                name: "origin/main",
+                name: "origin/main".into(),
                 tip: id('1')
             })
         );
@@ -167,10 +171,10 @@ mod tests {
             .commit('2', &[], 50)
             .branch("main", false, '1')
             .branch("origin/agent/plan", true, '2');
-        let inbox = inbox(&git).unwrap();
+        let inbox = inbox(&git, &BaseBranch::Search).unwrap();
         assert_eq!(inbox.current, None);
         assert_eq!(
-            inbox.default.map(|d| d.name),
+            inbox.default.map(|d| d.name).as_deref(),
             Some("main"),
             "main is used when origin/main is missing"
         );
@@ -181,12 +185,37 @@ mod tests {
     }
 
     #[test]
+    fn a_named_default_branch_is_used_as_written() {
+        let git = FakeGit::new()
+            .name("main", '1')
+            .name("dev", '2')
+            .commit('1', &[], 50)
+            .branch("dev", false, '2')
+            .branch("main", false, '1');
+        let named = inbox(&git, &BaseBranch::Named("dev".into())).unwrap();
+        assert_eq!(
+            named.default,
+            Some(DefaultBranch {
+                name: "dev".into(),
+                tip: id('2')
+            })
+        );
+        assert_eq!(named.branches, vec![open("main", false, '1', 50)]);
+        assert_eq!(
+            inbox(&git, &BaseBranch::Named("trunk".into())),
+            Err(RangeError::NoSuchBase {
+                name: "trunk".into()
+            })
+        );
+    }
+
+    #[test]
     fn without_a_default_branch_nothing_is_compared() {
         let git = FakeGit::new()
             .current_branch("trunk", '1')
             .branch("feature", false, '2');
         assert_eq!(
-            inbox(&git).unwrap(),
+            inbox(&git, &BaseBranch::Search).unwrap(),
             BranchInbox {
                 default: None,
                 current: Some("trunk".into()),
@@ -203,16 +232,19 @@ mod tests {
                 message: message.into(),
             }))
         };
-        assert_eq!(inbox(&broken_refs), other("no refs"));
+        assert_eq!(inbox(&broken_refs, &BaseBranch::Search), other("no refs"));
 
         let broken_default = FakeGit::new().fail_name("origin/main");
-        assert_eq!(inbox(&broken_default), other("broken ref"));
+        assert_eq!(
+            inbox(&broken_default, &BaseBranch::Search),
+            other("broken ref")
+        );
 
         let missing_tip = FakeGit::new()
             .name("main", '1')
             .branch("feature", false, '2');
         assert_eq!(
-            inbox(&missing_tip),
+            inbox(&missing_tip, &BaseBranch::Search),
             Err(RangeError::Git(GitError::MissingObject { id: id('2') }))
         );
 
@@ -220,6 +252,9 @@ mod tests {
             .name("main", '1')
             .raw_commit('2', b"not a commit")
             .branch("feature", false, '2');
-        assert_eq!(inbox(&bad_tip), Err(RangeError::BadCommit { id: id('2') }));
+        assert_eq!(
+            inbox(&bad_tip, &BaseBranch::Search),
+            Err(RangeError::BadCommit { id: id('2') })
+        );
     }
 }

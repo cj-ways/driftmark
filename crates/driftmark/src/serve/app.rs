@@ -394,11 +394,14 @@ async fn home_json(State(app): Shared) -> Response {
             })
         }
     };
-    let default_name = home.default.as_ref().map_or("", |default| default.name);
+    let default_name = home
+        .default
+        .as_ref()
+        .map_or("", |default| default.name.as_str());
     json(&HomeJson {
         schema_version: SCHEMA_VERSION,
         default_branch: home.default.as_ref().map(|default| DefaultJson {
-            name: default.name,
+            name: &default.name,
             tip: default.tip.as_hex(),
         }),
         current_branch: home.current.as_deref(),

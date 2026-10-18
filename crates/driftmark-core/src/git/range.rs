@@ -19,6 +19,18 @@ pub const AUTO_BASES: [&str; 6] = [
     "dev",
 ];
 
+/// Which branch `auto` and the home page compare with.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum BaseBranch {
+    /// The first of [`AUTO_BASES`] that exists.
+    #[default]
+    Search,
+    /// This branch, as the rules file or the command line names it. It is
+    /// used as written: `dev` is the local branch, `origin/dev` the
+    /// remote-tracking one.
+    Named(String),
+}
+
 /// A range as the user wrote it, before git is asked anything.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RangeSpec {
@@ -118,6 +130,22 @@ impl RangeSpec {
     ///
     /// A [`RangeError`] saying which step failed.
     pub fn resolve(&self, git: &dyn GitRead) -> Result<ResolvedRange, RangeError> {
+        self.resolve_with(git, &BaseBranch::Search)
+    }
+
+    /// Like [`RangeSpec::resolve`], with `auto` comparing with the branch
+    /// `base` chooses. The other forms name both points themselves.
+    ///
+    /// # Errors
+    ///
+    /// A [`RangeError`] saying which step failed, and
+    /// [`RangeError::NoSuchBase`] when a named default branch does not
+    /// exist.
+    pub fn resolve_with(
+        &self,
+        git: &dyn GitRead,
+        base: &BaseBranch,
+    ) -> Result<ResolvedRange, RangeError> {
         match self {
             Self::Direct { base, head } => Ok(ResolvedRange {
                 base: Some(git.resolve(base)?),
@@ -144,7 +172,7 @@ impl RangeSpec {
             }
             Self::Auto => {
                 let head = git.resolve("HEAD")?;
-                let (name, default) = first_default_branch(git)?;
+                let (name, default) = default_branch(git, base)?;
                 let (base, mut notes) = merge_base(git, &head, &default)?;
                 notes.insert(0, RangeNote::AutoBase { name });
                 Ok(ResolvedRange {
@@ -191,11 +219,11 @@ impl ResolvedRange {
 /// Something about a resolved range the reader should know.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RangeNote {
-    /// `auto` compared with this branch, the first of [`AUTO_BASES`] that
-    /// exists.
+    /// `auto` compared with this branch: the one the rules file or the
+    /// command line named, or the first of [`AUTO_BASES`] that exists.
     AutoBase {
         /// The branch.
-        name: &'static str,
+        name: String,
     },
     /// The two commits have several best common ancestors, which happens
     /// after criss-cross merges. The one with the lowest id was used, so the
@@ -246,6 +274,12 @@ pub enum RangeError {
     },
     /// `auto` found none of [`AUTO_BASES`].
     NoDefaultBranch,
+    /// The default branch the rules file or the command line named does not
+    /// exist.
+    NoSuchBase {
+        /// The branch as named.
+        name: String,
+    },
     /// A commit's bytes are not a commit git would write.
     BadCommit {
         /// The commit.
@@ -282,6 +316,10 @@ impl fmt::Display for RangeError {
                 f,
                 "`auto` found no default branch; it looks for {}",
                 AUTO_BASES.join(", ")
+            ),
+            Self::NoSuchBase { name } => write!(
+                f,
+                "the default branch `{name}`, named by `--base` or the rules file, does not name a commit"
             ),
             Self::BadCommit { id } => write!(f, "commit {id} could not be read"),
             Self::Git(error) => error.fmt(f),
@@ -357,13 +395,24 @@ pub fn merge_base(
     Ok((used, notes))
 }
 
-/// The first of [`AUTO_BASES`] that exists, and its commit.
-pub(super) fn first_default_branch(
+/// The default branch `base` chooses, and its commit: the named branch, or
+/// the first of [`AUTO_BASES`] that exists.
+pub(super) fn default_branch(
     git: &dyn GitRead,
-) -> Result<(&'static str, ObjectId), RangeError> {
+    base: &BaseBranch,
+) -> Result<(String, ObjectId), RangeError> {
+    if let BaseBranch::Named(name) = base {
+        return match git.resolve(name) {
+            Ok(id) => Ok((name.clone(), id)),
+            Err(GitError::UnknownRevision { .. }) => {
+                Err(RangeError::NoSuchBase { name: name.clone() })
+            }
+            Err(other) => Err(other.into()),
+        };
+    }
     for name in AUTO_BASES {
         match git.resolve(name) {
-            Ok(id) => return Ok((name, id)),
+            Ok(id) => return Ok((name.to_owned(), id)),
             Err(GitError::UnknownRevision { .. }) => {}
             Err(other) => return Err(other.into()),
         }
@@ -656,7 +705,12 @@ mod tests {
         let range = RangeSpec::Auto.resolve(&git).unwrap();
         assert_eq!(range.base, Some(id('5')));
         assert_eq!(range.head, Snapshot::Worktree);
-        assert_eq!(range.notes, [RangeNote::AutoBase { name: "master" }]);
+        assert_eq!(
+            range.notes,
+            [RangeNote::AutoBase {
+                name: "master".into()
+            }]
+        );
         assert_eq!(range.notes[0].to_string(), "compared with `master`");
 
         let git = FakeGit::new()
@@ -668,9 +722,46 @@ mod tests {
         assert_eq!(
             range.notes[0],
             RangeNote::AutoBase {
-                name: "origin/main"
+                name: "origin/main".into()
             }
         );
+    }
+
+    #[test]
+    fn auto_compares_with_a_named_default_branch_when_given_one() {
+        let git = FakeGit::new()
+            .name("HEAD", '1')
+            .name("main", '2')
+            .name("origin/dev", '3')
+            .bases(&['5']);
+        let named = BaseBranch::Named("origin/dev".into());
+        let range = RangeSpec::Auto.resolve_with(&git, &named).unwrap();
+        assert_eq!(range.base, Some(id('5')));
+        assert_eq!(range.notes[0].to_string(), "compared with `origin/dev`");
+        let searched = RangeSpec::Auto
+            .resolve_with(&git, &BaseBranch::default())
+            .unwrap();
+        assert_eq!(searched.notes[0].to_string(), "compared with `main`");
+
+        let missing = BaseBranch::Named("trunk".into());
+        assert_eq!(
+            RangeSpec::Auto.resolve_with(&git, &missing).unwrap_err(),
+            RangeError::NoSuchBase {
+                name: "trunk".into()
+            }
+        );
+        let broken = FakeGit::new().name("HEAD", '1').fail_name("dev");
+        assert_eq!(
+            RangeSpec::Auto
+                .resolve_with(&broken, &BaseBranch::Named("dev".into()))
+                .unwrap_err(),
+            RangeError::Git(GitError::Other {
+                message: "broken ref".into()
+            })
+        );
+
+        let direct = spec("main..HEAD").resolve_with(&git, &missing).unwrap();
+        assert!(direct.notes.is_empty(), "only auto uses the default branch");
     }
 
     #[test]
@@ -909,6 +1000,11 @@ mod tests {
                 RangeError::NoDefaultBranch,
                 "`auto` found no default branch; it looks for origin/main, main, origin/master, \
                  master, origin/dev, dev"
+                    .to_owned(),
+            ),
+            (
+                RangeError::NoSuchBase { name: "dev".into() },
+                "the default branch `dev`, named by `--base` or the rules file, does not name a commit"
                     .to_owned(),
             ),
             (

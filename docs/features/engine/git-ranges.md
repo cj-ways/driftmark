@@ -111,7 +111,7 @@ A date alone is UTC, not local time, because the engine reads no time zone. Writ
 
 `auto` compares the working tree with the commit where this branch left the default branch.
 
-1. The default branch is the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. Remote branches come first because a local `main` is often behind.
+1. The default branch is the one the caller names, from `--base` or the rules file's `[compare] default-branch` (`docs/features/engine/rules-file.md`). Without a name, it is the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. Remote branches come first because a local `main` is often behind.
 2. The base is the merge-base of `HEAD` with that branch.
 3. The head is the working tree, so changes not committed yet are included.
 
@@ -119,7 +119,7 @@ The range carries a note naming the default branch it used, such as "compared wi
 
 On the default branch itself, the base is usually `HEAD`, so `auto` shows only uncommitted changes. The word `auto` always means this range, even if a branch is named `auto`; write `auto..` for that branch.
 
-`auto` fails with `NoDefaultBranch` when none of the six branches exists, and with `UnknownRevision` for `HEAD` in a repo with no commits yet.
+`RangeSpec::resolve` searches the six names; `RangeSpec::resolve_with(git, &BaseBranch::Named(name))` uses `name` as written, and `BaseBranch::Search` searches. `auto` fails with `NoSuchBase` when the named branch does not exist, with `NoDefaultBranch` when none of the six branches exists, and with `UnknownRevision` for `HEAD` in a repo with no commits yet.
 
 ### Text that is not a range
 
@@ -129,7 +129,7 @@ A name alone, such as `main`, is refused with `NotARange`, as are `..`, `...`, a
 
 The home page of `driftmark serve` lists the branches whose documents differ from the default branch. `driftmark_core::git::inbox` decides which branches to compare, before any document is read:
 
-1. The default branch is the one `auto` uses: the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. When none exists, nothing is compared.
+1. The default branch is the one `auto` uses, chosen the same way: `inbox(git, &base)` takes the same `BaseBranch`. When no branch is named and none of the six exists, nothing is compared. A named branch that does not exist is the error `NoSuchBase`.
 2. A branch whose tip is the default branch's tip is left out, because nothing differs. This leaves out the default branch itself.
 3. Several branches at one tip are listed once, under the first name in `branches()` order: local before remote-tracking, then by name. A local branch and the one it was pushed to usually share a tip.
 4. The newest tip commit comes first, by committer date. Equal dates go by name.

@@ -10,13 +10,14 @@ date: 2026-10-18
 ## Running it
 
 ```text
-driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>]
+driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>] [--base <branch>]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--repo <path>` | A folder inside the repository. The default is the current folder. A bare repository works too; it has no working tree. |
 | `--addr <ip:port>` | Where to listen. The default is `127.0.0.1:4170`, this machine only. Port `0` picks a free port. |
+| `--base <branch>` | The default branch: the one the home page and `auto` compare with. It wins over the rules file's `[compare] default-branch`. |
 | `--token <value>` | The token every request must bring. It needs at least 16 characters, and only letters, digits, `-`, `_`, `.` and `~`, so it fits in an address and a cookie as it is. |
 | `--help` | Print the usage text. |
 
@@ -101,7 +102,7 @@ The pages are plain placeholders until the `render` and `pages` lanes land: a do
 
 The home page is an inbox of branches (decision 0010):
 
-1. **The default branch** is the one `auto` uses: the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. Without one, the page says so and compares nothing.
+1. **The default branch** is the one `auto` uses: the branch `--base` names, else the one the rules file's `[compare] default-branch` names (`docs/features/engine/rules-file.md`), else the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. The rules file is the one in the working tree, or at `HEAD` in a bare repository, read on each request. Without a default branch, the page says so and compares nothing. A named branch that does not exist answers `404` with ``the default branch `dev`, named by `--base` or the rules file, does not name a commit``.
 2. **Which branches** come from `driftmark_core::git::inbox`: every local and remote-tracking branch, except those at the default branch's tip, and only one of several branches at one tip (`docs/features/engine/git-ranges.md`).
 3. **Each branch is compared** with the default branch from where it left it, as `<default>...<branch>`: what a merge request shows. The rules file is read at the branch's tip.
 4. **Only branches whose documents differ are listed**: at least one Markdown file changed. A branch merged into the default branch changes nothing from where it left, so it drops out. The page counts the branches left out: those without document changes, and those that share no history with the default branch.
@@ -292,7 +293,7 @@ A kind of entry shows once it was asked for: `rules`, `documents`, `pages`, `ran
 
 | Status | When | Example message |
 |---|---|---|
-| 404 | The address names nothing: an unknown revision, text that is not a range, a date in neither form, two points without a common history, a path that is not a Markdown file in the repository, a document missing at that revision, a document that did not change in the range, or a working tree in a bare repository. | `` `nope` does not name a commit `` |
+| 404 | The address names nothing: an unknown revision, text that is not a range, a date in neither form, two points without a common history, a path that is not a Markdown file in the repository, a document missing at that revision, a document that did not change in the range, a named default branch that does not exist, or a working tree in a bare repository. | `` `nope` does not name a commit `` |
 | 500 | Reading git failed, or the rules file is broken. The message names the cause. | ``git could not be read: object 3f2a… is not in the repo`` |
 
 A page route answers with an HTML page that says so; an `/api/` route answers with JSON: `{"error": "<the message>"}`.
@@ -409,6 +410,19 @@ Measured on the maintainer's server, which has 12 cores, on 2026-10-18, with the
 | After the home page as well | 579 MB | 410 MB |
 
 About 52 MB of it is pack files mapped from disk. The rest above the cache is memory the system allocator keeps after the counting threads free it: each of the 12 threads keeps its own pool, and memory one thread frees is not reused by another. With two pools instead of 96 (`MALLOC_ARENA_MAX=2`), the same run ends 147 MB lower. A smaller gix pack cache (1 MB instead of 16 MB per handle) changed nothing measurable.
+
+Other allocators did not help, measured the same way later that day at a load of 27 to 63:
+
+| Allocator | After every changed document | After the home page as well |
+|---|---|---|
+| The system's (glibc) | 375 to 406 MB | 528 to 550 MB |
+| glibc with `MALLOC_ARENA_MAX=2` | 290 MB | 419 MB |
+| mimalloc 0.1.52 | 455 to 490 MB | 888 MB |
+| mimalloc, `MIMALLOC_PURGE_DELAY=0` | 446 MB | 679 MB |
+| jemalloc 0.7.0 | 366 to 376 MB | 465 to 478 MB |
+| glibc on 4 cores instead of 12 | 353 MB | 447 MB |
+
+What stays above the cache is the working memory of the counts on many threads: during the 30-day list the process peaks at 230 to 270 MB with an empty cache, and no allocator gives most of it back. The program keeps the system's allocator.
 
 ## Not covered yet
 

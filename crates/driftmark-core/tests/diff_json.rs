@@ -415,7 +415,9 @@ fn range_info_names_both_points() {
     let range = ResolvedRange {
         base: Some(id('a')),
         head: Snapshot::Commit(id('b')),
-        notes: vec![RangeNote::AutoBase { name: "main" }],
+        notes: vec![RangeNote::AutoBase {
+            name: "main".into(),
+        }],
     };
     assert_eq!(
         RangeInfo::of(&range),

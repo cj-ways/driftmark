@@ -10,8 +10,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use driftmark_core::diff::{ChangeList, DocumentChanges, RangeInfo, Summary};
 use driftmark_core::git::{
-    BranchInbox, DefaultBranch, FileChange, FileEntry, GitError, GitRead, ObjectId, OpenBranch,
-    RangeError, RangeSpec, RepoPath, ResolvedRange, Roots, Snapshot, diff_files, inbox, merge_base,
+    BaseBranch, BranchInbox, DefaultBranch, FileChange, FileEntry, GitError, GitRead, ObjectId,
+    OpenBranch, RangeError, RangeSpec, RepoPath, ResolvedRange, Roots, Snapshot, diff_files, inbox,
+    merge_base,
 };
 use driftmark_core::rules::Rules;
 
@@ -74,7 +75,8 @@ impl From<RangeError> for Problem {
             RangeError::NotARange { .. }
             | RangeError::BadDate { .. }
             | RangeError::NoMergeBase { .. }
-            | RangeError::NoDefaultBranch => Problem::missing(error.to_string()),
+            | RangeError::NoDefaultBranch
+            | RangeError::NoSuchBase { .. } => Problem::missing(error.to_string()),
         }
     }
 }
@@ -199,11 +201,14 @@ pub(crate) struct Repo {
     /// Home pages are counted one at a time, so a second request finds the
     /// first one's branches in the cache instead of counting them again.
     home: Mutex<()>,
+    /// The branch `--base` named, which overrides the rules file.
+    base: Option<String>,
 }
 
 impl Repo {
-    /// A repository read with `git`, keeping at most `cap` bytes.
-    pub(crate) fn new(git: Git, cap: usize, threads: usize) -> Repo {
+    /// A repository read with `git`, keeping at most `cap` bytes. `base` is
+    /// the branch `--base` named, if any.
+    pub(crate) fn new(git: Git, cap: usize, threads: usize, base: Option<String>) -> Repo {
         Repo {
             git,
             cache: Cache::new(cap),
@@ -213,7 +218,37 @@ impl Repo {
                 rules: Rules::default(),
             }),
             home: Mutex::new(()),
+            base,
         }
+    }
+
+    /// The branch the home page and `auto` compare with: the one `--base`
+    /// named, else the one the rules file names, else the first of the
+    /// default names that exists. The rules file is the one in the working
+    /// tree, or at `HEAD` in a bare repository.
+    ///
+    /// # Errors
+    ///
+    /// When the rules file cannot be read or is broken.
+    pub(crate) fn base_branch(&self) -> Result<BaseBranch, Problem> {
+        if let Some(name) = &self.base {
+            return Ok(BaseBranch::Named(name.clone()));
+        }
+        let side = if self.git.workdir().is_some() {
+            Snapshot::Worktree
+        } else {
+            match self.git.resolve("HEAD") {
+                Ok(head) => Snapshot::Commit(head),
+                Err(_) => return Ok(BaseBranch::Search),
+            }
+        };
+        let rules = self.rules_at(&side)?;
+        Ok(rules
+            .rules
+            .default_branch()
+            .map_or(BaseBranch::Search, |name| {
+                BaseBranch::Named(name.to_owned())
+            }))
     }
 
     /// The rules file at one side of a range: from a commit, cached by its
@@ -322,7 +357,12 @@ impl Repo {
     ///
     /// A missing problem when the range cannot be read or resolved.
     pub(crate) fn resolve(&self, address: &RangeAddress) -> Result<ResolvedRange, Problem> {
-        Ok(address.spec.resolve(&self.git)?)
+        let base = if address.spec == RangeSpec::Auto {
+            self.base_branch()?
+        } else {
+            BaseBranch::Search
+        };
+        Ok(address.spec.resolve_with(&self.git, &base)?)
     }
 
     /// The counted change list of a resolved range. A range between two
@@ -454,7 +494,7 @@ impl Repo {
             default,
             current,
             branches,
-        } = inbox(&self.git)?;
+        } = inbox(&self.git, &self.base_branch()?)?;
         let mut home = Home {
             default,
             current,
@@ -582,7 +622,7 @@ impl Repo {
     }
 
     fn count_auto(&self, files: &[FileEntry]) -> Result<(RangeInfo, RangeCount), Problem> {
-        let range = RangeSpec::Auto.resolve(&self.git)?;
+        let range = RangeSpec::Auto.resolve_with(&self.git, &self.base_branch()?)?;
         let old = match &range.base {
             Some(base) => self
                 .git

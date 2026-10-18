@@ -31,6 +31,8 @@ pub(crate) struct Args {
     pub addr: SocketAddr,
     /// The token a browser must present, when given.
     pub token: Option<String>,
+    /// The branch the home page and `auto` compare with, when given.
+    pub base: Option<String>,
 }
 
 /// Reads the arguments after `serve`.
@@ -44,6 +46,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
     let mut repo = None;
     let mut addr = None;
     let mut token = None;
+    let mut base = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let text = arg
@@ -58,6 +61,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
             "--repo" => repo = Some(PathBuf::from(value(&mut args, name, inline)?)),
             "--addr" => addr = Some(address(&text_value(&mut args, name, inline)?)?),
             "--token" => token = Some(checked_token(text_value(&mut args, name, inline)?)?),
+            "--base" => base = Some(text_value(&mut args, name, inline)?),
             _ if name.starts_with('-') => return Err(format!("unknown option `{name}`")),
             _ => {
                 return Err(format!(
@@ -70,6 +74,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
         repo: repo.unwrap_or_else(|| PathBuf::from(".")),
         addr: addr.unwrap_or(DEFAULT_ADDR),
         token,
+        base,
     }))
 }
 
@@ -149,6 +154,7 @@ mod tests {
                 repo: PathBuf::from("."),
                 addr: DEFAULT_ADDR,
                 token: None,
+                base: None,
             }
         );
         assert!(DEFAULT_ADDR.ip().is_loopback());
@@ -161,6 +167,11 @@ mod tests {
         assert_eq!(args.repo, PathBuf::from("/tmp/r"));
         assert_eq!(args.addr, "[::1]:0".parse().unwrap());
         assert_eq!(args.token.as_deref(), Some(token));
+        assert_eq!(
+            serve(&["--base", "origin/dev"]).base.as_deref(),
+            Some("origin/dev")
+        );
+        assert_eq!(serve(&["--base=dev"]).base.as_deref(), Some("dev"));
         let args = serve(&["--repo=x", "--addr", "100.64.0.1:8000"]);
         assert_eq!(args.repo, PathBuf::from("x"));
         assert_eq!(args.addr.to_string(), "100.64.0.1:8000");
@@ -173,6 +184,7 @@ mod tests {
         for (words, start) in [
             (&["--addr", "localhost:80"][..], "`--addr` takes an address"),
             (&["--addr"], "`--addr` needs a value"),
+            (&["--base"], "`--base` needs a value"),
             (&["--token", "short"], "`--token` needs at least 16"),
             (&["--token=has space in it 1234"], "`--token` may hold only"),
             (&["--port", "1"], "unknown option `--port`"),

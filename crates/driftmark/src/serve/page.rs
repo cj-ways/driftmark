@@ -179,7 +179,7 @@ pub(crate) fn home(home: &Home, worktree: &WorktreeLine<'_>) -> String {
     let _ = writeln!(
         out,
         "<p>Compared with <code>{}</code> at <code>{}</code>, each from where it left it.</p>",
-        escape(default.name),
+        escape(&default.name),
         short(default.tip.as_hex())
     );
     if home.changed.is_empty() {
@@ -204,7 +204,7 @@ pub(crate) fn home(home: &Home, worktree: &WorktreeLine<'_>) -> String {
         "<p class=\"left-out\">Not listed: {} branches without document changes, {} that share no history with <code>{}</code>.</p>",
         home.unchanged,
         home.unrelated,
-        escape(default.name)
+        escape(&default.name)
     );
     out.push_str("<p><a href=\"/api/home\">This page as JSON</a></p>\n");
     out

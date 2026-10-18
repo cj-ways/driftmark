@@ -26,7 +26,7 @@ pub use commit::CommitInfo;
 pub use date::parse_date;
 pub use path::{BadRoot, RepoPath, Roots};
 pub use range::{
-    AUTO_BASES, RangeError, RangeNote, RangeSpec, ResolvedRange, diff_files, merge_base,
+    AUTO_BASES, BaseBranch, RangeError, RangeNote, RangeSpec, ResolvedRange, diff_files, merge_base,
 };
 
 /// The id of a git object, in lowercase hex.

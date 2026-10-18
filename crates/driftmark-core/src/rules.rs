@@ -6,7 +6,8 @@
 //! reads the file; this module only parses its text, so the core stays free of
 //! file access. A preset (M4) is a rules file in this same format. The file's
 //! `[lint]` table holds the writing check's settings; [`crate::lint`] reads it.
-//! Its `[masthead]` table adds masthead keys to the known ones.
+//! Its `[masthead]` table adds masthead keys to the known ones, and its
+//! `[compare]` table names the branch `auto` and the home page compare with.
 
 use std::fmt;
 
@@ -35,6 +36,7 @@ pub struct Rules {
     types: Vec<TypeRule>,
     lint: LintSettings,
     masthead_keys: MastheadKeys,
+    default_branch: Option<String>,
 }
 
 /// One `[[type]]` entry of a rules file.
@@ -198,6 +200,40 @@ struct RawRules {
     lint: RawLint,
     #[serde(default)]
     masthead: RawMasthead,
+    #[serde(default)]
+    compare: RawCompare,
+}
+
+/// The `[compare]` table: what changes are compared with.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct RawCompare {
+    default_branch: Option<BranchName>,
+}
+
+/// A branch name from the rules file. It must be text git could take as a
+/// branch name, or comparing would fail later with a less helpful message;
+/// the TOML reader then names its line.
+#[derive(Deserialize)]
+#[serde(try_from = "String")]
+struct BranchName(String);
+
+impl TryFrom<String> for BranchName {
+    type Error = String;
+
+    fn try_from(name: String) -> Result<BranchName, String> {
+        let plain = !name.is_empty()
+            && !name.starts_with('-')
+            && !name.contains("..")
+            && !name.chars().any(|c| c.is_whitespace() || c.is_control());
+        if plain {
+            Ok(BranchName(name))
+        } else {
+            Err(format!(
+                "the default branch {name:?} cannot name a branch; write a branch name such as \"origin/main\""
+            ))
+        }
+    }
 }
 
 /// The `[masthead]` table: keys to read as metadata beside the known ones.
@@ -288,6 +324,7 @@ impl Rules {
             types,
             lint,
             masthead_keys,
+            default_branch: raw.compare.default_branch.map(|BranchName(name)| name),
         })
     }
 
@@ -297,6 +334,14 @@ impl Rules {
     #[must_use]
     pub fn masthead_keys(&self) -> &MastheadKeys {
         &self.masthead_keys
+    }
+
+    /// The branch `auto` and the home page compare with, from the
+    /// `[compare]` table's `default-branch`, as written. `None` means the
+    /// first that exists of [`crate::git::AUTO_BASES`].
+    #[must_use]
+    pub fn default_branch(&self) -> Option<&str> {
+        self.default_branch.as_deref()
     }
 
     /// The writing check's settings from the `[lint]` table, or the defaults
@@ -731,6 +776,21 @@ current = ["accepted"]
         );
         assert!(unreadable("[masthead]\nkeys = [\" \"]\n").contains("cannot match"));
         assert!(unreadable("[masthead]\nother = 1\n").contains("other"));
+    }
+
+    #[test]
+    fn the_compare_table_names_the_default_branch() {
+        let rules = Rules::parse("[compare]\ndefault-branch = \"origin/dev\"\n").expect("valid");
+        assert_eq!(rules.default_branch(), Some("origin/dev"));
+        assert_eq!(Rules::parse("").expect("valid").default_branch(), None);
+        assert_eq!(Rules::default().default_branch(), None);
+        for bad in ["", "-x", "a..b", "a b", "a\\u0007b"] {
+            let text = format!("[compare]\ndefault-branch = \"{bad}\"\n");
+            let message = unreadable(&text);
+            assert!(message.contains("line 2"), "{bad}: {message}");
+            assert!(message.contains("cannot name a branch"), "{bad}: {message}");
+        }
+        assert!(unreadable("[compare]\nbranch = \"dev\"\n").contains("branch"));
     }
 
     #[test]

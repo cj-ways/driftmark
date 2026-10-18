@@ -18,6 +18,7 @@ use std::io::{BufWriter, ErrorKind, Write};
 use std::time::{Duration, Instant};
 
 use driftmark_core::diff::{ChangeList, RangeInfo};
+use driftmark_core::git::{BaseBranch, RangeSpec, Snapshot};
 
 use crate::git::Git;
 use args::{Args, Json, Request};
@@ -51,6 +52,9 @@ Ranges:
 
 Options:
   --repo <path>      a folder inside the repository (default: here)
+  --base <branch>    the branch `auto` compares with (default: the rules
+                     file's [compare] default-branch, else the first of
+                     origin/main, main, origin/master, master, origin/dev, dev)
   --json             print the whole change list as JSON
   --json=summary     print one JSON entry per document with its counts
   --timings          print the time of each step on standard error
@@ -109,12 +113,29 @@ fn diff(
         )
     })?;
     clock.lap("open the repository");
+    // `auto` compares the working tree, so its rules file is the one on disk,
+    // and it may name the branch to compare with; it is read first.
+    let worktree_rules = if args.range == RangeSpec::Auto {
+        Some(rules_file::read(&git, &Snapshot::Worktree)?)
+    } else {
+        None
+    };
+    let base = match (&args.base, &worktree_rules) {
+        (Some(name), _) => BaseBranch::Named(name.clone()),
+        (None, Some(rules)) => rules.default_branch().map_or(BaseBranch::Search, |name| {
+            BaseBranch::Named(name.to_owned())
+        }),
+        (None, None) => BaseBranch::Search,
+    };
     let range = args
         .range
-        .resolve(&git)
+        .resolve_with(&git, &base)
         .map_err(|error| error.to_string())?;
     clock.lap("resolve the range");
-    let rules = rules_file::read(&git, &range.head)?;
+    let rules = match worktree_rules {
+        Some(rules) => rules,
+        None => rules_file::read(&git, &range.head)?,
+    };
     clock.lap("read the rules file");
     let changes = range
         .changes(&git, &args.roots)
@@ -277,6 +298,7 @@ mod tests {
             json,
             timings: false,
             threads: None,
+            base: None,
         }
     }
 

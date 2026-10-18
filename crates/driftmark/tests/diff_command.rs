@@ -522,3 +522,54 @@ fn control_characters_in_names_cannot_reach_the_terminal() {
     );
     assert!(!out.contains('\x1b'), "{out}");
 }
+
+#[test]
+fn base_or_the_rules_file_names_the_branch_auto_compares_with() {
+    let r = repo();
+    r.repo.write(
+        "docs/guide.md",
+        "# Guide\n\nRead the whole setup first, then build.\n",
+    );
+    let from_feature = format!("auto: from {} to the working tree", short(&r.feature));
+
+    // `--base feature` leaves only the edit not committed yet.
+    let (code, out, err) = driftmark(&r.repo.dir, &["diff", "auto", "--base", "feature"]);
+    assert_eq!((code, err.as_str()), (0, ""));
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], from_feature);
+    assert_eq!(lines[1], "Note: compared with `feature`");
+    assert!(
+        lines.contains(&"wording      1 of 1  docs/guide.md"),
+        "{out}"
+    );
+    assert!(!out.contains("docs/new.md"), "{out}");
+
+    // The rules file in the working tree names it too, and `--base` wins.
+    r.repo.write(
+        "driftmark.toml",
+        format!("{RULES}\n[compare]\ndefault-branch = \"feature\"\n"),
+    );
+    let (code, out, _) = driftmark(&r.repo.dir, &["diff", "auto"]);
+    assert_eq!(code, 0);
+    assert!(
+        out.starts_with(&format!("{from_feature}\nNote: compared with `feature`\n")),
+        "{out}"
+    );
+    let (code, out, _) = driftmark(&r.repo.dir, &["diff", "auto", "--base=main"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("Note: compared with `main`\n"), "{out}");
+
+    // A named branch that does not exist stops the command.
+    let (code, out, err) = driftmark(&r.repo.dir, &["diff", "auto", "--base", "nope"]);
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert_eq!(
+        err,
+        "driftmark diff: the default branch `nope`, named by `--base` or the rules file, does not name a commit\n"
+    );
+    let (code, _, err) = driftmark(&r.repo.dir, &["diff", "main..feature", "--base", "main"]);
+    assert_eq!(code, 2);
+    assert!(
+        err.starts_with("driftmark diff: `--base` names the branch `auto` compares with"),
+        "{err}"
+    );
+}

@@ -48,6 +48,7 @@ const STOP_WAIT: Duration = Duration::from_secs(2);
 /// How `driftmark serve` is called.
 const USAGE: &str = "\
 usage: driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>]
+                       [--base <branch>]
 
 Serves the repository's Markdown documents and their changes as pages. Each
 page reads git when it is opened, so branches show their latest commits.
@@ -59,6 +60,10 @@ Options:
   --token <value>    the token a browser must present, 16 characters or
                      more; an address other than 127.0.0.1 or ::1 always
                      needs one, and gets a random one when none is given
+  --base <branch>    the branch the home page and `auto` compare with
+                     (default: the rules file's [compare] default-branch,
+                     else the first of origin/main, main, origin/master,
+                     master, origin/dev, dev)
 
 Open the address it prints. Stop it with Ctrl-C.
 
@@ -99,7 +104,7 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
     })?;
     let workdir = git.workdir().map(std::path::Path::to_path_buf);
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    let repo = Arc::new(Repo::new(git, cache::CAP_BYTES, threads));
+    let repo = Arc::new(Repo::new(git, cache::CAP_BYTES, threads, args.base.clone()));
     let token = match &args.token {
         Some(token) => Some(token.clone()),
         None if args.addr.ip().is_loopback() => None,
