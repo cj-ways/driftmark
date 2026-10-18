@@ -1,17 +1,19 @@
 //! What driftmark asks of a git repo, and the rules for reading the answers.
 //!
-//! driftmark needs six answers from git: which commit a name points to, where
+//! driftmark needs seven answers from git: which commit a name points to, where
 //! two branches parted, which Markdown files exist at a commit, which of them
 //! changed between two points, where one other file is, such as the rules
-//! file, and the bytes of a file. [`GitRead`] states those questions. The `driftmark` program answers them twice, with gix and with the
-//! `git` command, and checks the two against each other.
+//! file, which branches exist, and the bytes of a file. [`GitRead`] states
+//! those questions. The `driftmark` program answers them twice, with gix and
+//! with the `git` command, and checks the two against each other.
 //!
 //! Everything that is a rule rather than a lookup lives here, so both readers
 //! follow the same rules: which files count as Markdown ([`RepoPath::is_markdown`]),
 //! which folders are read ([`Roots`]), how a range is written ([`RangeSpec`]),
-//! how a date is read ([`parse_date`]) and how a commit object is read
-//! ([`CommitInfo`]).
+//! how a date is read ([`parse_date`]), how a commit object is read
+//! ([`CommitInfo`]) and which branches the home page compares ([`inbox`]).
 
+mod branches;
 mod commit;
 mod date;
 mod path;
@@ -19,10 +21,13 @@ mod range;
 
 use std::fmt;
 
+pub use branches::{BranchInbox, DefaultBranch, OpenBranch, inbox};
 pub use commit::CommitInfo;
 pub use date::parse_date;
 pub use path::{BadRoot, RepoPath, Roots};
-pub use range::{AUTO_BASES, RangeError, RangeNote, RangeSpec, ResolvedRange, diff_files};
+pub use range::{
+    AUTO_BASES, RangeError, RangeNote, RangeSpec, ResolvedRange, diff_files, merge_base,
+};
 
 /// The id of a git object, in lowercase hex.
 ///
@@ -152,6 +157,25 @@ impl FileChange {
             Self::Added { new, .. } | Self::Modified { new, .. } => Some(new),
         }
     }
+}
+
+/// A branch and the commit at its tip.
+///
+/// Both local branches (`refs/heads/…`) and remote-tracking branches
+/// (`refs/remotes/…`) count, because an agent's work may sit in either: a
+/// branch in a worktree on this machine, or one pushed from another.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Branch {
+    /// The name git shows and resolves: `main` for a local branch,
+    /// `origin/main` for a remote-tracking one.
+    pub name: String,
+    /// Whether the branch is remote-tracking.
+    pub remote: bool,
+    /// The commit at the tip.
+    pub tip: ObjectId,
+    /// Whether `HEAD` points at this branch: it is checked out in the working
+    /// tree the reader opened.
+    pub current: bool,
 }
 
 /// The kind of git object a question expected.
@@ -307,6 +331,19 @@ pub trait GitRead: Send + Sync {
     ///
     /// When the commit or one of its trees cannot be read.
     fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError>;
+
+    /// Every local branch, then every remote-tracking branch, each sorted by
+    /// name in byte order.
+    ///
+    /// A symbolic ref such as `origin/HEAD` is left out: it only names
+    /// another branch. So is a ref that cannot be read, one whose tip is not a
+    /// commit, and one whose name is not UTF-8, because a name driftmark
+    /// cannot write as text cannot be resolved again.
+    ///
+    /// # Errors
+    ///
+    /// When the refs cannot be listed at all.
+    fn branches(&self) -> Result<Vec<Branch>, GitError>;
 
     /// The bytes of a blob, exactly as stored.
     ///

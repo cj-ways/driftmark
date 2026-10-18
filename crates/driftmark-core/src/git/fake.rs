@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use super::{
-    FileChange, FileEntry, GitError, GitRead, ObjectId, RepoPath, Roots, Snapshot, diff_files,
+    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, RepoPath, Roots, Snapshot,
+    diff_files,
 };
 
 /// An id made of one repeated hex digit, such as `1111…`.
@@ -25,6 +26,8 @@ pub(crate) struct FakeGit {
     bases: Result<Vec<ObjectId>, GitError>,
     commits: HashMap<ObjectId, Vec<u8>>,
     files: HashMap<Option<ObjectId>, Vec<FileEntry>>,
+    branches: Vec<Branch>,
+    branches_fail: bool,
 }
 
 impl FakeGit {
@@ -34,6 +37,8 @@ impl FakeGit {
             bases: Ok(Vec::new()),
             commits: HashMap::new(),
             files: HashMap::new(),
+            branches: Vec::new(),
+            branches_fail: false,
         }
     }
 
@@ -91,6 +96,31 @@ impl FakeGit {
         self.files.insert(None, files.to_vec());
         self
     }
+
+    /// A branch at a one-digit tip, in the order the test lists them.
+    pub(crate) fn branch(self, name: &str, remote: bool, digit: char) -> Self {
+        self.add_branch(name, remote, digit, false)
+    }
+
+    /// The local branch `HEAD` points at.
+    pub(crate) fn current_branch(self, name: &str, digit: char) -> Self {
+        self.add_branch(name, false, digit, true)
+    }
+
+    fn add_branch(mut self, name: &str, remote: bool, digit: char, current: bool) -> Self {
+        self.branches.push(Branch {
+            name: name.into(),
+            remote,
+            tip: id(digit),
+            current,
+        });
+        self
+    }
+
+    pub(crate) fn branches_fail(mut self) -> Self {
+        self.branches_fail = true;
+        self
+    }
 }
 
 impl GitRead for FakeGit {
@@ -140,6 +170,15 @@ impl GitRead for FakeGit {
 
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         Err(GitError::MissingObject { id: id.clone() })
+    }
+
+    fn branches(&self) -> Result<Vec<Branch>, GitError> {
+        if self.branches_fail {
+            return Err(GitError::Other {
+                message: "no refs".into(),
+            });
+        }
+        Ok(self.branches.clone())
     }
 
     fn read_worktree_file(&self, path: &RepoPath) -> Result<Vec<u8>, GitError> {

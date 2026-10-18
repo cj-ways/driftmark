@@ -1,0 +1,30 @@
+/* driftmark's placeholder style sheet. The pages lane replaces it with the
+   review-first design of decision 0010. */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+}
+body {
+  margin: 0 auto;
+  max-width: 60rem;
+  padding: 1rem;
+}
+header {
+  margin-bottom: 1rem;
+}
+pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+.level[data-level="decision"],
+.level[data-level="rule"] {
+  font-weight: bold;
+}
+.problem {
+  border-left: 4px solid currentColor;
+  padding-left: 0.75rem;
+}

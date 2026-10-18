@@ -10,3 +10,4 @@ pub mod diff;
 pub mod git;
 pub mod hook;
 pub mod lint;
+pub mod serve;

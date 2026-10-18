@@ -13,7 +13,8 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
 use std::sync::{Mutex, PoisonError};
 
 use driftmark_core::git::{
-    FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RepoPath, Roots, Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RepoPath, Roots,
+    Snapshot,
 };
 
 use super::worktree;
@@ -326,6 +327,46 @@ impl GitRead for CommandReader {
             }
         }
         Ok(None)
+    }
+
+    fn branches(&self) -> Result<Vec<Branch>, GitError> {
+        let mut command = self.git();
+        command.args([
+            "for-each-ref",
+            "--format=%(HEAD)%00%(objecttype)%00%(objectname)%00%(symref)%00%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ]);
+        let listing = run_ok(&mut command)?;
+        let mut branches = Vec::new();
+        // A ref name holds no line break, so each line is one ref.
+        for line in listing
+            .split(|&b| b == b'\n')
+            .filter(|line| !line.is_empty())
+        {
+            let fields: Vec<&[u8]> = line.split(|&b| b == 0).collect();
+            let [head, kind, id, symref, refname] = fields.as_slice() else {
+                return Err(odd_output("for-each-ref", line));
+            };
+            if !symref.is_empty() || *kind != b"commit" {
+                continue;
+            }
+            let (remote, short) = match refname.strip_prefix(b"refs/heads/") {
+                Some(short) => (false, Some(short)),
+                None => (true, refname.strip_prefix(b"refs/remotes/")),
+            };
+            let Some(name) = short.and_then(|n| std::str::from_utf8(n).ok()) else {
+                continue;
+            };
+            branches.push(Branch {
+                name: name.to_owned(),
+                remote,
+                tip: parse_id(&String::from_utf8_lossy(id))?,
+                current: *head == b"*",
+            });
+        }
+        branches.sort_by(|a, b| (a.remote, &a.name).cmp(&(b.remote, &b.name)));
+        Ok(branches)
     }
 
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {

@@ -6,8 +6,8 @@ mod support;
 use std::collections::BTreeSet;
 
 use driftmark_core::git::{
-    FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RangeSpec, RepoPath, Roots,
-    Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RangeSpec, RepoPath,
+    Roots, Snapshot,
 };
 use support::{DAY, Readers, T0, TestRepo};
 
@@ -266,6 +266,49 @@ fn both_readers_agree_on_a_history_with_branches_and_merges() {
     for wanted in [&h.c1, &h.c2, &h.f1, &h.f2, &h.m3, &h.merge, &h.m5, &h.other] {
         assert!(commits.contains(&id(wanted)));
     }
+}
+
+#[test]
+fn branches_list_local_then_remote_and_skip_what_is_not_a_branch() {
+    let h = history();
+    // A symbolic ref names another branch; a ref to a tag object is not a
+    // branch tip; a ref outside refs/heads and refs/remotes is no branch.
+    h.repo.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+    ]);
+    let tag = h.repo.git(&["rev-parse", "v2"]);
+    h.repo
+        .git(&["update-ref", "refs/remotes/origin/tag-object", &tag]);
+    h.repo
+        .git(&["update-ref", "refs/remotes/fork/topic", &h.f1]);
+    h.repo.git(&["update-ref", "refs/notes/x", &h.c1]);
+    let readers = h.repo.readers();
+    let branch = |name: &str, remote: bool, tip: &str, current: bool| Branch {
+        name: name.into(),
+        remote,
+        tip: id(tip),
+        current,
+    };
+    let expected = vec![
+        branch("feature", false, &h.f2, false),
+        branch("main", false, &h.m5, true),
+        branch("other", false, &h.other, false),
+        branch("fork/topic", true, &h.f1, false),
+        branch("origin/main", true, &h.c2, false),
+    ];
+    assert_eq!(readers.same("branches", |g| g.branches()), Ok(expected));
+
+    h.repo.git(&["checkout", "-q", "--detach", "main"]);
+    let readers = h.repo.readers();
+    let detached = readers
+        .same("detached", |g| g.branches())
+        .expect("branches");
+    assert!(
+        detached.iter().all(|b| !b.current),
+        "no branch is checked out"
+    );
 }
 
 #[test]

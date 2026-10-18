@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use driftmark::git::{CommandReader, GixReader};
 use driftmark_core::git::{
-    FileChange, FileEntry, GitError, GitRead, ObjectId, RangeSpec, RepoPath, ResolvedRange, Roots,
-    Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, RangeSpec, RepoPath, ResolvedRange,
+    Roots, Snapshot,
 };
 
 /// Counts the commits a range walk reads.
@@ -54,6 +54,9 @@ impl GitRead for Counting<'_> {
     }
     fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError> {
         self.inner.blob_at(commit, path)
+    }
+    fn branches(&self) -> Result<Vec<Branch>, GitError> {
+        self.inner.branches()
     }
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         self.inner.read_blob(id)

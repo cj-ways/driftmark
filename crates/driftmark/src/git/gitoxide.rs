@@ -10,7 +10,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, PoisonError};
 
 use driftmark_core::git::{
-    FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RepoPath, Roots, Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RepoPath, Roots,
+    Snapshot,
 };
 use gix::bstr::ByteSlice;
 use gix::diff::tree::recorder::Change as Record;
@@ -162,6 +163,12 @@ impl GitRead for GixReader {
         found.map(from_gix).transpose()
     }
 
+    fn branches(&self) -> Result<Vec<Branch>, GitError> {
+        let mut branches = self.with(list_branches)?;
+        branches.sort_by(|a, b| (a.remote, &a.name).cmp(&(b.remote, &b.name)));
+        Ok(branches)
+    }
+
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         self.read_object(id, ObjectKind::Blob)
     }
@@ -169,6 +176,45 @@ impl GitRead for GixReader {
     fn read_worktree_file(&self, path: &RepoPath) -> Result<Vec<u8>, GitError> {
         worktree::read(self.workdir(), path)
     }
+}
+
+/// The local and remote-tracking branches that point straight at a commit.
+/// A ref gix cannot read is skipped, as `git for-each-ref` skips a broken
+/// ref with a warning.
+fn list_branches(repo: &gix::Repository) -> Result<Vec<Branch>, GitError> {
+    let head = repo.head_name().map_err(|error| other(&error))?;
+    let refs = repo.references().map_err(|error| other(&error))?;
+    let local = refs.local_branches().map_err(|error| other(&error))?;
+    let remote = refs.remote_branches().map_err(|error| other(&error))?;
+    let mut branches = Vec::new();
+    for (is_remote, prefix, iter) in [
+        (false, &b"refs/heads/"[..], local),
+        (true, &b"refs/remotes/"[..], remote),
+    ] {
+        for reference in iter.flatten() {
+            let gix::refs::TargetRef::Object(tip) = reference.target() else {
+                continue;
+            };
+            let header = repo.find_header(tip).map_err(|error| other(&error))?;
+            if header.kind() != gix::objs::Kind::Commit {
+                continue;
+            }
+            let full = reference.name().as_bstr();
+            let short = full
+                .strip_prefix(prefix)
+                .and_then(|n| std::str::from_utf8(n).ok());
+            let Some(name) = short else {
+                continue;
+            };
+            branches.push(Branch {
+                name: name.to_owned(),
+                remote: is_remote,
+                tip: from_gix(tip.to_owned())?,
+                current: head.as_ref().is_some_and(|h| h.as_bstr() == full),
+            });
+        }
+    }
+    Ok(branches)
 }
 
 /// The blob of the regular file at `path` under `tree`. It walks one folder

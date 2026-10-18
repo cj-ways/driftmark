@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Git ranges and readers
 
-> Short version: driftmark asks a git repo six kinds of question through one interface, `GitRead`, in `driftmark-core`. Two readers in the `driftmark` program answer them: gix, and the `git` command. Both must give identical answers. A range is written as `<base>..<head>`, `<base>...<head>`, `--since <date>` or `auto`. `auto` includes changes not committed yet. Only `.md` and `.markdown` files count, and renames are not detected.
+> Short version: driftmark asks a git repo seven kinds of question through one interface, `GitRead`, in `driftmark-core`. Two readers in the `driftmark` program answer them: gix, and the `git` command. Both must give identical answers. A range is written as `<base>..<head>`, `<base>...<head>`, `--since <date>` or `auto`. `auto` includes changes not committed yet. Only `.md` and `.markdown` files count, and renames are not detected.
 
 ## What driftmark asks git
 
@@ -21,6 +21,7 @@ The interface is `driftmark_core::git::GitRead`. Every method has one answer, an
 | Which file is at this path in a commit? | `blob_at(commit, path)` | The blob id of the regular file there, or none when the path is missing, a folder, a symbolic link or a submodule. It finds any file, not only Markdown, such as the rules file. A path through a file or a submodule finds none. |
 | What is in this file? | `read_blob(id)` | The blob's bytes, exactly as stored. |
 | What is in this working-tree file? | `read_worktree_file(path)` | The bytes on disk now. |
+| Which branches are there? | `branches()` | Every local branch, then every remote-tracking branch, each sorted by name, with the commit at its tip and whether `HEAD` points at it. A local branch is named like `main`, a remote-tracking one like `origin/main`. Symbolic refs such as `origin/HEAD`, refs whose tip is not a commit, refs that cannot be read and names that are not UTF-8 are left out. |
 
 Every list comes back sorted by path, in byte order, with each path once.
 
@@ -68,6 +69,8 @@ A side left out means `HEAD` here too: `main...` is `main...HEAD`.
 When the two have several merge-bases, after criss-cross merges, the one with the lowest id is used. The range then carries a note that says so and lists the others. Another merge-base would show different changes.
 
 When the two share no history, resolving fails with `NoMergeBase`.
+
+`merge_base(git, a, b)` makes the same choice, with the same note, for a program that already holds the two commits, such as the server's home page.
 
 ### `--since <date>`: everything since a date on one branch
 
@@ -122,6 +125,17 @@ On the default branch itself, the base is usually `HEAD`, so `auto` shows only u
 
 A name alone, such as `main`, is refused with `NotARange`, as are `..`, `...`, and stray dots such as `a....b` or `a..b..c`. The message lists the accepted forms.
 
+## Branches for the home page
+
+The home page of `driftmark serve` lists the branches whose documents differ from the default branch. `driftmark_core::git::inbox` decides which branches to compare, before any document is read:
+
+1. The default branch is the one `auto` uses: the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. When none exists, nothing is compared.
+2. A branch whose tip is the default branch's tip is left out, because nothing differs. This leaves out the default branch itself.
+3. Several branches at one tip are listed once, under the first name in `branches()` order: local before remote-tracking, then by name. A local branch and the one it was pushed to usually share a tip.
+4. The newest tip commit comes first, by committer date. Equal dates go by name.
+
+It also names the branch `HEAD` points at. Example: `origin/main` and `main` at commit `a`, `feature` and `origin/feature` at `b` (made on 5 October), `docs` at `c` (made on 6 October). The list is `docs`, then `feature`. Whether a branch's documents really differ is found by comparing it, as `docs/features/commands/serve.md` says.
+
 ## Uncommitted work: the working-tree side
 
 Yes, the interface has a working-tree side: `Snapshot::Worktree`. A range's head is either `Snapshot::Commit(id)` or `Snapshot::Worktree`. Only `auto` uses the working tree today.
@@ -160,6 +174,7 @@ Both readers hash every listed file on every call. For about 3,400 files that re
 - `ls-tree -r -z` to list files at a commit, and `ls-tree -z` without `-r` to find one file;
 - `diff-tree -r -z --no-renames` to list changes;
 - one long-lived `cat-file --batch` process to read commits and blobs;
+- `for-each-ref` on `refs/heads` and `refs/remotes` to list branches;
 - `ls-files` and `hash-object` for the working tree.
 
 Paths are passed with `--literal-pathspecs`, so a folder name is never read as a pattern. Variables such as `GIT_DIR`, which would point git at another repo, are removed, and git never takes a lock or asks for a password.
@@ -182,6 +197,7 @@ Tests build small repos with the `git` command in a temporary folder, then ask g
 - files that are not Markdown, an executable file, a mode-only change, and CRLF content;
 - a symbolic link and a submodule entry, a name that is not UTF-8, and, except on Windows, names with a newline and a quote;
 - lightweight and annotated tags, and a remote branch;
+- local, remote-tracking and symbolic refs, a ref to a tag object, and a detached `HEAD`;
 - uncommitted edits, deletions, staged and untracked files, ignored files, links, and line-ending conversion;
 - a bare repo.
 

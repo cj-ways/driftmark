@@ -1,5 +1,5 @@
-//! The `driftmark` program. Version 1 adds `serve`, `mcp`, `init` and `export`
-//! to the commands here.
+//! The `driftmark` program. Version 1 adds `mcp`, `init` and `export` to the
+//! commands here.
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
@@ -15,12 +15,20 @@ usage: driftmark <command> [<arguments>]
 Commands:
   diff           show what changed between two git points, ranked by meaning
   lint           check Markdown files against the writing rules
+  serve          serve the documents and their changes as pages
   hook install   run the lint after each edit Claude Code makes
 
 Run `driftmark <command> --help` for a command's options.";
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if args.first().and_then(|arg| arg.to_str()) == Some("serve") {
+        // The server's threads write to standard error themselves, so this
+        // command must not hold it locked.
+        let code =
+            driftmark::serve::run(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
+        return ExitCode::from(code);
+    }
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
     let code = match args.first().and_then(|arg| arg.to_str()) {

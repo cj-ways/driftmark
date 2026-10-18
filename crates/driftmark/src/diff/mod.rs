@@ -8,8 +8,8 @@
 //! `docs/features/commands/diff.md` is the user's guide.
 
 mod args;
-mod rules_file;
-mod text;
+pub(crate) mod rules_file;
+pub(crate) mod text;
 mod work;
 
 use std::ffi::OsString;

@@ -9,7 +9,7 @@
 mod choose;
 mod command;
 mod gitoxide;
-mod worktree;
+pub(crate) mod worktree;
 
 pub use choose::Git;
 pub use command::CommandReader;

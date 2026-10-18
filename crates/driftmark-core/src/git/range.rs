@@ -325,7 +325,14 @@ fn change(old: Option<&FileEntry>, new: Option<&FileEntry>) -> Option<FileChange
     FileChange::between(path, old.map(|e| e.id.clone()), new.map(|e| e.id.clone()))
 }
 
-fn merge_base(
+/// The merge-base of two commits, as `<a>...<b>` uses it: the one with the
+/// lowest id when there are several, with a note that lists the others.
+///
+/// # Errors
+///
+/// [`RangeError::NoMergeBase`] when the two share no history, and any error
+/// from the git reader.
+pub fn merge_base(
     git: &dyn GitRead,
     a: &ObjectId,
     b: &ObjectId,
@@ -350,7 +357,10 @@ fn merge_base(
     Ok((used, notes))
 }
 
-fn first_default_branch(git: &dyn GitRead) -> Result<(&'static str, ObjectId), RangeError> {
+/// The first of [`AUTO_BASES`] that exists, and its commit.
+pub(super) fn first_default_branch(
+    git: &dyn GitRead,
+) -> Result<(&'static str, ObjectId), RangeError> {
     for name in AUTO_BASES {
         match git.resolve(name) {
             Ok(id) => return Ok((name, id)),

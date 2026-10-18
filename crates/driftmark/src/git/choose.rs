@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use driftmark_core::git::{
-    FileChange, FileEntry, GitError, GitRead, ObjectId, RepoPath, Roots, Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, RepoPath, Roots, Snapshot,
 };
 
 use super::{CommandReader, GixReader};
@@ -186,6 +186,10 @@ impl GitRead for Git {
             |g| g.blob_at(commit, path),
             |c| c.blob_at(commit, path),
         )
+    }
+
+    fn branches(&self) -> Result<Vec<Branch>, GitError> {
+        self.ask("list branches", GitRead::branches, GitRead::branches)
     }
 
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {

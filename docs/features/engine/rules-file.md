@@ -9,7 +9,7 @@ date: 2026-10-18
 
 ## Who reads it
 
-- The program finds the file and reads its text. It is `driftmark.toml` at the repository root. `driftmark lint` reads it from the disk. `driftmark diff` reads it at the newer side of the range: at the head commit, or from the disk for `auto` (`docs/features/commands/diff.md`). M2 decides where `driftmark serve` reads it.
+- The program finds the file and reads its text. It is `driftmark.toml` at the repository root. `driftmark lint` reads it from the disk. `driftmark diff` reads it at the newer side of the range: at the head commit, or from the disk for `auto` (`docs/features/commands/diff.md`). `driftmark serve` reads it at the side a page shows: at the commit, or from the disk for the working tree (`docs/features/commands/serve.md`).
 - `driftmark_core::rules::Rules::parse(text)` parses the text, so the core never touches a file.
 - `rules.classify(path, &document)` applies the rules to one parsed document. `path` is relative to the repository root, with `/` between folders, as git writes it.
 - With no rules file, `Rules::default()` has no types, so every file is a `document`.
