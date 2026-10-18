@@ -23,14 +23,23 @@ impl Anchors {
     /// because GitHub gives those headings anchors as well.
     #[must_use]
     pub fn of(document: &Document) -> Anchors {
+        let ids = Anchors::by_block(document).into_iter().flatten().collect();
+        Anchors { ids }
+    }
+
+    /// The anchor of each heading block, by block index; `None` for every
+    /// other block. Pages give their headings these ids, so a link the lint
+    /// accepts always finds its heading on the page.
+    pub(crate) fn by_block(document: &Document) -> Vec<Option<String>> {
         let mut anchorizer = Anchorizer::new();
-        let ids = document
+        document
             .blocks
             .iter()
-            .filter(|block| matches!(block.kind, BlockKind::Heading { .. }))
-            .map(|block| anchorizer.anchorize(&block.text))
-            .collect();
-        Anchors { ids }
+            .map(|block| {
+                matches!(block.kind, BlockKind::Heading { .. })
+                    .then(|| anchorizer.anchorize(&block.text))
+            })
+            .collect()
     }
 
     /// Whether a heading has this anchor, without the `#`.

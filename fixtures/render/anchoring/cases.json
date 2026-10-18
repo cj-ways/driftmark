@@ -1,0 +1,730 @@
+{
+ "about": "One row per case. 'select' picks rendered text (or select_from/select_to, select_node, select_css). 'expect' is the source text the selection must map to, found in the fixture's bytes ('expect_nth' picks the occurrence). 'snap' marks a case where the selection cannot map exactly and must snap. 'reverse' is the text the highlight of the expected range must show, when it differs from the selection. Cases with 'source' and no selection test only the reverse direction. The expected range runs from the source start of the first selected character to the source end of the last one, so markup at the edges (a closing '*') stays outside and markup in the middle is inside. Whitespace at the edges of a selection is dropped.",
+ "cases": [
+  {
+   "id": "plain-words",
+   "file": "01-plain",
+   "select": "quick brown fox",
+   "expect": "quick brown fox"
+  },
+  {
+   "id": "plain-sentence",
+   "file": "01-plain",
+   "select": "A second sentence follows it.",
+   "expect": "A second sentence follows it."
+  },
+  {
+   "id": "italic",
+   "file": "02-emphasis",
+   "select": "italic",
+   "expect": "italic"
+  },
+  {
+   "id": "bold-around-nested-italic",
+   "file": "02-emphasis",
+   "select": "phrase with nested italic inside",
+   "expect": "phrase with *nested italic* inside"
+  },
+  {
+   "id": "inside-nested-italic",
+   "file": "02-emphasis",
+   "select": "ted ital",
+   "expect": "ted ital"
+  },
+  {
+   "id": "strikethrough",
+   "file": "02-emphasis",
+   "select": "struck",
+   "expect": "struck"
+  },
+  {
+   "id": "bold-italic-together",
+   "file": "02-emphasis",
+   "select": "both at once",
+   "expect": "both at once"
+  },
+  {
+   "id": "underscore-emphasis",
+   "file": "02-emphasis",
+   "select": "under score",
+   "expect": "under_ __score"
+  },
+  {
+   "id": "code-span",
+   "file": "03-code-spans",
+   "select": "cargo build",
+   "expect": "cargo build"
+  },
+  {
+   "id": "code-span-with-backticks",
+   "file": "03-code-spans",
+   "select": "a `tick` here",
+   "expect": "a `tick` here"
+  },
+  {
+   "id": "code-span-padded",
+   "file": "03-code-spans",
+   "select": "`x`",
+   "expect": "`x`"
+  },
+  {
+   "id": "into-code-span",
+   "file": "03-code-spans",
+   "select": "Run cargo",
+   "expect": "Run `cargo"
+  },
+  {
+   "id": "inline-link",
+   "file": "04-links",
+   "select": "setup guide",
+   "expect": "setup guide"
+  },
+  {
+   "id": "reference-link",
+   "file": "04-links",
+   "select": "reference page",
+   "expect": "reference page"
+  },
+  {
+   "id": "collapsed-reference-link",
+   "file": "04-links",
+   "select": "second one",
+   "expect": "second one"
+  },
+  {
+   "id": "angle-autolink",
+   "file": "04-links",
+   "select": "https://example.com/a?b=c&d=e",
+   "expect": "https://example.com/a?b=c&d=e"
+  },
+  {
+   "id": "email-autolink",
+   "file": "04-links",
+   "select": "team@example.com",
+   "expect": "team@example.com"
+  },
+  {
+   "id": "bare-autolink",
+   "file": "04-links",
+   "select": "https://example.com/path",
+   "expect": "https://example.com/path"
+  },
+  {
+   "id": "www-autolink",
+   "file": "04-links",
+   "select": "www.example.org",
+   "expect": "www.example.org"
+  },
+  {
+   "id": "link-across-soft-break",
+   "file": "04-links",
+   "select": "details.\nRead the reference",
+   "expect": "details.\nRead the [reference"
+  },
+  {
+   "id": "image-alone",
+   "file": "05-images",
+   "select_node": "img",
+   "nth": 0,
+   "expect": "![a small *cat* picture](cat.png \"Cat\")"
+  },
+  {
+   "id": "image-inside-text",
+   "file": "05-images",
+   "select_from": "Before",
+   "select_to": "after",
+   "expect": "Before ![a small *cat* picture](cat.png \"Cat\") after"
+  },
+  {
+   "id": "image-own-paragraph",
+   "file": "05-images",
+   "select_node": "img",
+   "nth": 1,
+   "expect": "![Diagram of the flow](flow.svg)"
+  },
+  {
+   "id": "entity-amp",
+   "file": "06-entities",
+   "select": "Tom & Jerry",
+   "expect": "Tom &amp; Jerry"
+  },
+  {
+   "id": "entity-nbsp",
+   "file": "06-entities",
+   "select": "a b",
+   "expect": "a&nbsp;b"
+  },
+  {
+   "id": "entity-alone",
+   "file": "06-entities",
+   "select": "&",
+   "expect": "&amp;"
+  },
+  {
+   "id": "entity-numeric-emoji",
+   "file": "06-entities",
+   "select": "😀 smile",
+   "expect": "&#x1F600; smile"
+  },
+  {
+   "id": "entity-two-chars-half",
+   "file": "06-entities",
+   "select": "≂",
+   "expect": "&NotEqualTilde;",
+   "snap": true,
+   "reverse": "≂̸"
+  },
+  {
+   "id": "escaped-asterisks",
+   "file": "07-escapes",
+   "select": "*emphasis*",
+   "expect": "\\*emphasis\\*"
+  },
+  {
+   "id": "between-escapes",
+   "file": "07-escapes",
+   "select": "emphasis",
+   "expect": "emphasis"
+  },
+  {
+   "id": "escaped-backslash",
+   "file": "07-escapes",
+   "select": "a \\ backslash",
+   "expect": "a \\\\ backslash"
+  },
+  {
+   "id": "soft-break",
+   "file": "08-breaks",
+   "select": "here\nsecond",
+   "expect": "here\nsecond"
+  },
+  {
+   "id": "hard-break-spaces",
+   "file": "08-breaks",
+   "select_from": "red",
+   "select_to": "violets",
+   "expect": "red  \nviolets"
+  },
+  {
+   "id": "hard-break-backslash",
+   "file": "08-breaks",
+   "select_from": "One",
+   "select_to": "two",
+   "expect": "One\\\ntwo"
+  },
+  {
+   "id": "georgian-word",
+   "file": "09-georgian",
+   "select": "ტექსტი",
+   "expect": "ტექსტი"
+  },
+  {
+   "id": "georgian-across-bold",
+   "file": "09-georgian",
+   "select": "ქართული ტექსტი",
+   "expect": "ქართული** ტექსტი"
+  },
+  {
+   "id": "emoji-joiner-sequence",
+   "file": "10-emoji",
+   "select": "👩‍💻 developer",
+   "expect": "👩‍💻 developer"
+  },
+  {
+   "id": "emoji-half-of-sequence",
+   "file": "10-emoji",
+   "select": "👩",
+   "expect": "👩‍💻",
+   "snap": true,
+   "reverse": "👩‍💻"
+  },
+  {
+   "id": "emoji-split-surrogate",
+   "file": "10-emoji",
+   "select": "🇬🇪",
+   "trim_end": 1,
+   "expect": "🇬🇪",
+   "snap": true,
+   "reverse": "🇬🇪"
+  },
+  {
+   "id": "cjk-japanese",
+   "file": "11-cjk",
+   "select": "文章",
+   "expect": "文章"
+  },
+  {
+   "id": "cjk-mixed",
+   "file": "11-cjk",
+   "select": "です。这是中文",
+   "expect": "です。这是中文"
+  },
+  {
+   "id": "tight-list-item",
+   "file": "12-list-tight",
+   "select": "banana split",
+   "expect": "banana *split"
+  },
+  {
+   "id": "tight-list-two-items",
+   "file": "12-list-tight",
+   "select_from": "apple",
+   "select_to": "banana",
+   "expect": "apple\n- banana"
+  },
+  {
+   "id": "loose-list-paragraph",
+   "file": "13-list-loose",
+   "select": "with a second paragraph.",
+   "expect": "with a second paragraph."
+  },
+  {
+   "id": "loose-list-two-paragraphs",
+   "file": "13-list-loose",
+   "select_from": "Second item",
+   "select_to": "with",
+   "expect": "Second item\n\n   with"
+  },
+  {
+   "id": "nested-list-deep",
+   "file": "14-list-nested",
+   "select": "deepest three",
+   "expect": "deepest three"
+  },
+  {
+   "id": "nested-list-across-levels",
+   "file": "14-list-nested",
+   "select_from": "inner",
+   "select_to": "deepest",
+   "expect": "inner two\n    - deepest"
+  },
+  {
+   "id": "task-item",
+   "file": "15-tasks",
+   "select": "write the plan",
+   "expect": "write the plan"
+  },
+  {
+   "id": "task-item-emphasis",
+   "file": "15-tasks",
+   "select": "check the result",
+   "expect": "check *the* result"
+  },
+  {
+   "id": "table-cell",
+   "file": "16-table",
+   "select": "plain",
+   "expect": "plain"
+  },
+  {
+   "id": "table-escaped-pipe",
+   "file": "16-table",
+   "select": "a | b",
+   "expect": "a \\| b"
+  },
+  {
+   "id": "table-after-escaped-pipe",
+   "file": "16-table",
+   "select": "bold y",
+   "expect": "bold** y"
+  },
+  {
+   "id": "table-pipe-in-code",
+   "file": "16-table",
+   "select": "p | q",
+   "expect": "p \\| q"
+  },
+  {
+   "id": "table-two-cells",
+   "file": "16-table",
+   "select_from": "alpha",
+   "select_to": "a | b",
+   "expect": "alpha | a \\| b"
+  },
+  {
+   "id": "table-header-pipe",
+   "file": "16-table",
+   "select": "Value | unit",
+   "expect": "Value \\| unit"
+  },
+  {
+   "id": "table-multibyte-cell",
+   "file": "16-table",
+   "select": "日本語",
+   "expect": "日本語"
+  },
+  {
+   "id": "blockquote-two-lines",
+   "file": "17-blockquote",
+   "select": "line\ncontinues",
+   "expect": "line\n> continues"
+  },
+  {
+   "id": "blockquote-nested",
+   "file": "17-blockquote",
+   "select": "A nested quote.",
+   "expect": "A nested quote."
+  },
+  {
+   "id": "alert-body",
+   "file": "18-alerts",
+   "select": "Remember to save often.",
+   "expect": "Remember to *save* often."
+  },
+  {
+   "id": "alert-from-title",
+   "file": "18-alerts",
+   "select_from": "Note",
+   "select_to": "Remember",
+   "expect": "Remember",
+   "snap": true,
+   "reverse": "Remember"
+  },
+  {
+   "id": "alert-warning",
+   "file": "18-alerts",
+   "select": "Do not delete",
+   "expect": "Do not delete"
+  },
+  {
+   "id": "atx-heading",
+   "file": "19-headings",
+   "select": "Main title",
+   "expect": "Main title"
+  },
+  {
+   "id": "atx-heading-closing-hashes",
+   "file": "19-headings",
+   "select": "Section two",
+   "expect": "Section *two"
+  },
+  {
+   "id": "setext-heading",
+   "file": "19-headings",
+   "select": "Setext heading",
+   "expect": "Setext heading"
+  },
+  {
+   "id": "footnote-ref-with-word",
+   "file": "20-footnotes",
+   "select": "note1",
+   "expect": "note[^1]"
+  },
+  {
+   "id": "footnote-ref-alone",
+   "file": "20-footnotes",
+   "select_css": "sup.footnote-ref a",
+   "nth": 0,
+   "expect": "[^1]"
+  },
+  {
+   "id": "footnote-body",
+   "file": "20-footnotes",
+   "select": "note text itself",
+   "expect": "note *text* itself"
+  },
+  {
+   "id": "footnote-body-two-lines",
+   "file": "20-footnotes",
+   "select": "longer note\nwith",
+   "expect": "longer note\n    with"
+  },
+  {
+   "id": "footnote-into-back-link",
+   "file": "20-footnotes",
+   "select": "itself. ↩",
+   "expect": "itself.",
+   "snap": true,
+   "reverse": "itself."
+  },
+  {
+   "id": "across-bold-and-code",
+   "file": "21-cross-inline",
+   "select": "part and code",
+   "expect": "part** and `code"
+  },
+  {
+   "id": "across-code-and-link",
+   "file": "21-cross-inline",
+   "select": "code part and link",
+   "expect": "code part` and [link"
+  },
+  {
+   "id": "across-two-paragraphs",
+   "file": "22-cross-block",
+   "select_from": "ends here.",
+   "select_to": "The second",
+   "expect": "ends here.\n\nThe second"
+  },
+  {
+   "id": "across-paragraph-and-list",
+   "file": "22-cross-block",
+   "select_from": "starts",
+   "select_to": "a list",
+   "expect": "starts here.\n\n- and a list"
+  },
+  {
+   "id": "front-matter-heading",
+   "file": "23-front-matter",
+   "select": "Title after front matter",
+   "expect": "Title after front matter"
+  },
+  {
+   "id": "front-matter-body",
+   "file": "23-front-matter",
+   "select": "Body text here.",
+   "expect": "Body *text* here."
+  },
+  {
+   "id": "crlf-soft-break",
+   "file": "24-crlf",
+   "select": "soft\nbreak",
+   "expect": "soft\r\nbreak"
+  },
+  {
+   "id": "crlf-hard-break",
+   "file": "24-crlf",
+   "select_from": "hard",
+   "select_to": "break here",
+   "expect": "hard  \r\nbreak here"
+  },
+  {
+   "id": "crlf-list-item",
+   "file": "24-crlf",
+   "select": "item one",
+   "expect": "item *one"
+  },
+  {
+   "id": "crlf-code-span",
+   "file": "24-crlf",
+   "select": "span with",
+   "expect": "span\r\nwith"
+  },
+  {
+   "id": "crlf-table-pipe",
+   "file": "24-crlf",
+   "select": "c | d",
+   "expect": "c \\| d"
+  },
+  {
+   "id": "tab-after-list-marker",
+   "file": "25-tabs",
+   "select": "Tab after the marker",
+   "expect": "Tab after the marker"
+  },
+  {
+   "id": "tab-continuation-line",
+   "file": "25-tabs",
+   "select": "marker\nstill the",
+   "expect": "marker\n\tstill the"
+  },
+  {
+   "id": "tab-inside-text",
+   "file": "25-tabs",
+   "select": "Text\twith",
+   "expect": "Text\twith"
+  },
+  {
+   "id": "tab-after-quote-marker",
+   "file": "25-tabs",
+   "select": "Quote after a tab.",
+   "expect": "Quote after a tab."
+  },
+  {
+   "id": "tab-indented-code",
+   "file": "25-tabs",
+   "select": "fn main",
+   "expect": "fn main"
+  },
+  {
+   "id": "fenced-code-line",
+   "file": "26-code-blocks",
+   "select": "println!(\"hi\");",
+   "expect": "println!(\"hi\");"
+  },
+  {
+   "id": "fenced-code-in-list",
+   "file": "26-code-blocks",
+   "select": "cargo build\ncargo test",
+   "expect": "cargo build\n   cargo test"
+  },
+  {
+   "id": "fenced-code-in-quote",
+   "file": "26-code-blocks",
+   "select": "quoted code",
+   "expect": "quoted code"
+  },
+  {
+   "id": "raw-html-inline",
+   "file": "27-html-inline",
+   "select": "Press Ctrl and S",
+   "expect": "Press <kbd>Ctrl</kbd> and <kbd>S"
+  },
+  {
+   "id": "whole-paragraph-by-element",
+   "file": "02-emphasis",
+   "select_css": "p",
+   "nth": 1,
+   "expect": "A **bold phrase with *nested italic* inside** it, then ***both at once*** and _under_ __score__."
+  },
+  {
+   "id": "selection-with-edge-spaces",
+   "file": "01-plain",
+   "select": " quick brown fox ",
+   "expect": "quick brown fox"
+  },
+  {
+   "id": "only-generated-text",
+   "file": "18-alerts",
+   "select": "Note",
+   "expect_none": true
+  },
+  {
+   "id": "alert-into-next-title",
+   "file": "18-alerts",
+   "select_from": "often.",
+   "select_to": "Warning",
+   "expect": "often.",
+   "snap": true,
+   "reverse": "often."
+  },
+  {
+   "id": "table-emoji-cell",
+   "file": "16-table",
+   "select": "👩‍💻",
+   "expect": "👩‍💻"
+  },
+  {
+   "id": "combining-mark-split",
+   "file": "28-escaping-and-marks",
+   "select": "cafe",
+   "expect": "café",
+   "snap": true,
+   "reverse": "café"
+  },
+  {
+   "id": "html-special-chars-in-code",
+   "file": "28-escaping-and-marks",
+   "select": "a < b && c > d",
+   "expect": "a < b && c > d"
+  },
+  {
+   "id": "html-special-chars-in-text",
+   "file": "28-escaping-and-marks",
+   "select": "3 < 4 > 2 & more \"quotes\"",
+   "expect": "3 < 4 > 2 & more \"quotes\""
+  },
+  {
+   "id": "mouse-double-click-word",
+   "file": "01-plain",
+   "gesture": "dblclick",
+   "select": "brown",
+   "expect": "brown"
+  },
+  {
+   "id": "mouse-double-click-georgian",
+   "file": "09-georgian",
+   "gesture": "dblclick",
+   "select": "ტექსტი",
+   "expect": "ტექსტი"
+  },
+  {
+   "id": "mouse-triple-click-paragraph",
+   "file": "22-cross-block",
+   "gesture": "triple",
+   "select": "second paragraph",
+   "expect": "The second paragraph starts here."
+  },
+  {
+   "id": "mouse-triple-click-list-item",
+   "file": "12-list-tight",
+   "gesture": "triple",
+   "select": "banana",
+   "expect": "banana *split"
+  },
+  {
+   "id": "mouse-triple-click-table-cell",
+   "file": "16-table",
+   "gesture": "triple",
+   "select": "a | b",
+   "expect": "a \\| b"
+  },
+  {
+   "id": "mouse-drag-across-blocks",
+   "file": "22-cross-block",
+   "gesture": "drag",
+   "select_from": "first",
+   "select_to": "second",
+   "expect": "first paragraph ends here.\n\nThe second"
+  },
+  {
+   "id": "mouse-drag-across-inlines",
+   "file": "21-cross-inline",
+   "gesture": "drag",
+   "select_from": "bold",
+   "select_to": "link",
+   "expect": "bold part** and `code part` and [link"
+  },
+  {
+   "id": "code-span-wraps-in-list",
+   "file": "29-code-span-wrap",
+   "select": "make_thing(first, second)",
+   "expect": "make_thing(first,\n  second)"
+  },
+  {
+   "id": "code-span-wraps-in-quote",
+   "file": "29-code-span-wrap",
+   "select": "alpha beta",
+   "expect": "alpha\n> beta"
+  },
+  {
+   "id": "into-footnote-list-backwards",
+   "file": "30-footnote-order",
+   "select_from": "last paragraph",
+   "select_to": "note body",
+   "expect": "The note body.\n\nA last paragraph here.",
+   "snap": true,
+   "reverse": "A last paragraph here. The note body.",
+   "note": "the footnote is defined above the last paragraph but rendered below it, so the range covers both ends"
+  },
+  {
+   "id": "reverse-markup-around",
+   "file": "02-emphasis",
+   "source": "**bold**",
+   "reverse": "bold"
+  },
+  {
+   "id": "reverse-half-entity",
+   "file": "06-entities",
+   "source": "amp",
+   "reverse": "&",
+   "snap": true
+  },
+  {
+   "id": "reverse-link-url-only",
+   "file": "04-links",
+   "source": "https://example.com/setup",
+   "reverse": "",
+   "note": "no rendered text comes from a link target"
+  },
+  {
+   "id": "reverse-code-indent",
+   "file": "26-code-blocks",
+   "source": "   cargo test",
+   "reverse": "cargo test"
+  },
+  {
+   "id": "reverse-two-blocks",
+   "file": "22-cross-block",
+   "source": "here.\n\nThe second",
+   "reverse": "here.The second"
+  },
+  {
+   "id": "reverse-escaped-pipe",
+   "file": "16-table",
+   "source": "\\|",
+   "source_nth": 1,
+   "reverse": "|"
+  }
+ ]
+}

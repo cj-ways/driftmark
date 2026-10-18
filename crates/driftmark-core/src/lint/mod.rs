@@ -349,6 +349,9 @@ impl<'s> Report<'s> {
     fn parse_error(&mut self, error: &ParseError) {
         let (line, fix) = match error {
             ParseError::NotUtf8 { line, .. } => (*line, "save the file as UTF-8"),
+            ParseError::TooLarge { .. } => {
+                (1, "split it into smaller documents that link to each other")
+            }
             ParseError::TooDeep { line, .. } => (
                 *line,
                 "nest block quotes, lists, alerts and footnotes less deeply",

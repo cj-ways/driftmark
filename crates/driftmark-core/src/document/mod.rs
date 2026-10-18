@@ -27,6 +27,15 @@ use serde::Serialize;
 /// entries long.
 pub const MAX_DEPTH: usize = 100;
 
+/// The largest file driftmark parses, in bytes: 2 MiB.
+///
+/// The parser's time and memory grow with the file. A hostile 2 MiB file
+/// made only of nested list markers takes about half a second and 280 MB to
+/// parse; at 4 MiB it takes twice that. The largest file in a real corpus of
+/// about 3,500 documents has 479,045 bytes, so the limit leaves more than
+/// four times that.
+pub const MAX_FILE_SIZE: usize = 2 * 1024 * 1024;
+
 /// The masthead keys every document knows. A `Key: Value` line under the
 /// title is metadata only when its key is one of these or one the rules file
 /// adds. Any other key is not metadata, so `> Short version: …` stays the
@@ -397,6 +406,13 @@ pub enum ParseError {
         /// The 1-based line that byte is on.
         line: usize,
     },
+    /// The file has more than [`MAX_FILE_SIZE`] bytes.
+    TooLarge {
+        /// The file's size in bytes.
+        size: usize,
+        /// The limit.
+        limit: usize,
+    },
     /// Block quotes, lists, alerts and footnotes nest deeper than
     /// [`MAX_DEPTH`].
     TooDeep {
@@ -426,6 +442,10 @@ impl fmt::Display for ParseError {
             ParseError::NotUtf8 { offset, line } => write!(
                 f,
                 "the file is not UTF-8 text: byte {offset}, on line {line}, is not valid UTF-8"
+            ),
+            ParseError::TooLarge { size, limit } => write!(
+                f,
+                "the file has {size} bytes, more than the {limit} bytes driftmark reads"
             ),
             ParseError::TooDeep { line, limit } => write!(
                 f,
@@ -461,11 +481,22 @@ impl Document {
     ///
     /// # Errors
     ///
-    /// A [`ParseError`] when the bytes are not UTF-8, when blocks nest deeper
-    /// than [`MAX_DEPTH`], or when the Markdown parser fails. A parser panic
-    /// is caught and returned as [`ParseError::Internal`], so one bad file
-    /// cannot stop a server.
+    /// A [`ParseError`] when the file is larger than [`MAX_FILE_SIZE`], when
+    /// the bytes are not UTF-8, when blocks nest deeper than [`MAX_DEPTH`], or
+    /// when the Markdown parser fails. A parser panic is caught and returned
+    /// as [`ParseError::Internal`], so one bad file cannot stop a server.
+    ///
+    /// The size, and the `>` markers that open each line, are checked before
+    /// the parser sees the file. The parser takes time that grows with the
+    /// square of the quote markers on one line: 50,000 of them took two
+    /// seconds.
     pub fn parse_with(source: Vec<u8>, keys: &MastheadKeys) -> Result<Document, ParseError> {
+        if source.len() > MAX_FILE_SIZE {
+            return Err(ParseError::TooLarge {
+                size: source.len(),
+                limit: MAX_FILE_SIZE,
+            });
+        }
         let source = String::from_utf8(source).map_err(|error| {
             let offset = error.utf8_error().valid_up_to();
             let valid = std::str::from_utf8(&error.as_bytes()[..offset]).unwrap_or("");
@@ -474,6 +505,7 @@ impl Document {
                 line: markdown::LineIndex::new(valid).line_of(offset),
             }
         })?;
+        check_quote_markers(&source)?;
         guarded(|| {
             let arena = Arena::new();
             let root = parse_document(&arena, &source, &markdown::options());
@@ -493,6 +525,43 @@ impl Document {
     pub fn source_of(&self, block: &Block) -> &str {
         self.source.get(block.range.clone()).unwrap_or("")
     }
+}
+
+/// Refuses a file with a line that starts with more than [`MAX_DEPTH`] `>`
+/// quote markers, before the parser sees it.
+///
+/// Such a line would nest deeper than the block list allows anyway. Spaces
+/// and tabs between the markers count as part of the run. A line inside a code
+/// block is counted too, because the check runs before parsing; a code line
+/// that starts with more than 100 `>` signs is not expected in real documents.
+fn check_quote_markers(source: &str) -> Result<(), ParseError> {
+    let bytes = source.as_bytes();
+    let mut line = 1;
+    let mut markers = 0;
+    let mut in_prefix = true;
+    for (at, &byte) in bytes.iter().enumerate() {
+        match byte {
+            // A line ends at a line feed, and at a carriage return that no
+            // line feed follows, as in the parser.
+            b'\n' | b'\r' => {
+                line += usize::from(byte == b'\n' || bytes.get(at + 1) != Some(&b'\n'));
+                markers = 0;
+                in_prefix = true;
+            }
+            b'>' if in_prefix => {
+                markers += 1;
+                if markers > MAX_DEPTH {
+                    return Err(ParseError::TooDeep {
+                        line,
+                        limit: MAX_DEPTH,
+                    });
+                }
+            }
+            b' ' | b'\t' => {}
+            _ => in_prefix = false,
+        }
+    }
+    Ok(())
 }
 
 /// Runs `work`, turning a panic into [`ParseError::Internal`].
@@ -596,6 +665,86 @@ mod tests {
             Document::parse(source.into_bytes()),
             Err(ParseError::TooDeep {
                 line: 1,
+                limit: MAX_DEPTH
+            })
+        );
+    }
+
+    #[test]
+    fn files_over_the_size_limit_are_refused_before_parsing() {
+        let mut largest = "word ".repeat(MAX_FILE_SIZE / 5).into_bytes();
+        largest.resize(MAX_FILE_SIZE, b'x');
+        assert!(Document::parse(largest.clone()).is_ok());
+        largest.push(b'x');
+        let error = Document::parse(largest).expect_err("too large");
+        assert_eq!(
+            error,
+            ParseError::TooLarge {
+                size: MAX_FILE_SIZE + 1,
+                limit: MAX_FILE_SIZE
+            }
+        );
+        assert_eq!(
+            error.to_string(),
+            "the file has 2097153 bytes, more than the 2097152 bytes driftmark reads"
+        );
+        // Too large comes first, even for bytes that are not UTF-8.
+        assert_eq!(
+            Document::parse(vec![0xff; MAX_FILE_SIZE + 1]),
+            Err(ParseError::TooLarge {
+                size: MAX_FILE_SIZE + 1,
+                limit: MAX_FILE_SIZE
+            })
+        );
+    }
+
+    #[test]
+    fn a_line_with_too_many_quote_markers_is_refused_before_parsing() {
+        let limit = ">".repeat(MAX_DEPTH);
+        assert!(Document::parse(format!("{limit} x\n").into_bytes()).is_ok());
+        let spaced = "> ".repeat(MAX_DEPTH + 1);
+        for (source, line) in [
+            (format!("{limit}> x"), 1),
+            (format!("a\nb\r\nc\rd\n\t{spaced}x\n"), 5),
+            (format!("a\r\n\r\n{limit}>"), 3),
+        ] {
+            assert_eq!(
+                check_quote_markers(&source),
+                Err(ParseError::TooDeep {
+                    line,
+                    limit: MAX_DEPTH
+                }),
+                "{source:?}"
+            );
+        }
+        // Markers after other text, or spread over lines, do not count.
+        let after_text = format!("a {limit}>\n");
+        assert_eq!(check_quote_markers(&after_text), Ok(()));
+        let split_lines = format!("{limit}\n>\r{limit}\r\n>");
+        assert_eq!(check_quote_markers(&split_lines), Ok(()));
+        assert_eq!(
+            Document::parse(format!("x\n{limit}>").into_bytes()),
+            Err(ParseError::TooDeep {
+                line: 2,
+                limit: MAX_DEPTH
+            })
+        );
+    }
+
+    #[test]
+    fn nesting_the_quote_check_cannot_see_is_still_refused() {
+        // List items nested over many lines hold no `>` sign, so only the
+        // block list sees how deep they go.
+        let nested = (0..=MAX_DEPTH + 1).fold(String::new(), |mut text, level| {
+            text.push_str(&"  ".repeat(level));
+            text.push_str("- item\n");
+            text
+        });
+        assert_eq!(check_quote_markers(&nested), Ok(()));
+        assert_eq!(
+            Document::parse(nested.into_bytes()),
+            Err(ParseError::TooDeep {
+                line: MAX_DEPTH + 1,
                 limit: MAX_DEPTH
             })
         );

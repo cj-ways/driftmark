@@ -1,0 +1,2 @@
+- [ ] write the plan
+- [x] check *the* result

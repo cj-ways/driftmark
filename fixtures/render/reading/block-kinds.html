@@ -1,0 +1,36 @@
+<h1 id="cache-rendered-pages" data-k="1">Cache rendered pages<a class="anchor" href="#cache-rendered-pages" aria-label="Link to this section"></a></h1>
+<blockquote>
+<p data-k="2">Short version: the server keeps each rendered page for one hour, so a second visit costs nothing.</p>
+</blockquote>
+<h2 id="decision" data-k="3">Decision<a class="anchor" href="#decision" aria-label="Link to this section"></a></h2>
+<p data-k="4">Keep each page for <strong>one hour</strong>, then drop it. Pages with <em>open notes</em>
+expire sooner, and <del>two hours</del> is too long.</p>
+<p data-k="5">Escapes *stay* as written, entities such as &amp; and 😀 show as
+characters, and a hard break ends this line<br>
+before the next one.</p>
+<ul>
+<li><span data-k="6">A tight list item.</span></li>
+<li><span data-k="7">Another with <code>inline code</code>.</span></li>
+</ul>
+<hr />
+<blockquote>
+<p data-k="9">A block quote.</p>
+<blockquote>
+<p data-k="10">A nested quote with <strong>bold</strong> words.</p>
+</blockquote>
+</blockquote>
+<div class="table" role="region" tabindex="0" aria-label="Table">
+<table>
+<thead>
+<tr data-k="11"><th>Page</th><th align="right">Time</th></tr>
+</thead>
+<tbody>
+<tr data-k="12"><td>Home</td><td align="right">10 min</td></tr>
+</tbody>
+</table>
+</div>
+<pre data-k="13"><code class="language-sh">cache build --release
+</code></pre>
+<pre data-k="14"><code>indented code
+</code></pre>
+<h2 id="setext-heading" data-k="15">Setext heading<a class="anchor" href="#setext-heading" aria-label="Link to this section"></a></h2>

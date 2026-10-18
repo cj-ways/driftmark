@@ -291,6 +291,17 @@ fn a_file_that_is_not_markdown_gets_one_parse_finding() {
 }
 
 #[test]
+fn a_file_too_large_to_parse_is_one_finding_on_line_1() {
+    let large = "a".repeat(crate::document::MAX_FILE_SIZE + 1);
+    assert_eq!(
+        messages(&lint("t.md", &large)),
+        [
+            "1:1 error parse: the file has 2097153 bytes, more than the 2097152 bytes driftmark reads; split it into smaller documents that link to each other"
+        ]
+    );
+}
+
+#[test]
 fn parser_failures_ask_for_a_bug_report() {
     let settings = super::LintSettings::default();
     let mut report = Report::new(&settings);

@@ -1,0 +1,14 @@
+<h1 id="diagrams" data-k="0">Diagrams<a class="anchor" href="#diagrams" aria-label="Link to this section"></a></h1>
+<p data-k="1">A diagram the program draws:</p>
+<figure class="diagram" data-k="2" data-diagram="mermaid"><svg viewBox="0 0 10 10" aria-label="diagram 2"></svg></figure>
+<p data-k="3">A diagram whose drawing fails:</p>
+<pre data-k="4" data-diagram="mermaid" data-undrawn data-error="could not draw &quot;fail&quot; &lt;here&gt; &amp; there"><code class="language-mermaid">graph TD
+  fail &quot;here&quot;
+</code></pre>
+<p data-k="5">A D2 diagram the program does not draw:</p>
+<pre data-k="6" data-diagram="d2" data-undrawn><code class="language-d2">a -&gt; b
+</code></pre>
+<p data-k="7">A diagram that is never closed:</p>
+<pre data-k="8" data-diagram="mermaid" data-undrawn><code class="language-mermaid">sequenceDiagram
+  A-&gt;&gt;B: hello
+</code></pre>

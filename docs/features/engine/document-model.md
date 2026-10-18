@@ -20,8 +20,9 @@ These cases give an error value, never a panic:
 
 | Error | When |
 |---|---|
+| `TooLarge { size, limit }` | The file has more than 2 MiB (`MAX_FILE_SIZE`). It is checked first, before the parser sees the file. `docs/features/engine/html.md` says why the limit is where it is. |
 | `NotUtf8 { offset, line }` | The bytes are not UTF-8. `offset` is the first bad byte; `line` is its 1-based line. |
-| `TooDeep { line, limit }` | A block would sit inside more than 100 block quotes, list items, alerts and footnotes (`MAX_DEPTH`). Real documents nest a handful deep. The limit keeps a hostile file from making every block carry thousands of containers. |
+| `TooDeep { line, limit }` | A block would sit inside more than 100 block quotes, list items, alerts and footnotes (`MAX_DEPTH`). Real documents nest a handful deep. The limit keeps a hostile file from making every block carry thousands of containers. A line that starts with more than 100 `>` quote markers is refused before the parser sees the file, because the parser's time grows with the square of them. |
 | `BadPosition { line, column }` | comrak reported a position outside the file or inside a character. That would be a comrak bug, not a fault of the file. The parse refuses it rather than return a range that does not slice. |
 | `Internal { message }` | comrak panicked. The panic is caught, so one bad file cannot stop a server. |
 
@@ -322,7 +323,7 @@ No range fails to slice, no two blocks overlap, and no character outside a block
 
 ## Not covered
 
-- Rendering HTML and the per-block position tables for notes come in M2. `Positions` is the start of that work.
+- Rendering HTML and the per-block position tables for notes are in `docs/features/engine/html.md`.
 - Comparing two documents comes in wave 2.
 - Blocks carry byte ranges, not line numbers. `LineIndex::line_of` gives the line of a byte.
 - Footnote numbers are not in the plain text, because renumbering would read as an edit.

@@ -102,7 +102,7 @@ Every rule has a folder in `fixtures/lint/<rule>/` with a `pass.md` that no rule
 
 ### `parse`
 
-The file must be UTF-8 text, and its block quotes, lists, alerts and footnotes must nest at most 100 levels deep. When it cannot be read, this is the file's only finding, because no other rule can run.
+The file must be UTF-8 text of at most 2 MiB, and its block quotes, lists, alerts and footnotes must nest at most 100 levels deep. When it cannot be read, this is the file's only finding, because no other rule can run.
 
 ```text
 fail.md:5:1: error parse: the file is not UTF-8 text: byte 150, on line 5, is not valid UTF-8; save the file as UTF-8

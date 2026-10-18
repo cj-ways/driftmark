@@ -1,0 +1,10 @@
+{
+  "name": "driftmark-browser-tests",
+  "private": true,
+  "type": "module",
+  "description": "Runs the notes anchoring cases in headless Chromium against driftmark's reading pages",
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}
