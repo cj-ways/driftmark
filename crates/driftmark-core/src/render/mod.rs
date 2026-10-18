@@ -16,6 +16,7 @@ mod html;
 mod pieces;
 mod reading;
 mod url;
+pub mod words;
 
 use serde::Serialize;
 

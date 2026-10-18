@@ -32,6 +32,22 @@ gix = { version = "=0.89.0", default-features = false, features = [
 # rule (decision 0008 chose merman). Pinned: each 0.x release may break the
 # API. Every diagram family is on, so any diagram GitHub draws is checked.
 merman-core = { version = "=0.9.0", default-features = false, features = ["all-diagrams"] }
+# Draws Mermaid on the server for the pages (decision 0008, item 5): every
+# diagram family, SVG with the ELK and Cytoscape layouts and math labels
+# (merman's defaults), plus `native-fonts`, so text is measured with the
+# Liberation Sans files the program ships instead of merman's width guess.
+merman = { version = "=0.9.0", default-features = false, features = [
+  "all-diagrams",
+  "complete-svg-elk",
+  "native-fonts",
+] }
+# Reads each drawing as XML so it can be written out again from an
+# allow-list before it goes into a page; already a dependency of merman.
+quick-xml = "0.42.0"
+# Unpacks the built-in mermaid.js, which is stored compressed, for the rare
+# browser that does not accept gzip; already a dependency of tower-http's
+# compression.
+flate2 = "1.1.10"
 # The HTTP server of `driftmark serve`. axum runs on tokio, which M3's MCP
 # connector (rmcp) needs too, and rmcp's HTTP transport is a tower service
 # that mounts in an axum router, so both share one program and one runtime.
@@ -66,7 +82,4 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 workspace = true
 
 [dev-dependencies]
-# Unzips a gzipped answer in the server tests; already a dependency of
-# tower-http's compression.
-flate2 = "1.1.10"
 serde_json = "1.0.154"

@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><script>alert(1)</script><script type="text/javascript"><![CDATA[alert(2)]]></script><g><text x="1" y="20">Kept text</text></g></svg>

@@ -128,6 +128,10 @@ struct TableState {
     header: bool,
     cell: usize,
     body_open: bool,
+    /// The header row's cell texts. Each body cell carries its column's in
+    /// `data-label`, so a phone can show a row as a card whose values each
+    /// say which column they are.
+    labels: Vec<String>,
 }
 
 struct State<'r> {
@@ -459,14 +463,16 @@ fn task_item(
 ) -> ChildRendering {
     if entering {
         new_line(context);
-        let (state, checked) = if done {
-            ("done", " checked")
+        // The box has no label of its own, so it carries its state as a
+        // name for screen readers.
+        let (state, checked, name) = if done {
+            ("done", " checked", "Done")
         } else {
-            ("open", "")
+            ("open", "", "Not done")
         };
         let _ = write!(
             context,
-            "<li class=\"task\" data-task=\"{state}\"><input type=\"checkbox\" disabled{checked}> "
+            "<li class=\"task\" data-task=\"{state}\"><input type=\"checkbox\" disabled{checked} aria-label=\"{name}\"> "
         );
     } else {
         leave_container(context, node);
@@ -740,6 +746,12 @@ fn code_block(context: &mut Writer<'_, '_, '_>, node: Node<'_>, code: &NodeCodeB
     write_block_attributes(context, block, diagram);
     if diagram.is_some() {
         put(context, " data-undrawn");
+    } else if let Some(language) = language {
+        // The page labels code with its language and styles program output
+        // (`text`, `console`, `output`, `log`) apart, without a script.
+        put(context, " data-language=\"");
+        put_escaped(context, language);
+        put(context, "\"");
     }
     if let Some(message) = error {
         put(context, " data-error=\"");
@@ -796,6 +808,12 @@ fn table_row(
         context.user.table.header = header;
         context.user.table.cell = 0;
         let block = context.user.block_at(node);
+        if header
+            && let Some(BlockKind::TableRow { cells, .. }) =
+                block.map(|block| &context.user.document.blocks[block].kind)
+        {
+            context.user.table.labels.clone_from(cells);
+        }
         open_element(context, "tr", block);
     } else {
         context.user.close_leaf();
@@ -827,7 +845,14 @@ fn table_cell(context: &mut Writer<'_, '_, '_>, entering: bool) -> ChildRenderin
             TableAlignment::Right => " align=\"right\"",
             TableAlignment::None => "",
         };
-        let _ = write!(context, "<{tag}{align}>");
+        let _ = write!(context, "<{tag}{align}");
+        let label = context.user.table.labels.get(context.user.table.cell);
+        if let Some(label) = label.filter(|_| !context.user.table.header).cloned() {
+            put(context, " data-label=\"");
+            put_escaped(context, &label);
+            put(context, "\"");
+        }
+        put(context, ">");
     } else {
         close_inline(context);
         let _ = write!(context, "</{tag}>");

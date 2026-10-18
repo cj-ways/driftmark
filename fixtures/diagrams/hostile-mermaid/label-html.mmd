@@ -1,0 +1,4 @@
+flowchart TD
+  A["<img src=x onerror=alert(1)>"] --> B["<script>alert(2)</script>"]
+  B --> C["<a href='javascript:alert(3)'>link</a>"]
+  C --> D["<iframe src='https://evil.example'></iframe>"]

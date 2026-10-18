@@ -91,12 +91,12 @@ The separator is `/-/` because branch names hold `/`, as in `feature/login`. The
 | `GET /changes/<range>/-/<path>` | One document's changes, HTML. |
 | `GET /api/changes/<range>/-/<path>` | One document's changes, JSON: a change list with that one document. |
 | `GET /events` | The working tree's changes, as server-sent events. |
-| `GET /static/<hash>/<name>` | The page script `page.js` and the style sheet `page.css`, built into the program. |
+| `GET /static/<hash>/<name>` | The files the pages load, built into the program: the page script, the style sheet, the diagram font, Prism and mermaid.js (see "Static files"). |
 | `GET /api/status` | The cache's counts and the watcher's state, JSON. |
 
 Every route also answers `HEAD`. A route that exists answers another method with `405`, and any other address answers `404`.
 
-The pages are plain placeholders until the `render` and `pages` lanes land: a document shows its source in `<pre>`, a change list shows the summary `driftmark diff` prints with a link per document, and one document's changes show as a short text listing. The routes and their JSON are the contract those pages will use.
+The pages follow the review-first design of decision 0010. `docs/features/pages.md` says what a reader sees on each; this document covers the routes, the JSON and how the server makes them.
 
 ### The home page
 
@@ -109,7 +109,7 @@ The home page is an inbox of branches (decision 0010):
 5. **Newest first**, by the committer date of the branch's tip.
 6. **The working tree** comes first, as one line: this checkout's `auto` range, with its counts. The watcher counts it in the background (see "Live reload"), so the page never waits for the working tree to be read. It shows the last count and when it was made, and says when a new count is running. Until the first count ends, it says it is counting.
 
-Each branch shows its highest level, its number of changes and documents, and when its tip was made. The counts are those of `driftmark diff --json=summary`.
+Each branch shows its highest level, its number of changes and documents, when its tip was made, and the document to start with: the first of its change list, which sorts the highest level first. The counts are those of `driftmark diff --json=summary`. A branch's count keeps the paths of its changed documents too, so a reading page can say which open branches change its document.
 
 The JSON, for a made-up repository with one branch, `feature`, that edits a decision record and adds a document, while `README.md` has an edit not committed yet:
 
@@ -168,7 +168,9 @@ The JSON, for a made-up repository with one branch, `feature`, that edits a deci
 
 ### A document
 
-The page shows the document's source and links to its JSON. A document from the working tree is read from disk; a document at a commit, from git.
+The page shows the document as HTML from `driftmark_core::render::reading` (`docs/features/engine/html.md`), with its diagrams drawn, and links to its JSON. A document from the working tree is read from disk; a document at a commit, from git.
+
+The page also lists the open branches that change the document: the home page's branches whose changed paths hold it, newest first, up to six, each with the document's changes from where the branch left the default branch. Their headings mark the page's sections. A branch whose tip is the commit the page shows is left out. When the branches cannot be read, the page shows the document without them.
 
 ```json
 {
@@ -195,7 +197,7 @@ The `…` cuts the source here; the answer holds the whole text.
 
 ### A range's change list
 
-The page shows the summary `driftmark diff` prints, then one link per document to its changes. The JSON is exactly `driftmark diff --json=summary` for the same range (`docs/features/commands/diff.md`), with one more field, `skipped`: the files that could not be compared, each with its `path` and the `reason`, in the words of `driftmark diff`.
+The page shows the range's change cards, document by document in the order of the change list, up to 200 KB of change HTML, 300 changes and 40 documents; a document that would pass a limit is skipped for the next, among the first 80 tried. The others are listed with a link to their own pages, at most 300 of them; the JSON lists every one. Each document's change HTML comes from `driftmark_core::render::changes`, with ids that start with `C` and a hash of its path, so the same HTML serves the range's page and the document's own page. The JSON is exactly `driftmark diff --json=summary` for the same range (`docs/features/commands/diff.md`), with one more field, `skipped`: the files that could not be compared, each with its `path` and the `reason`, in the words of `driftmark diff`.
 
 ```json
 {
@@ -322,7 +324,21 @@ A new Markdown file in a folder that held none before is found by the next listi
 
 ## Static files
 
-`page.js` and `page.css` are built into the program. Each is served at `/static/<hash>/<name>`, where the hash is 16 hex digits of a hash of its bytes, so a new build gives a new address. At the right hash, the answer says `Cache-Control: public, max-age=31536000, immutable`: the browser keeps it for a year. At an old hash, the same file comes back with `no-cache`, so a page loaded before an upgrade still works.
+These files are built into the program:
+
+| File | What it is | Loaded by |
+|---|---|---|
+| `page.css` | The look of every page. | every page |
+| `page.js` | The theme button, the search box, live updates, tables, code colours and the browser's diagrams. | every page |
+| `liberation-sans-regular.woff2` | The diagram font, Liberation Sans 2.1.5, unmodified (147,036 bytes). | pages with a drawn diagram |
+| `prism-core.js`, `prism-<language>.js` | Prism 1.30.0 and 59 of its languages. | pages with code, for their languages |
+| `mermaid.js` | mermaid.js 12.1.0, for diagrams the server could not draw. | pages with such a diagram |
+
+Each is served at `/static/<hash>/<name>`, where the hash is 16 hex digits of a hash of its bytes, so a new build gives a new address. At the right hash, the answer says `Cache-Control: public, max-age=31536000, immutable`: the browser keeps it for a year. At an old hash, the same file comes back with `no-cache`, so a page loaded before an upgrade still works.
+
+- The style sheet and the script name the other files by their hashed addresses. The server writes those addresses into them when it starts, so the files carry no placeholder when they are served.
+- `mermaid.js` is stored compressed (1.6 MB instead of 5.5 MB). It goes as it is, with `Content-Encoding: gzip` and `Vary: Accept-Encoding`, to a browser that accepts gzip, which every browser does. Any other client gets it unpacked.
+- Their licences sit beside them in `crates/driftmark/assets/`: OFL 1.1 for the font, MIT for Prism and mermaid.js. mermaid.js bundles other projects (d3 under ISC among them); the release's notices file (M6) lists them.
 
 ## Compression
 
@@ -336,7 +352,7 @@ The server keeps what it read between requests, keyed by what fixes its content:
 |---|---|---|
 | `rules` | The rules file's blob id. | The parsed rules. |
 | `documents` | The blob id, and the version of the rules file. | The parsed document, or why it cannot be parsed. |
-| `pages` | The blob id, the rules version and the path; or the two blob ids, the rules version and the path. | The finished HTML of a document, or of one document's changes, without the page around it. |
+| `pages` | The blob id, the rules version and the path; or the two blob ids, the rules version and the path. | A document's HTML and its headings; or one document's changes, their HTML and its title. Without the page around them, which changes with the branches. |
 | `ranges` | The two commit ids. | Each document's counts. |
 | `branches` | The default branch's tip and the branch's tip. | The branch's counts. |
 
@@ -344,6 +360,7 @@ The rules version is part of a document's key because the rules file's masthead 
 
 - **Nothing goes stale.** A branch name never keys an entry, because a branch moves. Each request resolves the name, then looks up what that commit holds. A branch with a new commit gets new entries; the old ones stay correct for the old commit.
 - **The working tree is never cached.** Its bytes can change while its name stays. A document at `worktree`, the `auto` range and its documents are read and compared on every request.
+- **Drawings have a cache of their own**, 32 MB, keyed by a hash of the diagram's language and text (`docs/features/pages.md`, "Diagrams"). A document read again from the working tree, or another document with the same diagram, draws nothing again.
 - **The cap is 128 MB**, counted as the estimated heap memory of each entry: a document's text, each block's plain text, spans and details, and the heading paths and containers that blocks share, counted once. When the entries add up to more, the least recently used go first. A value larger than the whole cap is used once and not kept.
 - **Why 128 MB.** The speed spike measured about 5 MB of block lists for the whole private corpus, and 152 to 186 MB with the text and the rendered HTML. Parsed documents are larger than block lists, so the whole corpus does not fit. A day's reading does, and a dropped document costs one parse, a few milliseconds, when it is opened again.
 - **One load per key.** Two requests that need the same missing entry share one load: the second waits for the first. An error is not kept, so the next request tries again.
@@ -376,7 +393,7 @@ A request without `Origin`, such as one from a command-line tool, passes; it sti
 ## Safety
 
 - **Every path comes from git.** No route opens a file by a path taken from the address. The path is decoded to bytes and must be a path git could store: no empty, `.` or `..` part, no NUL byte, no `/` at either end. It is then looked up in git: in the commit's tree, or, for the working tree, among the files git tracks at `HEAD` or lists as not ignored. The git reader reads a working-tree file only through real folders, so a symbolic link cannot lead outside the repository.
-- **Content Security Policy** on every answer, errors included: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. A page runs only the program's own script and style sheet, loads images and fonts only from the server, and cannot be framed. Inline scripts, inline styles and images from the web are blocked.
+- **Content Security Policy** on every answer, errors included: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. A page runs only the program's own script and style sheet, loads images and fonts only from the server, and cannot be framed. Inline scripts, inline styles and images from the web are blocked. The pages need nothing more: a drawing's own style block is removed and the style sheet colours it; a bar's widths are SVG attributes; and mermaid.js, in the browser, gets its styles through a style sheet the page script builds and through the style object, which the policy allows.
 - **Other headers** on every answer: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`.
 - **No CORS headers**, ever, so a page on another site cannot read an answer.
 - **Text from the repository is escaped** in every page: file names, branch names, titles and document text.
@@ -426,8 +443,7 @@ What stays above the cache is the working memory of the counts on many threads: 
 
 ## Not covered yet
 
-- **The look.** Pages are placeholders until the `render` lane's HTML and the `pages` lane's templates land (decisions 0008 and 0010).
-- **Images and other files.** A link to an image or another non-Markdown file in a document answers `404` for now.
+- **Images and other files.** The server serves Markdown documents only. A reading page shows a link to any other file as its text, and an image as its alt text.
 - **A size limit before parsing.** A file with very deep nesting is refused by the parser after it reads it; the `render` lane adds a check before the parser sees the file.
 - **Search** (M2, wave 2) and **notes** (M3).
 - **HTTPS.** The server speaks plain HTTP; across machines, use a private network such as Tailscale.

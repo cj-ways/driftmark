@@ -13,6 +13,8 @@ use crate::diff::{
 };
 use crate::document::{BlockKind, DiagramLanguage, TaskState};
 
+use super::words;
+
 /// Renders one document's changes as an `<ol class="changes">`.
 ///
 /// `id_prefix` starts every `id` the list holds, so a page can show many
@@ -71,6 +73,7 @@ fn document_item(
         whole.bytes,
         whole.lines
     );
+    head(out, change);
     for (class, text) in [("title", &whole.title), ("summary", &whole.summary)] {
         if let Some(text) = text {
             let _ = write!(out, "<p class=\"{class}\">");
@@ -267,6 +270,7 @@ fn change_item(out: &mut String, block: &BlockChange<'_>, id_prefix: &str) {
         }
     }
     out.push_str(">\n");
+    head(out, change);
     if let Some(found) = shown
         && !found.heading_path.is_empty()
     {
@@ -287,6 +291,33 @@ fn change_item(out: &mut String, block: &BlockChange<'_>, id_prefix: &str) {
     }
     content(out, change, old.block.as_ref(), new.block.as_ref());
     out.push_str("</li>\n");
+}
+
+/// The line on top of a change: its level, what happened, how it is drawn
+/// and why it ranks there, in words, then the places for "Seen" and "Add a
+/// note". Those two arrive with notes in M3 (decision 0004), so they are
+/// inactive buttons until then.
+fn head(out: &mut String, change: &Change) {
+    let _ = write!(
+        out,
+        "<div class=\"head\" data-gen><span class=\"level\" data-level=\"{}\">{}</span> <span class=\"kind\">{}</span>",
+        level_name(change.level),
+        words::level(change.level),
+        words::kind(change)
+    );
+    if let Some(edit) = &change.edit {
+        let view = if edit.fallback {
+            "Both versions whole"
+        } else {
+            words::view(edit.view)
+        };
+        let _ = write!(out, " <span class=\"view\">{view}</span>");
+    }
+    let _ = writeln!(
+        out,
+        " <span class=\"why\">{}</span> <span class=\"acts\"><button type=\"button\" class=\"seen\" disabled title=\"Arrives with notes\">Seen</button> <button type=\"button\" class=\"note\" disabled title=\"Arrives with notes\">Add a note</button></span></div>",
+        words::signals(change)
+    );
 }
 
 fn line_attribute(out: &mut String, name: &str, side: &Side) {

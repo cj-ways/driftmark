@@ -70,7 +70,8 @@ fn run(folder: &Path) -> DocumentChanges {
 
 /// The elements and attributes change HTML may hold.
 const ELEMENTS: &[&str] = &[
-    "a", "code", "del", "details", "div", "ins", "li", "ol", "p", "pre", "summary",
+    "a", "button", "code", "del", "details", "div", "ins", "li", "ol", "p", "pre", "span",
+    "summary",
 ];
 const ATTRIBUTES: &[&str] = &[
     "class",
@@ -104,6 +105,8 @@ const ATTRIBUTES: &[&str] = &[
     "data-view",
     "href",
     "id",
+    "title",
+    "type",
 ];
 
 /// Checks that every tag is one change HTML writes, so no text from a

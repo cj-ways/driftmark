@@ -151,6 +151,32 @@ pub(crate) struct BranchCount {
     pub skipped: usize,
     /// The counts over its documents.
     pub totals: Summary,
+    /// The document to read first: the first of the branch's change list,
+    /// which sorts the highest level first.
+    pub start: Option<Start>,
+    /// The paths of the compared documents, sorted, so a reading page can
+    /// tell which branches change its document.
+    pub paths: Vec<String>,
+}
+
+/// The document a branch's review starts with.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Start {
+    /// Its path.
+    pub path: String,
+    /// Its counts.
+    pub summary: Summary,
+}
+
+/// An open branch that changes one document, with that document's changes.
+pub(crate) struct WaitingOn {
+    /// The branch.
+    pub branch: OpenBranch,
+    /// The default branch's name, which the branch is compared with.
+    pub default: String,
+    /// The document's changes on the branch, from where it left the default
+    /// branch.
+    pub changes: DocumentChanges,
 }
 
 /// How a branch's comparison with the default branch went.
@@ -556,8 +582,9 @@ impl Repo {
                     let mine = mine.iter().map(|&at| outcomes[at].clone()).collect();
                     let count = Arc::new(branch_count(base, notes, mine));
                     let key = Key::Branch(default_tip.clone(), branch.tip.clone());
+                    let bytes = branch_bytes(&count);
                     self.cache
-                        .put(&key, BranchState::Counted(Arc::clone(&count)), 512);
+                        .put(&key, BranchState::Counted(Arc::clone(&count)), bytes);
                     BranchState::Counted(count)
                 }
             };
@@ -604,6 +631,72 @@ impl Repo {
             changes,
             rules,
         })
+    }
+
+    /// The open branches whose changes from the default branch touch the
+    /// document at `path`, newest first, at most `limit`, each with the
+    /// document's changes. A branch whose tip is `shown`, the commit the
+    /// reader is looking at, is left out.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot be read.
+    pub(crate) fn waiting(
+        &self,
+        path: &RepoPath,
+        shown: Option<&ObjectId>,
+        limit: usize,
+    ) -> Result<Vec<WaitingOn>, Problem> {
+        let home = self.home()?;
+        let Some(default) = &home.default else {
+            return Ok(Vec::new());
+        };
+        let text = path.to_lossy();
+        let mut found = Vec::new();
+        for (branch, count) in &home.changed {
+            if found.len() == limit {
+                break;
+            }
+            if Some(&branch.tip) == shown
+                || count
+                    .paths
+                    .binary_search_by(|have| have.as_str().cmp(&text))
+                    .is_err()
+            {
+                continue;
+            }
+            let range = ResolvedRange {
+                base: Some(count.base.clone()),
+                head: Snapshot::Commit(branch.tip.clone()),
+                notes: Vec::new(),
+            };
+            let located = self.locate(&range, path)?;
+            let changes = self.document_changes(&range, located)?;
+            if let Some(changes) = changes.list.documents.into_iter().next() {
+                found.push(WaitingOn {
+                    branch: branch.clone(),
+                    default: default.name.clone(),
+                    changes,
+                });
+            }
+        }
+        Ok(found)
+    }
+
+    /// The title of a located document, from its newer version, or from its
+    /// older one when it was deleted. Both are parsed already when its
+    /// changes were compared, so this reads the cache.
+    pub(crate) fn title_of(&self, located: &Located) -> Option<String> {
+        let parsed = if located.worktree && located.change.new_blob().is_some() {
+            compare::worktree_document(&self.git, located.change.path(), &located.rules).ok()?
+        } else {
+            let blob = located
+                .change
+                .new_blob()
+                .or_else(|| located.change.old_blob())?;
+            compare::document(&self.git, &self.cache, blob, &located.rules).ok()?
+        };
+        parsed.as_ref().as_ref().ok()?.meta.title.clone()
     }
 
     /// The working tree's Markdown files and the `auto` range, counted. The
@@ -663,13 +756,38 @@ fn split(outcomes: Vec<Outcome>) -> (Vec<DocumentChanges>, Vec<Skipped>) {
 fn branch_count(base: ObjectId, notes: Vec<String>, outcomes: Vec<Outcome>) -> BranchCount {
     let (documents, skipped) = split(outcomes);
     let list = ChangeList::new(None, documents);
+    let start = list
+        .documents
+        .first()
+        .filter(|document| document.summary.changes > 0)
+        .map(|document| Start {
+            path: document.path.clone(),
+            summary: document.summary,
+        });
+    let mut paths: Vec<String> = list
+        .documents
+        .iter()
+        .map(|document| document.path.clone())
+        .collect();
+    paths.sort_unstable();
     BranchCount {
         base,
         notes,
         documents: list.documents.len(),
         skipped: skipped.len(),
         totals: list.totals,
+        start,
+        paths,
     }
+}
+
+/// The memory a branch's count holds, estimated.
+fn branch_bytes(count: &BranchCount) -> usize {
+    512 + count
+        .paths
+        .iter()
+        .map(|path| size_of::<String>() + path.capacity() * 2)
+        .sum::<usize>()
 }
 
 /// The memory a counted range holds, estimated.

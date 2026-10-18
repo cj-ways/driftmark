@@ -13,13 +13,14 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Path, Request, State};
-use axum::http::{StatusCode, Uri, header};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use driftmark_core::diff::{ChangeList, Summary, SummaryList};
+use driftmark_core::diff::{ChangeList, DocumentChanges, Summary, SummaryList};
 use driftmark_core::git::{ObjectId, RepoPath, ResolvedRange, Snapshot};
+use driftmark_core::render::{LinkKind, LinkResolver, Resolved, Section, Setup};
 use serde::Serialize;
 use tokio::sync::{broadcast, watch};
 use tower_http::compression::CompressionLayer;
@@ -29,9 +30,10 @@ use super::assets::Assets;
 use super::cache::{Key, Sized, Stats};
 use super::compare::Skipped;
 use super::guard::{self, Access, Verdict};
-use super::page::{self, Live, WorktreeLine};
-use super::repo::{Problem, Repo};
+use super::page::{self, Frame, Live, Tab, WorktreeLine};
+use super::repo::{DocumentAt, Located, Problem, Repo};
 use super::watch::{Message, Watch};
+use crate::diagram::Drawer;
 
 /// The version of the server's own JSON: the home page, a document and the
 /// status. The change lists keep the change list's `schema_version`.
@@ -49,8 +51,10 @@ pub(crate) struct App {
     pub watch: Option<Arc<Watch>>,
     /// Who may ask.
     pub access: Access,
-    /// The page script and style sheet.
+    /// The page script, the style sheet and the other built-in files.
     pub assets: Assets,
+    /// Who draws diagrams on reading pages.
+    pub drawer: Arc<Drawer>,
     /// Where the watcher announces changes.
     pub events: broadcast::Sender<Message>,
     /// Turns `true` when the server stops, which ends the event streams.
@@ -105,19 +109,12 @@ async fn access_guard(State(app): Shared, request: Request, next: Next) -> Respo
             .into_response(),
         Verdict::NeedToken { wrong } => html(
             StatusCode::UNAUTHORIZED,
-            page::page(
-                &app.assets,
-                "Token needed",
-                Live::No,
-                &page::token_needed(wrong),
-            ),
+            page::bare("Token needed", &page::token_needed(wrong)),
         ),
         Verdict::OtherHost => html(
             StatusCode::FORBIDDEN,
-            page::page(
-                &app.assets,
+            page::bare(
                 "Not this host",
-                Live::No,
                 &page::problem(
                     false,
                     "This server listens on this machine only and answers only to requests for localhost. Open it as http://localhost or http://127.0.0.1, or start it with --addr and a token.",
@@ -210,8 +207,7 @@ fn problem_page(app: &App, problem: &Problem) -> Response {
         status_of(problem),
         page::page(
             &app.assets,
-            title,
-            Live::No,
+            &Frame::plain(title, app.watch.is_some()),
             &page::problem(problem.missing, &problem.message),
         ),
     )
@@ -275,11 +271,15 @@ async fn home_page(State(app): Shared) -> Response {
         Ok(home) => {
             let latest = app.watch.as_ref().and_then(|watch| watch.latest());
             let line = worktree_line(&app, latest.as_deref());
-            let body = page::home(&home, &line);
-            html(
-                StatusCode::OK,
-                page::page(&app.assets, "Branches", Live::Home, &body),
-            )
+            let body = page::home(&home, &line, page::now());
+            let frame = Frame {
+                title: "Inbox",
+                live: Live::Home,
+                tab: Tab::Inbox,
+                worktree: app.watch.is_some(),
+                revision: None,
+            };
+            html(StatusCode::OK, page::page(&app.assets, &frame, &body))
         }
         Err(problem) => problem_page(&app, &problem),
     }
@@ -483,6 +483,89 @@ fn document_address(raw: &str) -> Result<(Revision, RepoPath), Problem> {
     Ok((address::revision(target)?, address::document_path(path)?))
 }
 
+/// How many open branches a reading page lists as changing its document.
+const WAITING_LIMIT: usize = 6;
+
+/// The cached part of a reading page: the document's HTML and its headings.
+pub(crate) struct ReadingPart {
+    /// The document as HTML, or why it cannot be shown.
+    html: String,
+    /// The headings, for "on this page".
+    outline: Vec<Section>,
+    /// Whether the document could be read.
+    readable: bool,
+}
+
+/// Where a document's links lead on its reading page.
+///
+/// A relative link to another Markdown file stays as written: the page's
+/// address ends in the document's path, so the browser finds the other
+/// document at the same revision. A link from the repository root, such as
+/// `/docs/a.md`, becomes relative to the document's folder, so the cached
+/// page serves every revision. The server shows only Markdown documents,
+/// so a link to any other file, and every image, shows as text.
+struct Links {
+    /// `../` once per folder the document sits in.
+    up: String,
+}
+
+impl Links {
+    fn for_path(path: &RepoPath) -> Links {
+        let folders = path.to_lossy().matches('/').count();
+        Links {
+            up: "../".repeat(folders),
+        }
+    }
+}
+
+impl LinkResolver for Links {
+    fn resolve(&self, address: &str, kind: LinkKind) -> Resolved {
+        if kind == LinkKind::Image {
+            return Resolved::Text;
+        }
+        let file = address.split(['#', '?']).next().unwrap_or_default();
+        let markdown = std::path::Path::new(file)
+            .extension()
+            .is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+            });
+        if !markdown {
+            return Resolved::Text;
+        }
+        match address.strip_prefix('/') {
+            Some(from_root) => Resolved::Url(format!("{}{from_root}", self.up)),
+            None => Resolved::Url(address.to_owned()),
+        }
+    }
+}
+
+fn reading_part(app: &App, document: &DocumentAt, path: &RepoPath) -> ReadingPart {
+    match document.parsed.as_ref() {
+        Ok(parsed) => {
+            let links = Links::for_path(path);
+            let setup = Setup {
+                links: &links,
+                diagrams: app.drawer.as_ref(),
+                allowed_html: &document.rules.rules.lint().allowed_html,
+            };
+            let reading = driftmark_core::render::reading(parsed, &setup);
+            ReadingPart {
+                html: reading.html,
+                outline: reading.outline,
+                readable: true,
+            }
+        }
+        Err(error) => ReadingPart {
+            html: format!(
+                "<p class=\"problem\">This document cannot be shown: {}.</p>\n",
+                page::escape(&error.to_string())
+            ),
+            outline: Vec::new(),
+            readable: false,
+        },
+    }
+}
+
 async fn document_page(State(app): Shared, uri: Uri) -> Response {
     let (revision, path) = match document_address(after(&uri, "/doc/")) {
         Ok(found) => found,
@@ -492,38 +575,76 @@ async fn document_page(State(app): Shared, uri: Uri) -> Response {
     let (asked, wanted) = (revision.clone(), path.clone());
     let made = blocking(move || {
         let document = work.repo.document_at(&asked, &wanted)?;
-        let body = match &document.blob {
+        let make = || {
+            let part = reading_part(&work, &document, &wanted);
+            let bytes = part.html.capacity()
+                + part
+                    .outline
+                    .iter()
+                    .map(|section| 64 + section.id.capacity() + section.text.capacity())
+                    .sum::<usize>();
+            Ok::<_, Problem>(Sized { value: part, bytes })
+        };
+        let part = match &document.blob {
             Some(blob) => {
                 let key = Key::Reading(blob.clone(), document.rules.id.clone(), wanted.clone());
-                work.repo.cache.get_or_load(&key, || {
-                    let html = page::document_body(&document.parsed);
-                    let bytes = html.capacity();
-                    Ok::<_, Problem>(Sized { value: html, bytes })
-                })?
+                work.repo.cache.get_or_load(&key, make)?
             }
-            None => Arc::new(page::document_body(&document.parsed)),
+            None => Arc::new(make()?.value),
         };
-        Ok((document, body))
+        // A page shows its document even when the branches cannot be read.
+        let waiting = work
+            .repo
+            .waiting(&wanted, document.commit.as_ref(), WAITING_LIMIT)
+            .unwrap_or_default();
+        Ok((document, part, waiting))
     })
     .await;
     match made {
-        Ok((document, body)) => {
-            let title = match document.parsed.as_ref() {
-                Ok(parsed) => parsed.meta.title.clone(),
-                Err(_) => None,
-            }
-            .unwrap_or_else(|| path.to_lossy().into_owned());
+        Ok((document, part, waiting)) => {
+            let parsed = document.parsed.as_ref().as_ref().ok();
+            let title = parsed
+                .and_then(|parsed| parsed.meta.title.clone())
+                .unwrap_or_else(|| path.to_lossy().into_owned());
+            let classification =
+                parsed.map(|parsed| document.rules.rules.classify(&path.to_lossy(), parsed));
             let commit = document.commit.as_ref().map(ObjectId::as_hex);
             let live = if commit.is_some() {
                 Live::No
             } else {
                 Live::Worktree
             };
-            let content = page::document(&title, revision.label(), commit, &path, &body);
-            html(
-                StatusCode::OK,
-                page::page(&app.assets, &title, live, &content),
-            )
+            let waiting: Vec<page::Waiting> = waiting
+                .into_iter()
+                .map(|on| page::Waiting {
+                    range: format!("{}...{}", on.default, on.branch.name),
+                    name: on.branch.name,
+                    at: on.branch.committed_at,
+                    changes: on.changes,
+                })
+                .collect();
+            let content = page::reading(
+                &page::Reading {
+                    path: &path,
+                    revision: revision.label(),
+                    commit,
+                    classification: classification.as_ref(),
+                    fields: parsed.map_or(&[], |parsed| parsed.meta.fields.as_slice()),
+                    outline: &part.outline,
+                    body: &part.html,
+                    readable: part.readable,
+                    waiting: &waiting,
+                },
+                page::now(),
+            );
+            let frame = Frame {
+                title: &title,
+                live,
+                tab: Tab::None,
+                worktree: app.watch.is_some(),
+                revision: Some(revision.label()),
+            };
+            html(StatusCode::OK, page::page(&app.assets, &frame, &content))
         }
         Err(problem) => problem_page(&app, &problem),
     }
@@ -604,6 +725,106 @@ fn with_range(list: &ChangeList, range: &ResolvedRange) -> ChangeList {
     list
 }
 
+/// How much a range's page shows in full. Documents are taken in the
+/// list's order, highest level first; one that would pass a limit is
+/// skipped and listed with a link to its own page, and the next is tried.
+/// A branch's review fits, and a month of a large repository still opens at
+/// once, under the 100 KB first-visit limit (`docs/features/pages.md`).
+struct Shown;
+
+impl Shown {
+    /// The change HTML of the documents shown, in bytes before compression.
+    /// Cards compress about five to one, so this is about 40 KB on the
+    /// network.
+    const BYTES: usize = 200 * 1024;
+    /// The changes shown, which the rail lists one by one.
+    const CHANGES: usize = 300;
+    /// The documents shown: each adds a section and a header.
+    const DOCUMENTS: usize = 40;
+    /// The documents tried, so a range of thousands never compares them
+    /// all for one page.
+    const TRIED: usize = 80;
+}
+
+/// The cached part of one document's changes page: the change HTML, the
+/// changes for the rail, and the title.
+pub(crate) struct ChangesPart {
+    /// The change list with this one document, or none when it was skipped.
+    list: ChangeList,
+    /// Why the document could not be compared, when it could not.
+    skipped: Vec<Skipped>,
+    /// The document's change HTML.
+    html: String,
+    /// The document's title.
+    title: Option<String>,
+}
+
+impl ChangesPart {
+    fn document(&self) -> Option<&DocumentChanges> {
+        self.list.documents.first()
+    }
+}
+
+/// One located document's changes, from the cache when its two blobs were
+/// compared before under the same rules.
+fn changes_part(
+    repo: &Repo,
+    range: &ResolvedRange,
+    located: &Located,
+) -> Result<Arc<ChangesPart>, Problem> {
+    let key = located.page_key();
+    let make = || {
+        let title = repo.title_of(located);
+        let changes = repo.document_changes(range, located.clone())?;
+        let html = changes
+            .list
+            .documents
+            .first()
+            .map_or_else(String::new, |document| {
+                driftmark_core::render::changes(document, &page::change_prefix(&document.path))
+            });
+        let bytes = html.capacity() * 3;
+        Ok::<_, Problem>(Sized {
+            value: ChangesPart {
+                list: changes.list,
+                skipped: changes.skipped,
+                html,
+                title,
+            },
+            bytes,
+        })
+    };
+    match key {
+        Some(key) => repo.cache.get_or_load(&key, make),
+        None => Ok(Arc::new(make()?.value)),
+    }
+}
+
+/// What a range's page is called: the branch of `<default>...<branch>`,
+/// "This checkout" for `auto`, otherwise the range.
+fn range_heading(label: &str) -> String {
+    if label == "auto" {
+        return "This checkout".to_owned();
+    }
+    match label.split_once("...") {
+        Some((_, head)) if !head.is_empty() => head.to_owned(),
+        _ => label.to_owned(),
+    }
+}
+
+/// The revisions a change page reads documents at: the newer side, and the
+/// older side for deleted documents.
+fn sides(range: &ResolvedRange) -> (String, Option<String>) {
+    let head = match &range.head {
+        Snapshot::Commit(commit) => commit.as_hex().to_owned(),
+        Snapshot::Worktree => address::WORKTREE.to_owned(),
+    };
+    (
+        head,
+        range.base.as_ref().map(|base| base.as_hex().to_owned()),
+    )
+}
+
 async fn changes_page(State(app): Shared, uri: Uri) -> Response {
     let (range, path) = match changes_address(after(&uri, "/changes/")) {
         Ok(found) => found,
@@ -611,56 +832,89 @@ async fn changes_page(State(app): Shared, uri: Uri) -> Response {
     };
     let work = Arc::clone(&app);
     let label = range.label.clone();
-    match path {
-        None => {
-            let made = blocking(move || {
-                let resolved = work.repo.resolve(&range)?;
+    let single = path.clone();
+    let made = blocking(move || {
+        let resolved = work.repo.resolve(&range)?;
+        match &path {
+            None => {
                 let count = work.repo.range_count(&resolved)?;
-                Ok((resolved, count))
-            })
-            .await;
-            match made {
-                Ok((resolved, count)) => {
-                    let list = with_range(&count.list, &resolved);
-                    let body = page::range(&label, &list, &count.skipped);
-                    let live = live_for(&resolved);
-                    html(StatusCode::OK, page::page(&app.assets, &label, live, &body))
+                let list = with_range(&count.list, &resolved);
+                let mut parts = Vec::new();
+                let (mut bytes, mut changes) = (0, 0);
+                for document in list.documents.iter().take(Shown::TRIED) {
+                    if parts.len() == Shown::DOCUMENTS {
+                        break;
+                    }
+                    let Some(path) = RepoPath::new(document.path.as_bytes()) else {
+                        continue;
+                    };
+                    if changes + document.summary.changes > Shown::CHANGES {
+                        continue;
+                    }
+                    let located = work.repo.locate(&resolved, &path)?;
+                    let part = changes_part(&work.repo, &resolved, &located)?;
+                    if bytes + part.html.len() > Shown::BYTES {
+                        continue;
+                    }
+                    bytes += part.html.len();
+                    changes += document.summary.changes;
+                    parts.push(part);
                 }
-                Err(problem) => problem_page(&app, &problem),
+                Ok((resolved, list, count.skipped.clone(), parts))
+            }
+            Some(path) => {
+                let located = work.repo.locate(&resolved, path)?;
+                let part = changes_part(&work.repo, &resolved, &located)?;
+                let mut list = part.list.clone();
+                list.range = Some(driftmark_core::diff::RangeInfo::of(&resolved));
+                let skipped = part.skipped.clone();
+                Ok((resolved, list, skipped, vec![part]))
             }
         }
-        Some(path) => {
-            let at = path.clone();
-            let made = blocking(move || {
-                let resolved = work.repo.resolve(&range)?;
-                let located = work.repo.locate(&resolved, &path)?;
-                let make = || {
-                    let changes = work.repo.document_changes(&resolved, located.clone())?;
-                    let html = page::changes_body(&changes.list, &changes.skipped);
-                    let bytes = html.capacity();
-                    Ok::<_, Problem>(Sized { value: html, bytes })
-                };
-                let body = match located.page_key() {
-                    Some(key) => work.repo.cache.get_or_load(&key, make)?,
-                    None => Arc::new(make()?.value),
-                };
-                Ok((resolved, body))
+    })
+    .await;
+    let (resolved, list, skipped, parts) = match made {
+        Ok(made) => made,
+        Err(problem) => return problem_page(&app, &problem),
+    };
+    let shown: Vec<page::Shown<'_>> = parts
+        .iter()
+        .filter_map(|part| {
+            part.document().map(|document| page::Shown {
+                document,
+                title: part.title.clone(),
+                html: &part.html,
             })
-            .await;
-            match made {
-                Ok((resolved, body)) => {
-                    let content = page::document_changes(&label, &at, &body);
-                    let title = at.to_lossy().into_owned();
-                    let live = live_for(&resolved);
-                    html(
-                        StatusCode::OK,
-                        page::page(&app.assets, &title, live, &content),
-                    )
-                }
-                Err(problem) => problem_page(&app, &problem),
-            }
-        }
-    }
+        })
+        .collect();
+    let heading = range_heading(&label);
+    let (head, base) = sides(&resolved);
+    let content = page::review(&page::Review {
+        label: &label,
+        heading: &heading,
+        list: &list,
+        shown: &shown,
+        skipped: &skipped,
+        head: &head,
+        base: base.as_deref(),
+        single: single.as_ref(),
+    });
+    let title = match &single {
+        Some(path) => path.to_lossy().into_owned(),
+        None => heading.clone(),
+    };
+    let frame = Frame {
+        title: &title,
+        live: live_for(&resolved),
+        tab: if label == "auto" {
+            Tab::Checkout
+        } else {
+            Tab::None
+        },
+        worktree: app.watch.is_some(),
+        revision: None,
+    };
+    html(StatusCode::OK, page::page(&app.assets, &frame, &content))
 }
 
 fn live_for(range: &ResolvedRange) -> Live {
@@ -782,7 +1036,11 @@ async fn events(State(app): Shared) -> Response {
         .into_response()
 }
 
-async fn asset(State(app): Shared, Path((hash, name)): Path<(String, String)>) -> Response {
+async fn asset(
+    State(app): Shared,
+    Path((hash, name)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
     let Some(file) = app.assets.get(&name) else {
         return refuse(
             &app,
@@ -796,12 +1054,92 @@ async fn asset(State(app): Shared, Path((hash, name)): Path<(String, String)>) -
     } else {
         "no-cache"
     };
-    (
+    let accepts_gzip = headers
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value.split(',').any(|coding| {
+                let mut parts = coding.split(';');
+                let name = parts.next().unwrap_or_default().trim();
+                let refused = parts.any(|part| part.trim().replace(' ', "") == "q=0");
+                (name.eq_ignore_ascii_case("gzip") || name == "*") && !refused
+            })
+        });
+    let body = file.body(accepts_gzip);
+    let mut response = (
         [
             (header::CONTENT_TYPE, file.content_type),
             (header::CACHE_CONTROL, lasting),
         ],
-        file.bytes,
+        body,
     )
-        .into_response()
+        .into_response();
+    if file.gzip {
+        let headers = response.headers_mut();
+        headers.insert(
+            header::VARY,
+            header::HeaderValue::from_static("accept-encoding"),
+        );
+        if accepts_gzip {
+            headers.insert(
+                header::CONTENT_ENCODING,
+                header::HeaderValue::from_static("gzip"),
+            );
+        }
+    }
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_lead_to_markdown_at_the_same_revision() {
+        let path = RepoPath::new("docs/features/a.md").unwrap();
+        let links = Links::for_path(&path);
+        let url = |address: &str| links.resolve(address, LinkKind::Link);
+        assert_eq!(url("b.md#install"), Resolved::Url("b.md#install".into()));
+        assert_eq!(url("../B.MARKDOWN"), Resolved::Url("../B.MARKDOWN".into()));
+        assert_eq!(url("/docs/x.md"), Resolved::Url("../../docs/x.md".into()));
+        assert_eq!(
+            url("/x.md?plain=1"),
+            Resolved::Url("../../x.md?plain=1".into())
+        );
+        assert_eq!(url("../src/main.rs"), Resolved::Text);
+        assert_eq!(url("folder/"), Resolved::Text);
+        assert_eq!(url(""), Resolved::Text);
+        assert_eq!(links.resolve("cat.md", LinkKind::Image), Resolved::Text);
+        let top = Links::for_path(&RepoPath::new("README.md").unwrap());
+        assert_eq!(
+            top.resolve("/docs/x.md", LinkKind::Link),
+            Resolved::Url("docs/x.md".into())
+        );
+    }
+
+    #[test]
+    fn a_range_page_is_named_after_its_branch() {
+        assert_eq!(range_heading("origin/main...feature/x"), "feature/x");
+        assert_eq!(range_heading("main..feature"), "main..feature");
+        assert_eq!(range_heading("main..."), "main...");
+        assert_eq!(range_heading("auto"), "This checkout");
+        assert_eq!(range_heading("since/2026-10-01"), "since/2026-10-01");
+    }
+
+    #[test]
+    fn documents_are_read_at_the_newer_side() {
+        let id = ObjectId::from_hex(&"a".repeat(40)).unwrap();
+        let range = ResolvedRange {
+            base: Some(id.clone()),
+            head: Snapshot::Worktree,
+            notes: Vec::new(),
+        };
+        assert_eq!(sides(&range), ("worktree".to_owned(), Some("a".repeat(40))));
+        let range = ResolvedRange {
+            base: None,
+            head: Snapshot::Commit(id),
+            notes: Vec::new(),
+        };
+        assert_eq!(sides(&range), ("a".repeat(40), None));
+    }
 }

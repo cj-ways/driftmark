@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>&lt;/svg&gt;&lt;script&gt;alert(1)&lt;/script&gt;</text><title>"&gt;&lt;img src=x onerror=alert(2)&gt;</title><g aria-label="&quot; onmouseover=&quot;alert(3)"/></svg>

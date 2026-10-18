@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" onload="alert(1)"><rect width="10" height="10" onclick="alert(2)" ONMOUSEOVER="alert(3)" onfocusin="alert(4)"/><g onerror="alert(5)"><circle r="3"/></g></svg>

@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" id="main"><g id="decision"><rect id="dmx-ok" width="1" height="1"/></g><use href="#decision"/><path id="a&quot;onmouseover=&quot;alert(1)" d="M0 0" clip-path="url(#decision)"/><g class="ok  bad&lt;x;y good"/></svg>

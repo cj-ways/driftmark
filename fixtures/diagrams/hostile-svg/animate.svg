@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><a id="x"><animate attributeName="href" to="javascript:alert(1)"/><set attributeName="href" to="javascript:alert(2)"/><text>click</text></a><animateTransform attributeName="transform"/><discard/></svg>

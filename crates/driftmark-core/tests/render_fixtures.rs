@@ -189,6 +189,8 @@ const PAGE_ATTRIBUTES: &[&str] = &[
     "data-error",
     "data-gen",
     "data-k",
+    "data-label",
+    "data-language",
     "data-task",
     "data-undrawn",
     "disabled",

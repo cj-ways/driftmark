@@ -163,12 +163,12 @@ fn a_new_or_deleted_document_is_one_item_with_its_title_summary_and_size() {
     let empty = changes(&changes_of(None, Some("")), "d");
     assert_eq!(
         empty,
-        "<ol class=\"changes\" data-path=\"doc.md\" data-file=\"added\">\n<li id=\"d.0\" class=\"change document\" data-kind=\"added\" data-level=\"wording\" data-signals=\"wording\" data-bytes=\"0\" data-lines=\"0\">\n<p class=\"size\" data-gen>0 lines</p>\n</li>\n</ol>\n"
+        "<ol class=\"changes\" data-path=\"doc.md\" data-file=\"added\">\n<li id=\"d.0\" class=\"change document\" data-kind=\"added\" data-level=\"wording\" data-signals=\"wording\" data-bytes=\"0\" data-lines=\"0\">\n<div class=\"head\" data-gen><span class=\"level\" data-level=\"wording\">Wording</span> <span class=\"kind\">New document</span> <span class=\"why\">words changed</span> <span class=\"acts\"><button type=\"button\" class=\"seen\" disabled title=\"Arrives with notes\">Seen</button> <button type=\"button\" class=\"note\" disabled title=\"Arrives with notes\">Add a note</button></span></div>\n<p class=\"size\" data-gen>0 lines</p>\n</li>\n</ol>\n"
     );
     let one_line = changes(&changes_of(Some("# Cache & \"quotes\" > 1\n"), None), "d");
     assert_eq!(
         one_line,
-        "<ol class=\"changes\" data-path=\"doc.md\" data-file=\"removed\">\n<li id=\"d.0\" class=\"change document\" data-kind=\"removed\" data-level=\"fact\" data-signals=\"heading number\" data-bytes=\"23\" data-lines=\"1\">\n<p class=\"title\">Cache &amp; &quot;quotes&quot; &gt; 1</p>\n<p class=\"size\" data-gen>1 line</p>\n</li>\n</ol>\n"
+        "<ol class=\"changes\" data-path=\"doc.md\" data-file=\"removed\">\n<li id=\"d.0\" class=\"change document\" data-kind=\"removed\" data-level=\"fact\" data-signals=\"heading number\" data-bytes=\"23\" data-lines=\"1\">\n<div class=\"head\" data-gen><span class=\"level\" data-level=\"fact\">Fact</span> <span class=\"kind\">Deleted document</span> <span class=\"why\">a heading changed · a number or a name changed</span> <span class=\"acts\"><button type=\"button\" class=\"seen\" disabled title=\"Arrives with notes\">Seen</button> <button type=\"button\" class=\"note\" disabled title=\"Arrives with notes\">Add a note</button></span></div>\n<p class=\"title\">Cache &amp; &quot;quotes&quot; &gt; 1</p>\n<p class=\"size\" data-gen>1 line</p>\n</li>\n</ol>\n"
     );
     let summary = changes(
         &changes_of(None, Some("# T\n\n> Short version: what it is for.\n")),
@@ -297,7 +297,7 @@ fn a_change_without_blocks_still_has_its_element() {
     let html = changes(&one(change), "d");
     assert_eq!(
         html,
-        "<ol class=\"changes\" data-path=\"doc.md\" data-file=\"modified\">\n<li id=\"d.0\" class=\"change\" data-kind=\"edited\" data-level=\"wording\" data-signals=\"wording\" data-old=\"0\" data-new=\"0\">\n<div class=\"side\" data-side=\"new\"></div>\n</li>\n</ol>\n"
+        "<ol class=\"changes\" data-path=\"doc.md\" data-file=\"modified\">\n<li id=\"d.0\" class=\"change\" data-kind=\"edited\" data-level=\"wording\" data-signals=\"wording\" data-old=\"0\" data-new=\"0\">\n<div class=\"head\" data-gen><span class=\"level\" data-level=\"wording\">Wording</span> <span class=\"kind\">Edited</span> <span class=\"why\">words changed</span> <span class=\"acts\"><button type=\"button\" class=\"seen\" disabled title=\"Arrives with notes\">Seen</button> <button type=\"button\" class=\"note\" disabled title=\"Arrives with notes\">Add a note</button></span></div>\n<div class=\"side\" data-side=\"new\"></div>\n</li>\n</ol>\n"
     );
 }
 

@@ -6,6 +6,7 @@
 //! program so its tests can build real repos and check the readers from
 //! outside, the way the commands will use them.
 
+pub mod diagram;
 pub mod diff;
 pub mod git;
 pub mod hook;

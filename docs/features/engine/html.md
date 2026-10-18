@@ -16,6 +16,7 @@ date: 2026-10-18
 | `reading(&document, &setup)` | A `Reading`: the page HTML, the position tables and the outline. |
 | `changes(&document_changes, id_prefix)` | One document's change list as an `<ol class="changes">`. |
 | `ANCHOR_SCRIPT` | The page script, `crates/driftmark-core/web/anchor.js`, as text. |
+| `words` | The words a reader sees for a level (`Decision`), a kind (`Moved and edited`, `New document`), a view (`Sentence by sentence`) and a signal (`in a decision section`). The change HTML and the program's own pages use the same words. |
 
 Neither call fails and neither reads anything. A node whose source position cannot be read is still shown; it only gets no place in the position table.
 
@@ -64,7 +65,7 @@ The address is read the way a browser reads it: spaces and control characters at
 | `Ok(None)` | The code, marked as an undrawn diagram, so the page can draw it in the browser. |
 | `Err(message)` | The same, with the message in `data-error`. |
 
-The SVG is placed in the page as returned. The program must make it safe: no scripts, no event attributes, and no `javascript:` or `data:` addresses. merman's own guide says its output needs that cleaning (`docs/working/version-1/spikes/mermaid.md`).
+The SVG is placed in the page as returned. The program must make it safe: no scripts, no event attributes, and no `javascript:` or `data:` addresses. merman's own guide says its output needs that cleaning (`docs/working/version-1/spikes/mermaid.md`). The program's drawer, `driftmark::diagram::Drawer`, draws Mermaid with merman and D2 with the `d2` program, and cleans every drawing from an allow-list; `docs/features/pages.md` ("Diagrams") says how.
 
 ## The reading HTML
 
@@ -77,9 +78,9 @@ Every element that holds a block's text carries `data-k`, the block's index in t
 | Heading | `<h1 id="…" data-k="n">` to `<h6>`, with `<a class="anchor" href="#…" aria-label="Link to this section"></a>` after its text. |
 | Paragraph | `<p data-k="n">`. In a tight list, `<span data-k="n">`. |
 | List item | Its leading paragraphs: `<p data-k="n">`, or `<span data-k="n">` in a tight list. Two paragraphs of one item are two elements with the same `data-k`. |
-| Task item | `<li class="task" data-task="open">` or `data-task="done"`, with `<input type="checkbox" disabled>` (and `checked`) before the text. |
-| Table row | `<tr data-k="n">`, its cells `<th>` or `<td>`, with `align="left"`, `"center"` or `"right"` when the column says so. |
-| Code | `<pre data-k="n"><code class="language-x">`. The class is the first word of the info string; a block without one has no class. |
+| Task item | `<li class="task" data-task="open">` or `data-task="done"`, with `<input type="checkbox" disabled aria-label="Not done">` (or `checked aria-label="Done"`) before the text. The box has no label of its own, so it carries its state as a name for screen readers. |
+| Table row | `<tr data-k="n">`, its cells `<th>` or `<td>`, with `align="left"`, `"center"` or `"right"` when the column says so. Each `<td>` carries `data-label`, the text of its column's header cell, so a phone can show a row as a card whose values say which column they are. |
+| Code | `<pre data-k="n" data-language="x"><code class="language-x">`. Both name the first word of the info string; a block without one has neither. `data-language` lets the page label the block and style program output (`text`, `console`, `output`, `log`) without a script. |
 | Diagram, drawn | `<figure class="diagram" data-k="n" data-diagram="mermaid">` holding the SVG. |
 | Diagram, not drawn | `<pre data-k="n" data-diagram="mermaid" data-undrawn><code class="language-mermaid">`, with `data-error="…"` when drawing failed. `data-diagram` is `mermaid` or `d2`. |
 | Alert | `<aside class="alert" data-alert="warning" aria-label="Warning">`, then `<p class="alert-title" data-gen>` with the title (the written one, or Note, Tip, Important, Warning, Caution), then the leading paragraphs as `<p data-k="n">`. |
@@ -212,7 +213,16 @@ Each change about one block is `<li id="prefix.n" class="change">`, where `n` is
 | `data-heading`, `data-depth`, `data-number`, `data-task`, `data-header`, `data-language`, `data-diagram`, `data-alert`, `data-footnote` | The block kind's details, from the new side (the old one for a removed block) |
 | `data-old-…` | A detail the old side had differently, such as `data-old-heading="2"` or `data-old-task="open"`; empty when the old side did not have it |
 
-Inside it come the block's heading path, as `<ol class="path"><li>Cache rendered pages</li><li>Decision</li></ol>`, then the content.
+Inside it come, in order:
+
+1. The head, `<div class="head" data-gen>`, which says in words what the attributes say:
+   - `<span class="level" data-level="decision">Decision</span>`;
+   - `<span class="kind">Edited</span>`: what happened (`words::kind`);
+   - for an edit, `<span class="view">Side by side</span>`, or `Both versions whole` when the marks failed the guard;
+   - `<span class="why">in a decision section · a number or a name changed</span>`: every signal, in words, joined by ` · `;
+   - `<span class="acts">` with two inactive buttons, `<button type="button" class="seen" disabled title="Arrives with notes">Seen</button>` and `class="note"` "Add a note". Notes and the seen mark arrive together in M3 (decision 0004); a page that does not offer them hides `.acts`.
+2. The block's heading path, as `<ol class="path"><li>Cache rendered pages</li><li>Decision</li></ol>`.
+3. The content.
 
 ### The content of each view
 
@@ -242,7 +252,7 @@ A run of formatting-only changes is folded in one `<li class="fold" data-count="
 
 ### A new or deleted document
 
-A new or deleted document is one item (decision 0009), from the change's `document` (`docs/features/engine/change-list.md`, schema version 2): `<li id="prefix.n" class="change document" data-kind="added|removed" data-level="…" data-signals="…" data-bytes="2340" data-lines="61">`. Inside it come `<p class="title">` when the document has a title, `<p class="summary">` when it has a summary, and `<p class="size" data-gen>61 lines</p>`. Its blocks are not listed, and its text is not shown: a reader opens the reading page for that.
+A new or deleted document is one item (decision 0009), from the change's `document` (`docs/features/engine/change-list.md`, schema version 2): `<li id="prefix.n" class="change document" data-kind="added|removed" data-level="…" data-signals="…" data-bytes="2340" data-lines="61">`. Inside it come the same head as a block change (its kind reads `New document` or `Deleted document`), then `<p class="title">` when the document has a title, `<p class="summary">` when it has a summary, and `<p class="size" data-gen>61 lines</p>`. Its blocks are not listed, and its text is not shown: a reader opens the reading page for that.
 
 ## Size limits
 

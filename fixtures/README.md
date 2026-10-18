@@ -12,3 +12,4 @@
 - `.gitattributes` here keeps every fixture's bytes exactly as written, line endings included, on every system.
 - `render/reading/` and `render/hostile/` hold documents `<name>.md` with the page HTML `<name>.html` and the position tables `<name>.positions.json` the renderer must give. `render/anchoring/` holds the 30 documents and the 113 cases (`cases.json`) of the notes anchoring check, which runs in a browser.
 - `render/changes/<case>.html` is the change HTML of the pair in `diff/<case>/` or `render/changes/<case>/`.
+- `diagrams/hostile-svg/` holds drawings a diagram program could return if it were tricked or broken: scripts, event attributes, outside addresses, animations that change a link, style blocks, HTML labels with images and frames, copied ids, entities, two roots. `diagrams/hostile-mermaid/` holds Mermaid sources that try the same through merman. `crates/driftmark/tests/diagrams.rs` cleans or draws each and checks what is left.

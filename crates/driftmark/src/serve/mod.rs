@@ -139,6 +139,7 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
         watch: watch.clone(),
         access: guard::Access::new(bound, token.clone()),
         assets: assets::Assets::built_in(),
+        drawer: Arc::new(crate::diagram::Drawer::new()),
         events,
         stopping,
     });

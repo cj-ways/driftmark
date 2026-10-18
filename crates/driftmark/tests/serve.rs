@@ -306,10 +306,14 @@ fn pages_and_json_answer_on_every_route() {
     );
     let text = home.text();
     assert!(
-        text.contains("<a href=\"/changes/origin/main...feature\">feature</a>"),
+        text.contains("<a class=\"card-name\" href=\"/changes/origin/main...feature\"><code>feature</code></a>"),
         "{text}"
     );
     assert!(text.contains("data-level=\"decision\""), "{text}");
+    assert!(
+        text.contains("Start with <a href=\"/changes/origin/main...feature#D"),
+        "the card says where to start: {text}"
+    );
     let home = server.json("/api/home");
     assert_eq!(home["schema_version"], 1);
     assert_eq!(home["default_branch"]["name"], "origin/main");
@@ -337,8 +341,8 @@ fn pages_and_json_answer_on_every_route() {
         "{text}"
     );
     assert!(
-        text.contains("500 &lt;b&gt;pages"),
-        "the source, escaped: {text}"
+        text.contains("It holds 500 <code class=\"html\">&lt;b&gt;</code>pages"),
+        "rendered, with raw HTML that is not allowed shown as text: {text}"
     );
     let document = server.json("/api/doc/feature/-/docs/a.md");
     assert_eq!(document["path"], "docs/a.md");
@@ -370,7 +374,8 @@ fn change_lists_match_the_diff_command() {
     let page = server.get("/changes/origin/main...feature");
     assert_eq!(page.status, 200);
     let text = page.text();
-    assert!(text.contains("2 documents changed"), "{text}");
+    assert!(text.contains(" in 2 documents</span>"), "{text}");
+    assert!(text.contains("<h1>feature</h1>"), "{text}");
     assert!(
         text.contains("href=\"/changes/origin/main...feature/-/docs/a.md\""),
         "{text}"
@@ -383,10 +388,18 @@ fn change_lists_match_the_diff_command() {
     // One document's changes; the JSON is diff's entry for it.
     let page = server.get("/changes/origin/main...feature/-/docs/a.md");
     assert_eq!(page.status, 200);
+    let text = page.text();
     assert!(
-        page.text().contains("decision, edited: status"),
-        "{}",
-        page.text()
+        text.contains("<span class=\"level\" data-level=\"decision\">Decision</span> <span class=\"kind\">Edited</span>"),
+        "a card with its level and kind: {text}"
+    );
+    assert!(
+        text.contains("<span class=\"why\">the status changed</span>"),
+        "{text}"
+    );
+    assert!(
+        text.contains("href=\"/changes/origin/main...feature\">every document of this range</a>"),
+        "{text}"
     );
     let one = server.json("/api/changes/origin/main...feature/-/docs/a.md");
     let full = diff_json(&repo.dir, &["--json", "origin/main...feature"]);
@@ -471,6 +484,121 @@ fn answers_are_gzipped_when_the_browser_accepts_it() {
         .to_owned();
     let css = server.send("GET", &address, &[("Accept-Encoding", "gzip")]);
     assert_eq!(css.header("content-encoding"), Some("gzip"));
+}
+
+#[test]
+fn mermaid_js_is_sent_compressed_and_found_by_the_page_script() {
+    let repo = branch_repo();
+    let server = Server::start(&repo.dir, &[]);
+    let page = server.get("/").text();
+    let script_at = page
+        .split('"')
+        .find(|part| part.ends_with("page.js"))
+        .unwrap()
+        .to_owned();
+    let script = server.get(&script_at).text();
+    let mermaid_at = script
+        .split('"')
+        .find(|part| part.ends_with("/mermaid.js"))
+        .expect("the page script names mermaid.js")
+        .to_owned();
+    assert!(script.contains("/prism-core.js\""), "and Prism");
+    let zipped = server.send("GET", &mermaid_at, &[("Accept-Encoding", "gzip, br")]);
+    assert_eq!(zipped.status, 200);
+    assert_eq!(zipped.header("content-encoding"), Some("gzip"));
+    assert_eq!(zipped.header("vary"), Some("accept-encoding"));
+    let mut unzipped = Vec::new();
+    flate2::read::GzDecoder::new(zipped.body.as_slice())
+        .read_to_end(&mut unzipped)
+        .unwrap();
+    let plain = server.get(&mermaid_at);
+    assert_eq!(plain.header("content-encoding"), None);
+    assert_eq!(plain.body, unzipped, "unpacked for a client without gzip");
+    let refused = server.send("GET", &mermaid_at, &[("Accept-Encoding", "gzip;q=0")]);
+    assert_eq!(refused.header("content-encoding"), None);
+    let css_at = page
+        .split('"')
+        .find(|part| part.ends_with("page.css"))
+        .unwrap()
+        .to_owned();
+    let css = server.get(&css_at).text();
+    let font = css
+        .split('"')
+        .find(|part| part.ends_with("liberation-sans-regular.woff2"))
+        .expect("the style sheet names the diagram font")
+        .to_owned();
+    let font = server.get(&font);
+    assert_eq!(font.header("content-type"), Some("font/woff2"));
+    assert_eq!(font.body.len(), 147_036);
+}
+
+#[test]
+fn reading_pages_draw_diagrams_and_say_which_branches_wait() {
+    let repo = branch_repo();
+    repo.write(
+        "docs/flow.md",
+        "---\nstatus: draft\ndate: 2026-10-18\n---\n\n# Flow\n\n## Steps\n\n```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```\n\n```d2\na -> b\n```\n\n| Name | Kind | Size |\n|---|---|---|\n| a | b | c |\n\n```rust\nfn main() {}\n```\n\nSee [the guide](/docs/a.md) and [code](../src/main.rs).\n",
+    );
+    repo.commit("flow", T0 + 2 * DAY);
+    let server = Server::start(&repo.dir, &[]);
+    let page = server.get("/doc/main/-/docs/flow.md").text();
+    assert!(
+        page.contains(
+            "<figure class=\"diagram\" data-k=\"3\" data-diagram=\"mermaid\"><svg id=\"dm"
+        ),
+        "Mermaid is drawn on the server: {page}"
+    );
+    assert!(!page.contains("<style"), "{page}");
+    let undrawn = page.contains("<pre data-k=\"4\" data-diagram=\"d2\" data-undrawn>");
+    let drawn = page.contains("data-diagram=\"d2\"><svg");
+    assert!(
+        undrawn || drawn,
+        "D2 is drawn only with d2 installed: {page}"
+    );
+    assert!(page.contains("<td data-label=\"Name\">a</td>"), "{page}");
+    assert!(
+        page.contains("<pre data-k=\"7\" data-language=\"rust\">"),
+        "{page}"
+    );
+    assert!(
+        page.contains("<a href=\"../docs/a.md\">the guide</a>"),
+        "{page}"
+    );
+    assert!(
+        page.contains("<span class=\"link-off\">code</span>"),
+        "{page}"
+    );
+    assert!(
+        page.contains("<li class=\"pill\" data-pill=\"status\">Status: draft</li>"),
+        "{page}"
+    );
+    assert!(page.contains("Dated 2026-10-18"), "{page}");
+
+    // docs/a.md is changed on the open branch `feature`.
+    let read = server.get("/doc/main/-/docs/a.md").text();
+    assert!(
+        read.contains("1 open branch changes this document"),
+        "{read}"
+    );
+    assert!(
+        read.contains(
+            "href=\"/changes/origin/main...feature/-/docs/a.md\"><code>feature</code></a>"
+        ),
+        "{read}"
+    );
+    assert!(
+        read.contains("<li class=\"pill\" data-pill=\"type\">Decision</li>"),
+        "{read}"
+    );
+    assert!(
+        read.contains(
+            "class=\"pending-flag\" href=\"/changes/origin/main...feature/-/docs/a.md\" data-gen>"
+        ),
+        "the Decision section is flagged: {read}"
+    );
+    // The branch itself does not list itself as waiting.
+    let own = server.get("/doc/feature/-/docs/a.md").text();
+    assert!(!own.contains("open branch changes this document"), "{own}");
 }
 
 #[test]
@@ -729,11 +857,10 @@ fn the_cache_parses_a_blob_once_and_keeps_finished_pages() {
     assert_eq!((number(&ranges, "misses"), number(&ranges, "hits")), (1, 1));
     server.get("/");
     server.get("/");
+    // Reading pages ask the branches too, for the changes waiting on them.
     let branches = counts("branches");
-    assert_eq!(
-        (number(&branches, "misses"), number(&branches, "hits")),
-        (1, 1)
-    );
+    assert_eq!(number(&branches, "misses"), 1, "{branches}");
+    assert!(number(&branches, "hits") >= 1, "{branches}");
 
     // A moved branch leads to a new entry; the old one stays valid.
     repo.git(&["checkout", "-q", "feature"]);

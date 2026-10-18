@@ -6,6 +6,11 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+# rustybuzz and ttf-parser were marked unmaintained in 2026; neither has a
+# known vulnerability. merman measures diagram text with real fonts through
+# them (decision 0008, item 5), and merman 0.9 has no other way. Remove these
+# two lines when merman moves to their successors, harfrust and skrifa.
+ignore = ["RUSTSEC-2026-0192", "RUSTSEC-2026-0206"]
 
 [licenses]
 # Reasons: docs/decisions/0008-engine-choices-from-the-m1-spikes.md, item 8.
