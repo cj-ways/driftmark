@@ -34,6 +34,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked --workspace
 
+  # The presets on public repositories, fetched from GitHub at pinned
+  # commits. This is the only job that uses the network; the test job above
+  # leaves these tests out.
+  presets-public:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked -p driftmark --test presets_public -- --ignored
+
   msrv:
     runs-on: ubuntu-latest
     steps:

@@ -16,5 +16,6 @@ pub mod mcp;
 mod memory;
 pub mod new;
 pub mod notes;
+pub mod presets;
 pub mod search;
 pub mod serve;

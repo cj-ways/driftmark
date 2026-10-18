@@ -1,0 +1,20 @@
+preset openspec found by openspec/config.yaml
+
+README.md
+    type document | status - | lifecycle - | date - | decisions -
+openspec/changes/add-tags/design.md
+    type design | status - | lifecycle - | date 2026-03-02 | decisions 2 blocks under Decisions
+openspec/changes/add-tags/proposal.md
+    type proposal | status - | lifecycle - | date 2026-03-02 | decisions 6 blocks under What Changes, Capabilities, Modified Capabilities
+openspec/changes/add-tags/specs/notes/spec.md
+    type delta-spec | status - | lifecycle - | date 2026-03-02 | decisions 6 blocks under ADDED Requirements, Requirement: Tag a note, MODIFIED Requirements, Requirement: Create a note
+openspec/changes/add-tags/tasks.md
+    type tasks | status - | lifecycle - | date 2026-03-02 | decisions -
+openspec/changes/archive/2026-01-10-add-search/proposal.md
+    type archived-change | status - | lifecycle archived | date 2026-01-08 | decisions -
+openspec/changes/archive/2026-01-10-add-search/specs/search/spec.md
+    type archived-change | status - | lifecycle archived | date 2026-01-08 | decisions -
+openspec/project.md
+    type project | status - | lifecycle current | date - | decisions -
+openspec/specs/notes/spec.md
+    type spec | status - | lifecycle current | date - | decisions 6 blocks under Requirements, Requirement: Create a note, Scenario: Save a note

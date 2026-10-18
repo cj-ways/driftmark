@@ -1,0 +1,24 @@
+preset spec-kit found by .specify/memory/constitution.md
+
+.specify/memory/constitution.md
+    type constitution | status - | lifecycle current | date - | decisions -
+specs/001-albums/checklists/requirements.md
+    type checklist | status - | lifecycle - | date - | decisions -
+specs/001-albums/contracts/albums-api.md
+    type contract | status - | lifecycle - | date - | decisions -
+specs/001-albums/data-model.md
+    type data-model | status - | lifecycle - | date - | decisions -
+specs/001-albums/plan.md
+    type plan | status - | lifecycle - | date 2026-01-06 | decisions -
+specs/001-albums/quickstart.md
+    type quickstart | status - | lifecycle - | date - | decisions -
+specs/001-albums/research.md
+    type research | status - | lifecycle - | date - | decisions -
+specs/001-albums/spec.md
+    type feature-spec | status Implemented | lifecycle current | date 2026-01-05 | decisions 4 blocks under Requirements (mandatory), Functional Requirements
+specs/001-albums/tasks.md
+    type tasks | status - | lifecycle - | date - | decisions -
+specs/002-sharing/spec.md
+    type feature-spec | status Draft | lifecycle - | date 2026-02-01 | decisions 5 blocks under Clarifications, Session 2026-02-02, Requirements (mandatory)
+specs/003-slideshow/spec.md
+    type feature-spec | status Superseded by 004-player | lifecycle superseded | date 2026-01-20 | decisions 2 blocks under Requirements (mandatory)

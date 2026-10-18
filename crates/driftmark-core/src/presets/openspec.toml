@@ -1,0 +1,66 @@
+# driftmark's preset for OpenSpec (https://github.com/Fission-AI/OpenSpec).
+#
+# OpenSpec keeps the living specs in openspec/specs/, each open change in its
+# own folder under openspec/changes/, and finished changes in
+# openspec/changes/archive/. driftmark only reads these files; it never moves
+# or rewrites them.
+#
+# To change these rules, copy this text into driftmark.toml and edit it. The
+# format is described in driftmark's docs/features/engine/rules-file.md.
+
+# A finished change, moved into the archive by `openspec archive`. It is kept
+# as a record. This type comes before the types of open changes, because the
+# first type whose paths match a file wins.
+[[type]]
+name = "archived-change"
+paths = ["openspec/changes/archive/**"]
+lifecycle = "archived"
+date = { file = ".openspec.yaml", key = "created" }
+
+# A spec delta of an open change: the requirements it adds, modifies, removes
+# or renames in a living spec. Every change under these headings is a
+# decision. An open change is neither current nor archived yet.
+[[type]]
+name = "delta-spec"
+paths = ["openspec/changes/*/specs/**/*.md"]
+date = { file = ".openspec.yaml", key = "created" }
+decision-headings = [
+  "ADDED Requirements",
+  "MODIFIED Requirements",
+  "REMOVED Requirements",
+  "RENAMED Requirements",
+]
+
+# Why a change is made and what it changes.
+[[type]]
+name = "proposal"
+paths = ["openspec/changes/*/proposal.md"]
+date = { file = ".openspec.yaml", key = "created" }
+decision-headings = ["What Changes", "Capabilities"]
+
+# How a change is built.
+[[type]]
+name = "design"
+paths = ["openspec/changes/*/design.md"]
+date = { file = ".openspec.yaml", key = "created" }
+decision-headings = ["Decisions"]
+
+# The task list of a change.
+[[type]]
+name = "tasks"
+paths = ["openspec/changes/*/tasks.md"]
+date = { file = ".openspec.yaml", key = "created" }
+
+# A living spec: what the system does now. Its requirements are the decided
+# behaviour.
+[[type]]
+name = "spec"
+paths = ["openspec/specs/**/*.md"]
+lifecycle = "current"
+decision-headings = ["Requirements"]
+
+# The project's context, in OpenSpec versions before openspec/config.yaml.
+[[type]]
+name = "project"
+paths = ["openspec/project.md"]
+lifecycle = "current"

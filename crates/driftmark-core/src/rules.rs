@@ -4,17 +4,21 @@
 //!
 //! The format is stated in `docs/features/engine/rules-file.md`. The program
 //! reads the file; this module only parses its text, so the core stays free of
-//! file access. A preset (M4) is a rules file in this same format. The file's
-//! `[lint]` table holds the writing check's settings; [`crate::lint`] reads it.
-//! Its `[masthead]` table adds masthead keys to the known ones, and its
-//! `[compare]` table names the branch `auto` and the home page compare with.
+//! file access. A preset is a rules file in this same format, built into
+//! driftmark ([`crate::presets`]), and `presets = [...]` names the ones a
+//! repository uses. The file's `[lint]` table holds the writing check's
+//! settings; [`crate::lint`] reads it. Its `[masthead]` table adds masthead
+//! keys to the known ones, and its `[compare]` table names the branch `auto`
+//! and the home page compare with.
 
 use std::fmt;
 
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
 
-use crate::document::{BlockKind, Document, FieldOrigin, MastheadKeys, normalize_key};
+use crate::document::{
+    BlockKind, Document, FieldOrigin, MAX_FILE_SIZE, MastheadKeys, MetaValue, normalize_key,
+};
 use crate::lint::{LintSettings, RawLint};
 
 /// The type of a document that no rule matches.
@@ -29,6 +33,24 @@ pub(crate) const MATCHING: MatchOptions = MatchOptions {
     require_literal_leading_dot: false,
 };
 
+/// The other files of a repository, as the rules need them: a file beside a
+/// document that a location names, such as cc-sdd's `spec.json`, and the
+/// marker files and folders a preset is found by.
+///
+/// The program answers for one side of a comparison, a commit or the working
+/// tree, so the core reads no files itself. Paths are relative to the
+/// repository root, with `/` between folders, as git writes them.
+pub trait RepoFiles {
+    /// The bytes of the regular file at `path`, or `None` when there is
+    /// none.
+    fn read(&self, path: &str) -> Option<Vec<u8>>;
+
+    /// The Markdown files inside these folders, at any depth, in any order.
+    /// A folder that is not there adds nothing. An empty folder name means
+    /// the whole repository.
+    fn markdown_in(&self, folders: &[&str]) -> Vec<String>;
+}
+
 /// A parsed rules file: an ordered list of document types, the writing
 /// check's settings, and the masthead keys documents are read with.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -36,7 +58,11 @@ pub struct Rules {
     types: Vec<TypeRule>,
     lint: LintSettings,
     masthead_keys: MastheadKeys,
+    /// The keys added to the built-in ones, as written, so the keys of a
+    /// preset can join them.
+    masthead_extra: Vec<String>,
     default_branch: Option<String>,
+    presets: Vec<String>,
 }
 
 /// One `[[type]]` entry of a rules file.
@@ -74,7 +100,8 @@ pub struct TypeRule {
 }
 
 /// Where a value is written in a document. When more than one place is
-/// given, they are tried in this order: front matter, masthead, section.
+/// given, they are tried in this order: front matter, masthead, section,
+/// file.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Location {
@@ -85,6 +112,14 @@ pub struct Location {
     /// The title of a section whose first line of text is the value, as in
     /// adr-tools' `## Status` section.
     pub section: Option<String>,
+    /// The name of a JSON or YAML file beside the document, for layouts that
+    /// keep a value outside the Markdown, as cc-sdd keeps a spec's phase in
+    /// `spec.json`. The nearest such file counts: in the document's folder,
+    /// or else in the closest folder above it.
+    pub file: Option<String>,
+    /// The key of the value in that file, with `.` between the keys of
+    /// nested tables, as in `approvals.requirements.approved`.
+    pub key: Option<String>,
 }
 
 /// Which of a type's status lists a value is in.
@@ -117,6 +152,8 @@ pub enum Place {
     Masthead,
     /// The first line of text under a section heading.
     Section,
+    /// A key of a JSON or YAML file beside the document.
+    File,
 }
 
 /// What a document's status means for the status view.
@@ -194,6 +231,8 @@ impl std::error::Error for RulesError {}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRules {
+    #[serde(default)]
+    presets: Vec<PresetName>,
     #[serde(default, rename = "type")]
     types: Vec<RawType>,
     #[serde(default)]
@@ -202,6 +241,31 @@ struct RawRules {
     masthead: RawMasthead,
     #[serde(default)]
     compare: RawCompare,
+}
+
+/// The name of a built-in preset. A name driftmark does not know is refused
+/// here, so the TOML reader names its line and the user sees the known names.
+#[derive(Deserialize)]
+#[serde(try_from = "String")]
+struct PresetName(String);
+
+impl TryFrom<String> for PresetName {
+    type Error = String;
+
+    fn try_from(name: String) -> Result<PresetName, String> {
+        if crate::presets::find(&name).is_some() {
+            Ok(PresetName(name))
+        } else {
+            let known: Vec<String> = crate::presets::PRESETS
+                .iter()
+                .map(|preset| format!("\"{}\"", preset.name))
+                .collect();
+            Err(format!(
+                "driftmark has no preset {name:?}; the presets are {}",
+                known.join(", ")
+            ))
+        }
+    }
 }
 
 /// The `[compare]` table: what changes are compared with.
@@ -313,19 +377,45 @@ impl Rules {
             .flat_map(|rule| [&rule.status, &rule.date, &rule.superseded_by])
             .flatten()
             .filter_map(|location| location.masthead.clone());
-        let masthead_keys = MastheadKeys::with(
-            raw.masthead
-                .keys
-                .into_iter()
-                .map(|KeyName(key)| key)
-                .chain(named),
-        );
+        let masthead_extra: Vec<String> = raw
+            .masthead
+            .keys
+            .into_iter()
+            .map(|KeyName(key)| key)
+            .chain(named)
+            .collect();
+        let mut presets: Vec<String> = Vec::new();
+        for PresetName(name) in raw.presets {
+            if !presets.contains(&name) {
+                presets.push(name);
+            }
+        }
         Ok(Rules {
             types,
             lint,
-            masthead_keys,
+            masthead_keys: MastheadKeys::with(&masthead_extra),
+            masthead_extra,
             default_branch: raw.compare.default_branch.map(|BranchName(name)| name),
+            presets,
         })
+    }
+
+    /// The presets the file names in `presets = [...]`, each once, in the
+    /// order written. Their types are not in these rules yet;
+    /// [`crate::presets::Setup::build`] adds them after the file's own.
+    #[must_use]
+    pub fn presets(&self) -> &[String] {
+        &self.presets
+    }
+
+    /// Adds a preset's types after these rules' own, and its masthead keys to
+    /// theirs. The preset's `[lint]` and `[compare]` tables are not used: the
+    /// writing check's settings and the default branch belong to the
+    /// repository's own file.
+    pub(crate) fn append(&mut self, preset: Rules) {
+        self.types.extend(preset.types);
+        self.masthead_extra.extend(preset.masthead_extra);
+        self.masthead_keys = MastheadKeys::with(&self.masthead_extra);
     }
 
     /// The masthead keys documents should be parsed with
@@ -365,11 +455,35 @@ impl Rules {
     }
 
     /// The type, status, date, "superseded by" and decision sections of the
-    /// document at `path`.
+    /// document at `path`. A location that names a file beside the document
+    /// finds nothing here; [`Rules::classify_with`] reads such files.
     #[must_use]
     pub fn classify(&self, path: &str, document: &Document) -> Classification {
+        self.classify_from(path, document, None)
+    }
+
+    /// As [`Rules::classify`], with the repository's other files, so a
+    /// location can read a value from a file beside the document, such as
+    /// cc-sdd's `spec.json`.
+    #[must_use]
+    pub fn classify_with(
+        &self,
+        path: &str,
+        document: &Document,
+        files: &dyn RepoFiles,
+    ) -> Classification {
+        self.classify_from(path, document, Some(files))
+    }
+
+    /// [`Rules::classify`] with the other files, when they are known.
+    fn classify_from(
+        &self,
+        path: &str,
+        document: &Document,
+        files: Option<&dyn RepoFiles>,
+    ) -> Classification {
         match self.type_for(path) {
-            Some(rule) => rule.classify(document),
+            Some(rule) => rule.classify(path, document, files),
             None => Classification {
                 doc_type: DEFAULT_TYPE.to_owned(),
                 status: None,
@@ -410,20 +524,9 @@ impl TypeRule {
         ];
         for (key, location) in locations {
             if let Some(location) = location {
-                let places = [
-                    &location.front_matter,
-                    &location.masthead,
-                    &location.section,
-                ];
-                if places.iter().all(|place| place.is_none()) {
-                    return Err(invalid(format!("`{key}` names no place to look")));
-                }
-                if places
-                    .iter()
-                    .any(|place| place.as_deref().is_some_and(|name| name.trim().is_empty()))
-                {
-                    return Err(invalid(format!("`{key}` has an empty name")));
-                }
+                location
+                    .check()
+                    .map_err(|problem| invalid(format!("`{key}` {problem}")))?;
             }
         }
         let lists = [
@@ -560,23 +663,26 @@ impl TypeRule {
             .any(|heading| normalize_key(heading) == title)
     }
 
-    fn classify(&self, document: &Document) -> Classification {
-        let status = self
-            .status
-            .as_ref()
-            .and_then(|location| location.find(document));
+    fn classify(
+        &self,
+        path: &str,
+        document: &Document,
+        files: Option<&dyn RepoFiles>,
+    ) -> Classification {
+        let find = |location: &Option<Location>| {
+            let location = location.as_ref()?;
+            match files {
+                Some(files) => location.find_in(path, document, files),
+                None => location.find(document),
+            }
+        };
+        let status = find(&self.status);
         let lifecycle = status
             .as_ref()
             .and_then(|status| self.lifecycle_of(&status.text))
             .or(self.lifecycle);
-        let date = self
-            .date
-            .as_ref()
-            .and_then(|location| location.find(document));
-        let superseded_by = self
-            .superseded_by
-            .as_ref()
-            .and_then(|location| location.find(document));
+        let date = find(&self.date);
+        let superseded_by = find(&self.superseded_by);
         let decision_blocks = document
             .blocks
             .iter()
@@ -606,11 +712,70 @@ impl TypeRule {
 }
 
 impl Location {
+    /// What is wrong with this location, to finish the sentence "`status` …".
+    fn check(&self) -> Result<(), String> {
+        let places = [
+            &self.front_matter,
+            &self.masthead,
+            &self.section,
+            &self.file,
+            &self.key,
+        ];
+        if places.iter().all(|place| place.is_none()) {
+            return Err("names no place to look".to_owned());
+        }
+        if places
+            .iter()
+            .any(|place| place.as_deref().is_some_and(|name| name.trim().is_empty()))
+        {
+            return Err("has an empty name".to_owned());
+        }
+        match (&self.file, &self.key) {
+            (Some(_), None) => Err("names a file but no key to read in it".to_owned()),
+            (None, Some(_)) => Err("names a key but no file to read it from".to_owned()),
+            (Some(file), Some(_)) if file.contains(['/', '\\']) || file == "." || file == ".." => {
+                Err(format!(
+                    "names the file {file:?}; write a file name without folders, and driftmark looks for it beside the document and in the folders above"
+                ))
+            }
+            (Some(_), Some(key)) if key.split('.').any(|part| part.trim().is_empty()) => Err(
+                format!("has the key {key:?}, which has an empty part between its dots"),
+            ),
+            _ => Ok(()),
+        }
+    }
+
     /// The value at this location in `document`, with the targets of the
     /// links in it and the place that held it. The places are tried in the
     /// order front matter, masthead, section. Empty values count as missing.
+    /// A file place finds nothing here; [`Location::find_in`] reads it.
     #[must_use]
     pub fn find(&self, document: &Document) -> Option<Located> {
+        self.in_document(document)
+    }
+
+    /// As [`Location::find`], for the document at `path`, reading a file
+    /// place from `files` when the document holds none of the other places.
+    #[must_use]
+    pub fn find_in(
+        &self,
+        path: &str,
+        document: &Document,
+        files: &dyn RepoFiles,
+    ) -> Option<Located> {
+        self.in_document(document).or_else(|| {
+            let (file, key) = (self.file.as_deref()?, self.key.as_deref()?);
+            let text = file_value(path, file, key, files)?;
+            Some(Located {
+                text,
+                links: Vec::new(),
+                place: Place::File,
+            })
+        })
+    }
+
+    /// The value in the document itself: front matter, masthead, section.
+    fn in_document(&self, document: &Document) -> Option<Located> {
         let meta = &document.meta;
         let field = |origin: FieldOrigin, key: &Option<String>, place: Place| {
             key.as_deref()
@@ -673,6 +838,81 @@ fn section_line(document: &Document, title: &str) -> Option<String> {
                 .find(|line| !line.is_empty())
                 .map(str::to_owned)
         })
+}
+
+/// The value at `key` in the nearest file named `name` beside the document at
+/// `path`: in its folder, or else in the closest folder above it. The file is
+/// JSON or YAML; JSON is read as YAML, which holds it. A value must be text:
+/// a number or `true` reads as written, and a list or a table is no value.
+fn file_value(path: &str, name: &str, key: &str, files: &dyn RepoFiles) -> Option<String> {
+    let bytes = folders_above(path)
+        .into_iter()
+        .find_map(|folder| files.read(&join(folder, name)))?;
+    if bytes.len() > MAX_FILE_SIZE {
+        return None;
+    }
+    let text = std::str::from_utf8(&bytes).ok()?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut entries = crate::document::yaml::read(&untabbed(text)).ok()?;
+    let (tables, last) = match key.rsplit_once('.') {
+        Some((tables, last)) => (Some(tables), last),
+        None => (None, key),
+    };
+    for part in tables.into_iter().flat_map(|tables| tables.split('.')) {
+        entries = match entry(entries, part)? {
+            MetaValue::Map(inner) => inner,
+            MetaValue::Text(_) | MetaValue::List(_) => return None,
+        };
+    }
+    let value = entry(entries, last)?;
+    let text = value.as_text()?.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// The value of one key of a table, keys compared as front matter keys are.
+fn entry(entries: Vec<(String, MetaValue)>, key: &str) -> Option<MetaValue> {
+    let wanted = normalize_key(key);
+    entries
+        .into_iter()
+        .find(|(name, _)| normalize_key(name) == wanted)
+        .map(|(_, value)| value)
+}
+
+/// JSON with its indentation's tabs turned into spaces. YAML refuses a tab
+/// that indents a line, and many JSON files are indented with tabs. A tab at
+/// the start of a JSON line is never inside a string, because a JSON string
+/// cannot hold a line break.
+fn untabbed(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_start_matches([' ', '\t']);
+        let indent = line.len() - body.len();
+        out.push_str(&" ".repeat(indent));
+        out.push_str(body);
+    }
+    out
+}
+
+/// The folders from the one holding `path` up to the repository root, the
+/// root written as the empty name.
+fn folders_above(path: &str) -> Vec<&str> {
+    let mut folders = Vec::new();
+    let mut rest = path;
+    while let Some((folder, _)) = rest.rsplit_once('/') {
+        folders.push(folder);
+        rest = folder;
+    }
+    folders.push("");
+    folders
+}
+
+/// A file name inside a folder, the root written as the empty name.
+fn join(folder: &str, name: &str) -> String {
+    if folder.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{folder}/{name}")
+    }
 }
 
 /// A status value in the form values are compared in: lower case, without
@@ -985,6 +1225,8 @@ current = ["accepted"]
             front_matter: Some("status".to_owned()),
             masthead: Some("Status".to_owned()),
             section: Some("Status".to_owned()),
+            file: None,
+            key: None,
         };
         let place = |source: &str| {
             location
@@ -1102,6 +1344,280 @@ current = ["accepted"]
         assert_eq!(
             error.to_string(),
             "the rules file's type 2 (\"u\"): it lists no paths"
+        );
+    }
+
+    #[test]
+    fn the_presets_key_names_built_in_presets_once_each() {
+        let rules =
+            Rules::parse("presets = [\"openspec\", \"adr\", \"openspec\"]\n").expect("valid");
+        assert_eq!(rules.presets(), ["openspec", "adr"]);
+        assert_eq!(rules.types(), []);
+        assert_eq!(Rules::default().presets(), [] as [String; 0]);
+        let message = unreadable("\npresets = [\"adr\", \"nope\"]\n");
+        assert!(message.contains("line 2"), "{message}");
+        assert!(
+            message.contains(
+                "driftmark has no preset \"nope\"; the presets are \"openspec\", \"spec-kit\", \"adr\", \"kiro\""
+            ),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_preset_adds_its_types_after_the_own_and_its_masthead_keys() {
+        let mut own = Rules::parse(
+            "[lint]\nmax-heading-length = 50\n\n[[type]]\nname = \"own\"\npaths = [\"specs/*/spec.md\"]\n",
+        )
+        .expect("valid");
+        let lint = own.lint().clone();
+        let preset = Rules::parse(
+            "[masthead]\nkeys = [\"Created\"]\n\n[lint]\nmax-heading-length = 7\n\n[compare]\ndefault-branch = \"x\"\n\n[[type]]\nname = \"feature-spec\"\npaths = [\"specs/*/spec.md\", \"specs/*/plan.md\"]\n",
+        )
+        .expect("valid");
+        assert!(!own.masthead_keys().knows("Created"));
+        own.append(preset);
+        let names: Vec<&str> = own.types().iter().map(|rule| rule.name.as_str()).collect();
+        assert_eq!(names, ["own", "feature-spec"]);
+        assert_eq!(
+            own.type_for("specs/a/spec.md").map(|r| r.name.as_str()),
+            Some("own")
+        );
+        assert_eq!(
+            own.type_for("specs/a/plan.md").map(|r| r.name.as_str()),
+            Some("feature-spec")
+        );
+        assert!(own.masthead_keys().knows("Created"));
+        assert_eq!(own.lint(), &lint);
+        assert_eq!(own.default_branch(), None);
+    }
+
+    /// A made-up repository: files by path, for locations that read a file.
+    struct Files(Vec<(&'static str, Vec<u8>)>);
+
+    impl RepoFiles for Files {
+        fn read(&self, path: &str) -> Option<Vec<u8>> {
+            self.0
+                .iter()
+                .find(|(name, _)| *name == path)
+                .map(|(_, bytes)| bytes.clone())
+        }
+
+        fn markdown_in(&self, _folders: &[&str]) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    const SPEC_JSON: &str = "{\n  \"feature_name\": \"albums\",\n  \"Updated_At\": \"2026-01-05\",\n  \"phase\": \"tasks-generated\",\n  \"approvals\": {\n    \"requirements\": { \"generated\": true, \"approved\": true },\n    \"design\": { \"approved\": \"  \" }\n  },\n  \"tags\": [\"a\", \"b\"]\n}\n";
+
+    fn in_file(key: &str) -> Location {
+        Location {
+            front_matter: None,
+            masthead: None,
+            section: None,
+            file: Some("spec.json".to_owned()),
+            key: Some(key.to_owned()),
+        }
+    }
+
+    #[test]
+    fn a_file_location_reads_the_nearest_file_beside_the_document() {
+        let doc = document("# Requirements\n");
+        let files = Files(vec![
+            (
+                ".kiro/specs/albums/spec.json",
+                SPEC_JSON.as_bytes().to_vec(),
+            ),
+            (".kiro/spec.json", b"{\"phase\": \"from-above\"}".to_vec()),
+            ("spec.json", b"phase: at-the-root\n".to_vec()),
+        ]);
+        let read = |path: &str, key: &str| {
+            in_file(key)
+                .find_in(path, &doc, &files)
+                .map(|found| (found.text, found.place))
+        };
+        let here = ".kiro/specs/albums/requirements.md";
+        assert_eq!(
+            read(here, "phase"),
+            Some(("tasks-generated".to_owned(), Place::File))
+        );
+        assert_eq!(
+            read(here, "approvals.requirements.approved"),
+            Some(("true".to_owned(), Place::File))
+        );
+        assert_eq!(
+            read(here, "updated-at").map(|f| f.0).as_deref(),
+            Some("2026-01-05")
+        );
+        assert_eq!(
+            read(".kiro/specs/other/x.md", "phase")
+                .map(|f| f.0)
+                .as_deref(),
+            Some("from-above")
+        );
+        assert_eq!(
+            read("top.md", "phase").map(|f| f.0).as_deref(),
+            Some("at-the-root")
+        );
+        for missing in [
+            "status",
+            "approvals",
+            "tags",
+            "approvals.design.approved",
+            "approvals.tasks.approved",
+            "phase.inner",
+            "tags.first",
+        ] {
+            assert_eq!(read(here, missing), None, "{missing}");
+        }
+        assert_eq!(in_file("phase").find(&doc), None);
+        let no_key = Location {
+            key: None,
+            ..in_file("phase")
+        };
+        assert_eq!(no_key.find_in(here, &doc, &files), None);
+        let no_file = Location {
+            file: None,
+            ..in_file("phase")
+        };
+        assert_eq!(no_file.find_in(here, &doc, &files), None);
+        assert_eq!(files.markdown_in(&[""]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_gives_no_value() {
+        let doc = document("# T\n");
+        let read = |bytes: Vec<u8>| {
+            in_file("phase")
+                .find_in("a/doc.md", &doc, &Files(vec![("a/spec.json", bytes)]))
+                .map(|found| found.text)
+        };
+        assert_eq!(
+            read(b"\xef\xbb\xbf{\"phase\": \"bom\"}".to_vec()).as_deref(),
+            Some("bom")
+        );
+        assert_eq!(
+            read(b"{\n\t\"phase\":\n\t\t\"tabs\"\n}\n".to_vec()).as_deref(),
+            Some("tabs")
+        );
+        assert_eq!(read(b"{\"phase\": \"a\"".to_vec()), None);
+        assert_eq!(read(b"[1, 2]".to_vec()), None);
+        assert_eq!(read(vec![0xff, 0xfe]), None);
+        let mut largest = b"{\"phase\": \"big\"}\n".to_vec();
+        largest.resize(MAX_FILE_SIZE, b' ');
+        assert_eq!(read(largest.clone()).as_deref(), Some("big"));
+        largest.push(b' ');
+        assert_eq!(read(largest), None);
+    }
+
+    #[test]
+    fn a_yaml_file_keeps_its_nesting() {
+        let doc = document("# T\n");
+        let yaml = b"approvals:\n  requirements:\n    approved: yes\n  design:\n    approved: no\n";
+        let files = Files(vec![("a/spec.json", yaml.to_vec())]);
+        let read = |key: &str| {
+            in_file(key)
+                .find_in("a/doc.md", &doc, &files)
+                .map(|found| found.text)
+        };
+        assert_eq!(read("approvals.design.approved").as_deref(), Some("no"));
+        assert_eq!(
+            read("approvals.requirements.approved").as_deref(),
+            Some("yes")
+        );
+    }
+
+    #[test]
+    fn the_document_wins_over_a_file_and_classify_with_reads_files() {
+        let rules = Rules::parse(
+            "[[type]]\nname = \"requirements\"\npaths = [\".kiro/specs/*/requirements.md\"]\nstatus = { front-matter = \"status\", file = \"spec.json\", key = \"phase\" }\ndate = { file = \"spec.json\", key = \"updated_at\" }\nlifecycle = \"current\"\n",
+        )
+        .expect("valid");
+        let files = Files(vec![(
+            ".kiro/specs/albums/spec.json",
+            SPEC_JSON.as_bytes().to_vec(),
+        )]);
+        let path = ".kiro/specs/albums/requirements.md";
+        let plain = document("# Requirements\n");
+        let found = rules.classify_with(path, &plain, &files);
+        assert_eq!(found.status.as_deref(), Some("tasks-generated"));
+        // The file writes the key as `Updated_At`; keys match as front
+        // matter keys do.
+        assert_eq!(found.date.as_deref(), Some("2026-01-05"));
+        assert_eq!(found.lifecycle, Some(Lifecycle::Current));
+        let without = rules.classify(path, &plain);
+        assert_eq!(without.status, None);
+        let written = document("---\nstatus: approved\n---\n\n# Requirements\n");
+        assert_eq!(
+            rules
+                .classify_with(path, &written, &files)
+                .status
+                .as_deref(),
+            Some("approved")
+        );
+        assert_eq!(
+            rules.classify_with("README.md", &plain, &files).doc_type,
+            DEFAULT_TYPE
+        );
+    }
+
+    #[test]
+    fn impossible_file_locations_are_refused() {
+        let base = "[[type]]\nname = \"t\"\npaths = [\"a/*.md\"]\n";
+        let cases = [
+            (
+                "{ file = \"spec.json\" }",
+                "`status` names a file but no key to read in it",
+            ),
+            (
+                "{ key = \"phase\" }",
+                "`status` names a key but no file to read it from",
+            ),
+            (
+                "{ file = \" \", key = \"phase\" }",
+                "`status` has an empty name",
+            ),
+            (
+                "{ file = \"spec.json\", key = \"\" }",
+                "`status` has an empty name",
+            ),
+            (
+                "{ file = \"a/spec.json\", key = \"phase\" }",
+                "`status` names the file \"a/spec.json\"; write a file name without folders, and driftmark looks for it beside the document and in the folders above",
+            ),
+            (
+                "{ file = \"a\\\\b\", key = \"phase\" }",
+                "`status` names the file \"a\\\\b\"; write a file name without folders, and driftmark looks for it beside the document and in the folders above",
+            ),
+            (
+                "{ file = \".\", key = \"phase\" }",
+                "`status` names the file \".\"; write a file name without folders, and driftmark looks for it beside the document and in the folders above",
+            ),
+            (
+                "{ file = \"..\", key = \"phase\" }",
+                "`status` names the file \"..\"; write a file name without folders, and driftmark looks for it beside the document and in the folders above",
+            ),
+            (
+                "{ file = \"spec.json\", key = \"a..b\" }",
+                "`status` has the key \"a..b\", which has an empty part between its dots",
+            ),
+            (
+                "{ file = \"spec.json\", key = \".a\" }",
+                "`status` has the key \".a\", which has an empty part between its dots",
+            ),
+        ];
+        for (location, problem) in cases {
+            assert_eq!(
+                invalid(&format!("{base}status = {location}\n")),
+                problem,
+                "{location}"
+            );
+        }
+        assert!(
+            Rules::parse(&format!(
+                "{base}status = {{ file = \"..x\", key = \"a.b\" }}\n"
+            ))
+            .is_ok()
         );
     }
 }

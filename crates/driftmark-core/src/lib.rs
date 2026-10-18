@@ -12,6 +12,7 @@ pub mod document;
 pub mod git;
 pub mod lint;
 pub mod notes;
+pub mod presets;
 pub mod render;
 pub mod rules;
 pub mod search;

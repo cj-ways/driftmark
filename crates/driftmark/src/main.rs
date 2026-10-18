@@ -20,6 +20,7 @@ Commands:
   hook install   run the lint after each edit Claude Code makes
   init           set up a docs layout with templates and writing rules
   new            start a document from a template of that layout
+  presets        list the built-in presets and the ones this repository uses
 
 Run `driftmark <command> --help` for a command's options.";
 
@@ -64,6 +65,7 @@ fn main() -> ExitCode {
         Some("hook") => driftmark::hook::run(&args[1..], &mut stdout, &mut stderr),
         Some("init") => driftmark::init::run(&args[1..], &mut stdout, &mut stderr),
         Some("new") => driftmark::new::run(&args[1..], &mut stdout, &mut stderr),
+        Some("presets") => driftmark::presets::run(&args[1..], &mut stdout, &mut stderr),
         Some("serve") => driftmark::serve::run(&args[1..], &mut stdout, &mut stderr),
         _ => {
             let _ = writeln!(stderr, "{USAGE}");

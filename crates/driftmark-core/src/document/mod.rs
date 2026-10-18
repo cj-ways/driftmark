@@ -11,7 +11,7 @@ mod content;
 pub mod markdown;
 pub(crate) mod meta;
 pub mod outline;
-mod yaml;
+pub(crate) mod yaml;
 
 use std::any::Any;
 use std::fmt;

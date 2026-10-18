@@ -163,7 +163,9 @@ fn place_start(
                 block.range.start
             })
         }
-        Place::Masthead => heading_end(None),
+        // A value from a file beside the document has no line in it, so its
+        // finding points at the title, as a masthead's does.
+        Place::Masthead | Place::File => heading_end(None),
         Place::Section => heading_end(location.section.as_deref()),
     }
 }

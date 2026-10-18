@@ -35,7 +35,9 @@ const RULES: &str = "[[type]]\nname = \"decision\"\npaths = [\"docs/decisions/*.
 
 /// A repo with these commits:
 ///
-/// - `main`: the first version, with no rules file;
+/// - `main`: the first version, with no rules file. Its decision record has
+///   no number in its name, so the ADR preset does not take `docs/decisions/`
+///   for an ADR folder, and `main` has the default rules;
 /// - `feature`, one day later: the decision record changes, a guide is
 ///   reworded, a page is deleted, a page is added, `README.md` moves to
 ///   `docs/readme.md`, and the rules file appears;
@@ -52,14 +54,14 @@ struct Fixture {
 
 fn repo() -> Fixture {
     let repo = TestRepo::new("diff");
-    repo.write("docs/decisions/0002-cache.md", DECISION_BEFORE);
+    repo.write("docs/decisions/cache.md", DECISION_BEFORE);
     repo.write("docs/guide.md", "# Guide\n\nRead the setup first.\n");
     repo.write("docs/old.md", "# Old\n\nThis page goes away.\n");
     repo.write("README.md", "# Readme\n");
     repo.write("notes.txt", "not Markdown\n");
     let main = repo.commit("first", T0);
     repo.git(&["checkout", "-q", "-b", "feature"]);
-    repo.write("docs/decisions/0002-cache.md", DECISION_AFTER);
+    repo.write("docs/decisions/cache.md", DECISION_AFTER);
     repo.write("docs/guide.md", "# Guide\n\nRead the whole setup first.\n");
     repo.remove("docs/old.md");
     repo.write("docs/new.md", "# New\n\nVersion 2 adds export.\n");
@@ -99,7 +101,7 @@ fn the_summary_ranks_documents_by_their_highest_level() {
 main..feature: from {} to {}
 
 level       changes  document
-decision     3 of 5  docs/decisions/0002-cache.md (status proposed -> accepted)
+decision     3 of 5  docs/decisions/cache.md (status proposed -> accepted)
 fact         1 of 1  README.md (deleted)
 fact         1 of 1  docs/new.md (new)
 fact         1 of 1  docs/old.md (deleted)
@@ -129,9 +131,9 @@ fn the_rules_file_comes_from_the_head_side() {
     assert_eq!(code, 0);
     let line = out
         .lines()
-        .find(|line| line.contains("0002-cache.md"))
+        .find(|line| line.contains("cache.md"))
         .expect("the decision record is listed");
-    assert_eq!(line, "fact         2 of 5  docs/decisions/0002-cache.md");
+    assert_eq!(line, "fact         2 of 5  docs/decisions/cache.md");
 
     // A broken rules file in the working tree does not matter to a range
     // whose head is a commit, and is an error for `auto`.
@@ -179,7 +181,7 @@ fn json_holds_the_whole_change_list() {
     assert_eq!(
         paths,
         [
-            "docs/decisions/0002-cache.md",
+            "docs/decisions/cache.md",
             "README.md",
             "docs/new.md",
             "docs/old.md",
@@ -246,7 +248,7 @@ fn json_summary_lists_each_document_with_its_counts() {
     assert_eq!(
         documents[0],
         serde_json::json!({
-            "path": "docs/decisions/0002-cache.md",
+            "path": "docs/decisions/cache.md",
             "file": "modified",
             "summary": {
                 "changes": 5,

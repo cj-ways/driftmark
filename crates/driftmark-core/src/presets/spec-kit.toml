@@ -1,0 +1,68 @@
+# driftmark's preset for GitHub Spec Kit (https://github.com/github/spec-kit).
+#
+# Spec Kit keeps one folder per feature, specs/NNN-name/, with the feature's
+# spec, plan and tasks, and the project's constitution in
+# .specify/memory/constitution.md. driftmark only reads these files; it never
+# moves or rewrites them.
+#
+# To change these rules, copy this text into driftmark.toml and edit it. The
+# format is described in driftmark's docs/features/engine/rules-file.md.
+
+# Spec Kit writes its fields as bold lines under the title, such as
+# `**Status**: Draft`. Status and Date are known keys already. These keys come
+# before Status in a spec, so they must be known too, or driftmark stops
+# reading before it reaches the status.
+[masthead]
+keys = ["Feature Branch", "Created", "Input"]
+
+# The project's principles. It changes in place, so it is always current.
+[[type]]
+name = "constitution"
+paths = [".specify/memory/constitution.md", "memory/constitution.md"]
+lifecycle = "current"
+
+# A feature's specification. Its status says whether it is still a draft,
+# built, replaced or dropped. Spec Kit starts every spec as Draft; the other
+# values are the ones Spec Kit users write most.
+[[type]]
+name = "feature-spec"
+paths = ["specs/*/spec.md"]
+status = { masthead = "Status" }
+current = ["implemented", "complete", "completed", "done", "approved", "accepted", "shipped"]
+superseded = ["superseded", "subsumed", "migrated"]
+archived = ["deprecated", "abandoned", "cancelled", "canceled", "rejected", "withdrawn", "obsolete"]
+other-statuses = ["draft", "in progress", "in review", "review", "planned", "proposed", "ready"]
+date = { masthead = "Created" }
+decision-headings = ["Requirements", "Requirements (mandatory)", "Clarifications"]
+
+# How the feature is built.
+[[type]]
+name = "plan"
+paths = ["specs/*/plan.md"]
+date = { masthead = "Date" }
+
+# The feature's task list.
+[[type]]
+name = "tasks"
+paths = ["specs/*/tasks.md"]
+
+# The other documents of a feature folder.
+[[type]]
+name = "research"
+paths = ["specs/*/research.md"]
+
+[[type]]
+name = "data-model"
+paths = ["specs/*/data-model.md"]
+
+[[type]]
+name = "quickstart"
+paths = ["specs/*/quickstart.md"]
+
+[[type]]
+name = "contract"
+paths = ["specs/*/contracts/**/*.md"]
+
+[[type]]
+name = "checklist"
+paths = ["specs/*/checklists/**/*.md"]

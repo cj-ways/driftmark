@@ -1,0 +1,8 @@
+---
+project:
+  name: Made-up shop
+  adrFolder: ./docs/adr
+  packages:
+    - name: checkout
+      path: ./packages/checkout
+      adrFolder: ./packages/checkout/docs/adr

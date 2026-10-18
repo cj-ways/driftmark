@@ -44,6 +44,9 @@ pub(crate) enum RulesId {
     Blob(ObjectId),
     /// The rules file on disk, by a hash of its bytes.
     Worktree(u64),
+    /// Rules with presets, by a hash of the rules file and of each preset in
+    /// use with the folders it reads.
+    Presets(u64),
 }
 
 /// The key of a cache entry. Each kind of key holds one type of value.

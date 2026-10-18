@@ -5,14 +5,15 @@ date: 2026-10-18
 
 # Rules file
 
-> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset (M4) is a rules file in this same format. An optional `[lint]` table holds the writing check's settings, an optional `[masthead]` table adds masthead keys to the known ones, and an optional `[compare]` table names the branch `auto` and the home page compare with.
+> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. A value can also come from a JSON or YAML file beside the document, such as cc-sdd's `spec.json`. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset is a rules file in this same format, built into driftmark: `presets = [...]` names the ones a repository uses, and a repository with no rules file uses the ones whose layout it has (`docs/features/presets.md`). An optional `[lint]` table holds the writing check's settings, an optional `[masthead]` table adds masthead keys to the known ones, and an optional `[compare]` table names the branch `auto` and the home page compare with.
 
 ## Who reads it
 
 - The program finds the file and reads its text. It is `driftmark.toml` at the repository root. `driftmark lint` reads it from the disk. `driftmark diff` reads it at the newer side of the range: at the head commit, or from the disk for `auto` (`docs/features/commands/diff.md`). `driftmark serve` reads it at the side a page shows: at the commit, or from the disk for the working tree (`docs/features/commands/serve.md`).
-- `driftmark_core::rules::Rules::parse(text)` parses the text, so the core never touches a file.
-- `rules.classify(path, &document)` applies the rules to one parsed document. `path` is relative to the repository root, with `/` between folders, as git writes it.
-- With no rules file, `Rules::default()` has no types, so every file is a `document`.
+- `driftmark_core::rules::Rules::parse(text)` parses the text, so the core never touches a file. It keeps the names in `presets = [...]` without their types.
+- `driftmark_core::presets::Setup::build(own, &files)` adds the presets: those the parsed file `own` names, after its own types, or, when `own` is `None`, every preset whose markers `files` holds. `files` is a `RepoFiles`, which the program answers for one side: a commit, or the working tree on disk. Every command reads its rules this way.
+- `rules.classify(path, &document)` applies the rules to one parsed document. `path` is relative to the repository root, with `/` between folders, as git writes it. `rules.classify_with(path, &document, &files)` does the same and also reads a location's file beside the document.
+- With no rules file and no preset found, the rules have no types, so every file is a `document`.
 - `rules.masthead_keys()` gives the masthead keys to parse documents with: `Document::parse_with(bytes, rules.masthead_keys())`. See "Masthead keys" below.
 
 ## An example
@@ -75,7 +76,23 @@ What it gives for a few files of that project:
 
 ## The format
 
-The file is TOML. It holds a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes, one `[masthead]` table and one `[compare]` table. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
+The file is TOML. It holds an optional `presets` list, a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes, one `[masthead]` table and one `[compare]` table. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
+
+### Presets
+
+`presets` names built-in presets whose types the repository uses:
+
+```toml
+presets = ["openspec", "adr"]
+```
+
+- The file's own types come first, then each preset's, in the order named. A file can therefore type some of a preset's paths its own way.
+- The names are `openspec`, `spec-kit`, `adr` and `kiro`. A name driftmark does not know is a `Syntax` error with its line: ``driftmark has no preset "backlog"; the presets are "openspec", "spec-kit", "adr", "kiro"``. A name written twice counts once.
+- The masthead keys of every named preset are known too.
+- A preset gives types and masthead keys only. The `[lint]` and `[compare]` tables come from this file.
+- A rules file with no `presets` key uses no preset, even where a preset's markers are. With no rules file at all, driftmark uses every preset whose markers it finds.
+
+`docs/features/presets.md` describes each preset, its markers and how to copy one into this file.
 
 ### Keys of a type
 
@@ -114,18 +131,37 @@ The file is TOML. It holds a list of `[[type]]` tables and, optionally, one `[li
 
 ### Locations
 
-A location says where to find one value. It is a table with one or more of three keys:
+A location says where to find one value. It is a table with one or more of four places:
 
 | Key | Reads |
 |---|---|
 | `front-matter = "key"` | That key of the YAML front matter. |
 | `masthead = "Key"` | That key of the masthead: the `Key: Value` lines right under the title, as a quote, a paragraph or a list. |
 | `section = "Title"` | The first line of text under the first heading with that title, outside any container. Deeper headings inside the section are skipped. The section ends at the next heading of the same or a higher level. This is how adr-tools writes status. |
+| `file = "name"` with `key = "a.b"` | The value at `key` in the nearest JSON or YAML file called `name`: in the document's folder, or else in the closest folder above it. This is how cc-sdd keeps a spec's phase, in `spec.json`. |
 
-- When a location names more than one place, they are tried in this order: front matter, masthead, section. The first value found wins. So `{ front-matter = "status", masthead = "Status" }` suits a folder that is moving from mastheads to front matter.
+- When a location names more than one place, they are tried in this order: front matter, masthead, section, file. The first value found wins. So `{ front-matter = "status", masthead = "Status" }` suits a folder that is moving from mastheads to front matter.
 - Keys match without regard to case, and `-`, `_` and spaces count as the same. `superseded-by` finds `superseded_by:` in front matter and `Superseded by:` in a masthead. Section titles match the same way.
 - A value is text. A front matter list or map is not a value, and neither is an empty or blank value. The next place is tried instead.
 - Masthead values are their rendered text, so `**Accepted**` reads as `Accepted`. The targets of links in a masthead "superseded by" value come back too.
+
+#### A value in a file beside the document
+
+```toml
+[[type]]
+name = "requirements"
+paths = [".kiro/specs/*/requirements.md"]
+status = { file = "spec.json", key = "phase" }
+date = { file = "spec.json", key = "updated_at" }
+```
+
+For `.kiro/specs/albums/requirements.md`, driftmark reads `.kiro/specs/albums/spec.json`, or else `.kiro/specs/spec.json`, `.kiro/spec.json` and `spec.json`, and takes the first that exists.
+
+- `file` is a file name, without folders. `key` names the value; nested tables are joined with `.`, as in `approvals.requirements.approved`. Keys match as front matter keys do, so `updated-at` finds `updated_at`.
+- The file is read as YAML, which also reads JSON. Tabs that indent a JSON line are allowed.
+- A value must be text: a number or `true` reads as written. A list, a table, an empty value, a missing key, or a file that is too large (over 2 MiB), not UTF-8 or not valid, gives no value.
+- `file` and `key` go together. Either one alone is an `Invalid` type, and so is a file name with a `/` or a `\`, `.` or `..`, or a key with an empty part between its dots.
+- Only `classify_with` reads files. The change list compares Markdown files only, so a value from a file takes no part in its ranking (`docs/features/presets.md`, "Not covered"). The writing check reads the document alone, so it does not see such a value either.
 
 `docs/features/engine/document-model.md` has the exact rules for reading front matter and mastheads.
 
@@ -203,7 +239,7 @@ Here `status: proposed` is allowed and has no lifecycle. `status: draft` gets a 
 
 | Error | When |
 |---|---|
-| `Syntax` | The file is not valid TOML, a key is unknown or missing, a value has the wrong shape, a `[masthead]` key cannot match a line, or `default-branch` cannot name a branch. The TOML reader's message names the line and column and shows the line. |
+| `Syntax` | The file is not valid TOML, a key is unknown or missing, a value has the wrong shape, a `[masthead]` key cannot match a line, `default-branch` cannot name a branch, or `presets` names a preset driftmark does not have. The TOML reader's message names the line and column and shows the line. |
 | `Invalid` | A type is valid TOML but says something impossible. The message names the type by its position and name, as in `the rules file's type 2 ("feature"): it lists no paths`. |
 | `Lint` | The `[lint]` table is valid TOML but names an HTML element that cannot exist, as in ``the rules file's [lint] table: `allowed-html` holds "<b>", …``. An unknown rule id or a limit of 0 is a `Syntax` error instead, because the TOML reader catches it with its line. |
 
@@ -222,6 +258,7 @@ A type is invalid when:
 - its name is empty;
 - it lists no paths, or a pattern does not parse;
 - a location names no place to look, or names an empty key or title;
+- a location names a `file` without a `key`, or a `key` without a `file`, a file name with folders in it, or a key with an empty part;
 - it lists status values, in any of the four lists, but has no `status` location;
 - one status value is in two lists, or has no letters or digits;
 - a decision heading is empty;
@@ -239,23 +276,20 @@ A type is invalid when:
 | `superseded_by_links` | The link targets in that text, when it came from the masthead. |
 | `decision_blocks` | The indexes of the blocks in decision sections. |
 
-`rules.type_for(path)` returns the matching type itself. `rule.lifecycle_of(status)` and `rule.is_decision_heading(title)` apply one rule each.
+`rules.classify_with(path, &document, &files)` returns the same fields, with the values of `file` places read from `files`. `rules.type_for(path)` returns the matching type itself. `rule.lifecycle_of(status)` and `rule.is_decision_heading(title)` apply one rule each.
 
 Three more lookups serve the writing check:
 
 - `rule.allows_status(status)` says whether any of the four lists holds the status, and `rule.statuses()` lists every value in the order the file writes them.
-- `location.find(&document)` reads one location. It returns a `Located`: the value's text, the targets of its links, and the `Place` that held it (`FrontMatter`, `Masthead` or `Section`), so a finding can point at the right line.
+- `location.find(&document)` reads one location. It returns a `Located`: the value's text, the targets of its links, and the `Place` that held it (`FrontMatter`, `Masthead`, `Section` or `File`), so a finding can point at the right line. `location.find_in(path, &document, &files)` also reads a `file` place.
 - `rules.lint()` returns the `[lint]` settings, or the defaults when the file has no `[lint]` table.
 - `rules.masthead_keys()` returns the known masthead keys: the built-in ones, the `[masthead]` table's, and those the types' `masthead` locations name.
 
 ## Presets
 
-A preset is a rules file in this same format, built into driftmark (M4). M4 decides how a repository turns one on and how its types combine with the repository's own. These sketches show that the planned presets fit the format:
+A preset is a rules file in this same format, built into driftmark. Version 1 has four: `openspec`, `spec-kit`, `adr` and `kiro`. `docs/features/presets.md` lists each one's types, statuses, lifecycles and decision headings, and the markers driftmark finds it by. `driftmark presets show <name>` prints one, so it can be copied into `driftmark.toml` and changed.
 
-- **OpenSpec.** `openspec/specs/**` as current specs with `lifecycle = "current"`, `openspec/changes/archive/**` with `lifecycle = "archived"` listed before `openspec/changes/**`, and `decision-headings = ["ADDED Requirements", "MODIFIED Requirements", "REMOVED Requirements"]`.
-- **GitHub Spec Kit.** `specs/*/spec.md`, `specs/*/plan.md` and `specs/*/tasks.md` as three types, with `status = { masthead = "Status" }`, read from Spec Kit's `**Status**: Draft` line.
-- **ADR folders.** adr-tools with `status = { section = "Status" }`. MADR 3 and later with `status = { front-matter = "status" }`. MADR 2 with `status = { masthead = "Status" }`, read from its `* Status: accepted` list. log4brains is checked against a real repository in M4.
-- **Kiro and cc-sdd.** `.kiro/specs/*/requirements.md`, `.kiro/specs/*/design.md` and `.kiro/specs/*/tasks.md` by path, with no status.
+How the presets meet a rules file is under "Presets" in "The format" above.
 
 ## Not covered
 

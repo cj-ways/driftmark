@@ -181,7 +181,12 @@ fn read(context: &Context, args: &Args) -> Result<Value, String> {
 /// rules file and its metadata say about it.
 fn metadata(found: &DocumentAt, label: &str, path: &str, parsed: &Document) -> Map<String, Value> {
     let source = parsed.source.as_str();
-    let classification = found.rules.rules.classify(path, parsed);
+    // `document_at` classified it with the files beside it, such as a
+    // cc-sdd `spec.json`.
+    let classification = found
+        .classification
+        .clone()
+        .unwrap_or_else(|| found.rules.rules.classify(path, parsed));
     let mut head = Map::new();
     head.insert("schema_version".into(), json!(1));
     head.insert("path".into(), json!(path));

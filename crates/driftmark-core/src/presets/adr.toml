@@ -1,0 +1,48 @@
+# driftmark's preset for folders of architecture decision records (ADRs):
+# records written with adr-tools (https://github.com/npryce/adr-tools), MADR
+# (https://adr.github.io/madr/), log4brains
+# (https://github.com/thomvaill/log4brains), or by hand in Michael Nygard's
+# style. driftmark only reads these files; it never moves or rewrites them.
+#
+# To change these rules, copy this text into driftmark.toml and edit it. The
+# format is described in driftmark's docs/features/engine/rules-file.md.
+
+# A record is a numbered or dated file in a decision folder, such as
+# 0001-use-markdown.md, 20240926-use-git-flow.md or ADR-012-cache.md. The
+# folder's README, index and template are not records.
+#
+# The status is read from the first of these places that has one:
+# - `status:` in the front matter (MADR 3 and later);
+# - a `Status:` line under the title, as a list item (MADR 2, log4brains) or
+#   as a paragraph;
+# - the first line under a `## Status` heading (adr-tools, Nygard).
+#
+# A record without a status has no lifecycle: driftmark cannot tell whether
+# it is in force.
+[[type]]
+name = "adr"
+paths = [
+  "docs/adr/[0-9]*.md",
+  "docs/adr/[Aa][Dd][Rr]-[0-9]*.md",
+  "doc/adr/[0-9]*.md",
+  "doc/adr/[Aa][Dd][Rr]-[0-9]*.md",
+  "adr/[0-9]*.md",
+  "adr/[Aa][Dd][Rr]-[0-9]*.md",
+  "docs/decisions/[0-9]*.md",
+  "docs/decisions/[Aa][Dd][Rr]-[0-9]*.md",
+  "docs/adrs/[0-9]*.md",
+  "docs/adrs/[Aa][Dd][Rr]-[0-9]*.md",
+  "docs/architecture/decisions/[0-9]*.md",
+  "docs/architecture/decisions/[Aa][Dd][Rr]-[0-9]*.md",
+  "doc/architecture/decisions/[0-9]*.md",
+  "doc/architecture/decisions/[Aa][Dd][Rr]-[0-9]*.md",
+  # driftmark adds the folders that .adr-dir and .log4brains.yml name here.
+]
+status = { front-matter = "status", masthead = "Status", section = "Status" }
+current = ["accepted", "approved"]
+superseded = ["superseded", "superceded", "replaced"]
+archived = ["deprecated", "rejected", "withdrawn", "obsolete"]
+other-statuses = ["proposed", "draft"]
+date = { front-matter = "date", masthead = "Date" }
+superseded-by = { front-matter = "superseded-by", masthead = "Superseded by" }
+decision-headings = ["Decision", "Decision Outcome"]

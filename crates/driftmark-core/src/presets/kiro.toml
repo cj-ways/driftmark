@@ -1,0 +1,68 @@
+# driftmark's preset for Kiro (https://kiro.dev) and cc-sdd
+# (https://github.com/gotalab/cc-sdd), which share one layout: a folder per
+# feature or bug under .kiro/specs/, and steering files under .kiro/steering/.
+# driftmark only reads these files; it never moves or rewrites them.
+#
+# To change these rules, copy this text into driftmark.toml and edit it. The
+# format is described in driftmark's docs/features/engine/rules-file.md.
+
+# Kiro writes no status: its specs are living documents, changed in place, so
+# they count as current. Kiro's .config.kiro file names the spec's id and kind,
+# not a status. cc-sdd keeps each spec's phase in a spec.json beside its files,
+# such as "tasks-generated"; driftmark shows that phase as the status, and
+# cc-sdd's updated_at as the date. A per-document approval can be read
+# instead, with key = "approvals.requirements.approved".
+
+[[type]]
+name = "requirements"
+paths = [".kiro/specs/*/requirements.md"]
+status = { file = "spec.json", key = "phase" }
+date = { file = "spec.json", key = "updated_at" }
+lifecycle = "current"
+decision-headings = ["Requirements"]
+
+[[type]]
+name = "bugfix"
+paths = [".kiro/specs/*/bugfix.md"]
+status = { file = "spec.json", key = "phase" }
+date = { file = "spec.json", key = "updated_at" }
+lifecycle = "current"
+decision-headings = ["Bug Analysis"]
+
+[[type]]
+name = "design"
+paths = [".kiro/specs/*/design.md"]
+status = { file = "spec.json", key = "phase" }
+date = { file = "spec.json", key = "updated_at" }
+lifecycle = "current"
+
+[[type]]
+name = "tasks"
+paths = [".kiro/specs/*/tasks.md"]
+status = { file = "spec.json", key = "phase" }
+date = { file = "spec.json", key = "updated_at" }
+lifecycle = "current"
+
+# cc-sdd's research notes, with the design decisions it weighed, and its
+# feature brief.
+[[type]]
+name = "research"
+paths = [".kiro/specs/*/research.md"]
+status = { file = "spec.json", key = "phase" }
+date = { file = "spec.json", key = "updated_at" }
+lifecycle = "current"
+decision-headings = ["Design Decisions"]
+
+[[type]]
+name = "brief"
+paths = [".kiro/specs/*/brief.md"]
+status = { file = "spec.json", key = "phase" }
+date = { file = "spec.json", key = "updated_at" }
+lifecycle = "current"
+
+# Steering files: the product, technology and structure notes every agent
+# reads, such as product.md, tech.md and structure.md.
+[[type]]
+name = "steering"
+paths = [".kiro/steering/**/*.md"]
+lifecycle = "current"

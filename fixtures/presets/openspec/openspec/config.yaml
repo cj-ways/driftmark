@@ -1,0 +1,4 @@
+schema: spec-driven
+
+context: |
+  A small notes app for one person.

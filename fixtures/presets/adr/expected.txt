@@ -1,0 +1,28 @@
+preset adr found by .adr-dir, also reading architecture/records, packages/checkout/docs/adr
+
+architecture/records/0001-split-the-shop-into-two-services.md
+    type adr | status Accepted | lifecycle current | date - | decisions 2 blocks under Decision
+architecture/records/README.md
+    type document | status - | lifecycle - | date - | decisions -
+doc/adr/0001-record-architecture-decisions.md
+    type adr | status Accepted | lifecycle current | date 2026-01-02 | decisions 2 blocks under Decision
+doc/adr/0002-store-files-in-sqlite.md
+    type adr | status Superceded by 3. Store files on disk | lifecycle superseded | date 2026-01-09 | decisions 2 blocks under Decision
+doc/adr/0003-store-files-on-disk.md
+    type adr | status Accepted | lifecycle current | date 2026-02-14 | decisions 2 blocks under Decision
+docs/adr/20260105-use-log4brains.md
+    type adr | status accepted | lifecycle current | date 2026-01-05 | decisions 2 blocks under Decision Outcome
+docs/adr/20260201-try-graphql.md
+    type adr | status proposed | lifecycle - | date 2026-02-01 | decisions 2 blocks under Decision Outcome
+docs/adr/template.md
+    type document | status - | lifecycle - | date - | decisions -
+docs/decisions/0001-use-markdown-for-decisions.md
+    type adr | status accepted | lifecycle current | date 2026-01-03 | decisions 2 blocks under Decision Outcome
+docs/decisions/0002-write-decisions-in-a-wiki.md
+    type adr | status rejected | lifecycle archived | date 2026-01-04 | decisions 2 blocks under Decision Outcome
+docs/decisions/README.md
+    type document | status - | lifecycle - | date - | decisions -
+docs/decisions/adr-template.md
+    type document | status - | lifecycle - | date - | decisions -
+packages/checkout/docs/adr/20260110-pay-by-card-only.md
+    type adr | status deprecated | lifecycle archived | date 2026-01-10 | decisions 2 blocks under Decision Outcome

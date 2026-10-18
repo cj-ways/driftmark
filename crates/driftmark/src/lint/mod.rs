@@ -77,20 +77,15 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    /// Opens the working tree at `root` and reads its rules file.
+    /// Opens the working tree at `root` and reads its rules file, with the
+    /// presets it names, or, without one, the presets whose layout is there.
     ///
     /// # Errors
     ///
     /// A sentence for the user when the rules file cannot be read or is not
     /// valid.
     pub fn open(root: &Path) -> Result<Workspace, String> {
-        let rules_path = root.join(RULES_FILE);
-        let rules = match std::fs::read_to_string(&rules_path) {
-            Ok(text) => Rules::parse(&text)
-                .map_err(|error| format!("{RULES_FILE}: {}", error.to_string().trim_end()))?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Rules::default(),
-            Err(error) => return Err(format!("{RULES_FILE} could not be read: {error}")),
-        };
+        let rules = crate::presets::rules_on_disk(root)?;
         Ok(Workspace {
             root: root.to_path_buf(),
             rules,

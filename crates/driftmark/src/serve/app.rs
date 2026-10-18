@@ -715,8 +715,7 @@ async fn document_page(State(app): Shared, uri: Uri) -> Response {
             let title = parsed
                 .and_then(|parsed| parsed.meta.title.clone())
                 .unwrap_or_else(|| path.to_lossy().into_owned());
-            let classification =
-                parsed.map(|parsed| document.rules.rules.classify(&path.to_lossy(), parsed));
+            let classification = document.classification.clone();
             let commit = document.commit.as_ref().map(ObjectId::as_hex);
             let live = if commit.is_some() {
                 Live::No
@@ -791,11 +790,8 @@ async fn document_json(State(app): Shared, uri: Uri) -> Response {
         Ok(document) => document,
         Err(problem) => return refuse(&app, &problem, true),
     };
-    let text_path = path.to_lossy();
     let parsed = document.parsed.as_ref().as_ref();
-    let classification = parsed
-        .ok()
-        .map(|parsed| document.rules.rules.classify(&text_path, parsed));
+    let classification = document.classification.clone();
     json(&DocumentJson {
         schema_version: SCHEMA_VERSION,
         path: path.to_lossy(),

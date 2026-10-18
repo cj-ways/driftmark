@@ -5,6 +5,7 @@
 //! its new tip on the next request, with no timer and no rebuild.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -14,7 +15,7 @@ use driftmark_core::git::{
     OpenBranch, RangeError, RangeSpec, RepoPath, ResolvedRange, Roots, Snapshot, diff_files, inbox,
     merge_base,
 };
-use driftmark_core::rules::Rules;
+use driftmark_core::rules::{Classification, Rules};
 
 use super::address::{RangeAddress, Revision};
 use super::cache::{Cache, Key, RulesId, Sized};
@@ -91,6 +92,9 @@ pub(crate) struct DocumentAt {
     pub rules: Arc<RulesAt>,
     /// The parsed document, or why it could not be parsed.
     pub parsed: Arc<Parsed>,
+    /// What the rules say about it, with the files beside it that a rules
+    /// location names; `None` when it could not be parsed.
+    pub classification: Option<Classification>,
 }
 
 /// The counted change list of a range: each document's counts, without its
@@ -277,8 +281,9 @@ impl Repo {
             }))
     }
 
-    /// The rules file at one side of a range: from a commit, cached by its
-    /// blob, or from the disk.
+    /// The rules at one side of a range: the rules file from a commit,
+    /// cached by its blob, or from the disk, with the presets it names; with
+    /// no rules file, the presets found at that side.
     ///
     /// # Errors
     ///
@@ -288,31 +293,71 @@ impl Repo {
         let Some(path) = RepoPath::new(RULES_FILE) else {
             return Ok(Arc::clone(&self.default_rules));
         };
-        match side {
-            Snapshot::Commit(commit) => {
-                let Some(blob) = self.git.blob_at(commit, &path)? else {
-                    return Ok(Arc::clone(&self.default_rules));
-                };
-                self.cache.get_or_load(&Key::Rules(blob.clone()), || {
-                    let rules = rules_file::read(&self.git, side).map_err(Problem::failed)?;
-                    Ok(Sized {
+        let own = match side {
+            Snapshot::Commit(commit) => match self.git.blob_at(commit, &path)? {
+                None => None,
+                Some(blob) => Some(self.cache.get_or_load(&Key::Rules(blob.clone()), || {
+                    let rules = rules_file::own(&self.git, side)
+                        .map_err(Problem::failed)?
+                        .unwrap_or_default();
+                    Ok::<_, Problem>(Sized {
                         value: RulesAt {
                             id: RulesId::Blob(blob.clone()),
                             rules,
                         },
                         bytes: 16 * 1024,
                     })
-                })
-            }
+                })?),
+            },
             Snapshot::Worktree => match self.git.read_worktree_file(&path) {
-                Err(GitError::MissingFile { .. }) => Ok(Arc::clone(&self.default_rules)),
-                Err(error) => Err(error.into()),
-                Ok(bytes) => Ok(Arc::new(RulesAt {
+                Err(GitError::MissingFile { .. }) => None,
+                Err(error) => return Err(error.into()),
+                Ok(bytes) => Some(Arc::new(RulesAt {
                     id: RulesId::Worktree(super::fingerprint(&bytes)),
-                    rules: rules_file::read(&self.git, side).map_err(Problem::failed)?,
+                    rules: rules_file::own(&self.git, side)
+                        .map_err(Problem::failed)?
+                        .unwrap_or_default(),
                 })),
             },
+        };
+        // A rules file that names no preset is used as it is, and so is the
+        // default when no preset is found: their cache ids stay as they were.
+        if let Some(own) = &own
+            && own.rules.presets().is_empty()
+        {
+            return Ok(Arc::clone(own));
         }
+        let setup =
+            rules_file::with_presets(&self.git, side, own.as_ref().map(|own| own.rules.clone()))
+                .map_err(Problem::failed)?;
+        if setup.presets.is_empty() {
+            return Ok(Arc::clone(&self.default_rules));
+        }
+        let mut made_of = format!("{:?};", own.as_ref().map(|own| &own.id));
+        for in_use in &setup.presets {
+            let _ = write!(made_of, "{}:{:?};", in_use.preset.name, in_use.folders);
+        }
+        Ok(Arc::new(RulesAt {
+            id: RulesId::Presets(super::fingerprint(made_of.as_bytes())),
+            rules: setup.rules,
+        }))
+    }
+
+    /// What the rules say about a document at one side, reading the files
+    /// beside it that a location names, such as cc-sdd's `spec.json`.
+    fn classify(
+        &self,
+        side: &Snapshot,
+        path: &RepoPath,
+        rules: &RulesAt,
+        parsed: &Parsed,
+    ) -> Option<Classification> {
+        let files = crate::presets::files_at(&self.git, side);
+        parsed.as_ref().ok().map(|document| {
+            rules
+                .rules
+                .classify_with(&path.to_lossy(), document, &files)
+        })
     }
 
     /// A document at a revision.
@@ -336,24 +381,29 @@ impl Repo {
                         path.to_lossy()
                     ))
                 })?;
-                let rules = self.rules_at(&Snapshot::Commit(commit.clone()))?;
+                let side = Snapshot::Commit(commit.clone());
+                let rules = self.rules_at(&side)?;
                 let parsed = compare::document(&self.git, &self.cache, &blob, &rules)?;
+                let classification = self.classify(&side, path, &rules, &parsed);
                 Ok(DocumentAt {
                     commit: Some(commit),
                     blob: Some(blob),
                     rules,
                     parsed,
+                    classification,
                 })
             }
             Revision::Worktree => {
                 self.known_worktree_file(path)?;
                 let rules = self.rules_at(&Snapshot::Worktree)?;
                 let parsed = compare::worktree_document(&self.git, path, &rules)?;
+                let classification = self.classify(&Snapshot::Worktree, path, &rules, &parsed);
                 Ok(DocumentAt {
                     commit: None,
                     blob: None,
                     rules,
                     parsed,
+                    classification,
                 })
             }
         }

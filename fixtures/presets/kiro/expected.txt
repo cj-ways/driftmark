@@ -1,0 +1,24 @@
+preset kiro found by .kiro/specs/empty-list-crash/bugfix.md
+
+.kiro/settings/templates/specs/requirements.md
+    type document | status - | lifecycle - | date - | decisions -
+.kiro/specs/empty-list-crash/bugfix.md
+    type bugfix | status - | lifecycle current | date - | decisions 5 blocks under Bug Analysis, Current Behavior (Defect), Expected Behavior (Correct)
+.kiro/specs/meal-plan/design.md
+    type design | status - | lifecycle current | date - | decisions -
+.kiro/specs/meal-plan/requirements.md
+    type requirements | status - | lifecycle current | date - | decisions 5 blocks under Requirements, Requirement 1, Acceptance Criteria
+.kiro/specs/meal-plan/tasks.md
+    type tasks | status - | lifecycle current | date - | decisions -
+.kiro/specs/shopping-list/brief.md
+    type brief | status design-generated | lifecycle current | date 2026-02-03T16:30:00Z | decisions -
+.kiro/specs/shopping-list/design.md
+    type design | status design-generated | lifecycle current | date 2026-02-03T16:30:00Z | decisions -
+.kiro/specs/shopping-list/requirements.md
+    type requirements | status design-generated | lifecycle current | date 2026-02-03T16:30:00Z | decisions 5 blocks under Requirements, Requirement 1: Make the list, Acceptance Criteria
+.kiro/specs/shopping-list/research.md
+    type research | status design-generated | lifecycle current | date 2026-02-03T16:30:00Z | decisions 3 blocks under Design Decisions, Decision: merge by name
+.kiro/steering/product.md
+    type steering | status - | lifecycle current | date - | decisions -
+.kiro/steering/tech.md
+    type steering | status - | lifecycle current | date - | decisions -

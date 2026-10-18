@@ -1,41 +1,81 @@
 //! The rules file of a range: `driftmark.toml` at the repository root, on the
 //! head side. The head is the newer version, so a change to the rules file
-//! inside the range already applies to the documents it changes.
+//! inside the range already applies to the documents it changes. The presets
+//! it names, or with no rules file the presets found there, add their types
+//! after its own.
 
 use driftmark_core::git::{GitError, GitRead, ObjectId, RepoPath, Snapshot};
+use driftmark_core::presets::Setup;
 use driftmark_core::rules::{Rules, RulesError};
 
+use crate::git::Git;
 use crate::lint::RULES_FILE;
+use crate::presets::files_at;
 
 /// The rules at the head side: from the head commit, or from the working tree
-/// when the head is the working tree. No rules file means the default rules.
+/// when the head is the working tree, with their presets. No rules file and
+/// no preset found means the default rules.
 ///
 /// # Errors
 ///
 /// A sentence for the user that says where the file was read and, when it is
 /// broken, on which line.
-pub(crate) fn read(git: &dyn GitRead, head: &Snapshot) -> Result<Rules, String> {
+pub(crate) fn read(git: &Git, head: &Snapshot) -> Result<Rules, String> {
+    let own = own(git, head)?;
+    with_presets(git, head, own).map(|setup| setup.rules)
+}
+
+/// The rules file alone at one side, parsed, without its presets' types;
+/// `None` when there is no rules file.
+///
+/// # Errors
+///
+/// As [`read`].
+pub(crate) fn own(git: &dyn GitRead, side: &Snapshot) -> Result<Option<Rules>, String> {
     let Some(path) = RepoPath::new(RULES_FILE) else {
         // A fixed name, always a valid path.
-        return Ok(Rules::default());
+        return Ok(None);
     };
-    let (place, bytes) = match head {
+    let (place, bytes) = match side {
         Snapshot::Commit(commit) => {
             let place = format!("{RULES_FILE} at commit {}", short(commit));
             match git.blob_at(commit, &path) {
-                Ok(None) => return Ok(Rules::default()),
+                Ok(None) => return Ok(None),
                 Ok(Some(blob)) => (place, git.read_blob(&blob)),
                 Err(error) => return Err(format!("{place} could not be looked up: {error}")),
             }
         }
         Snapshot::Worktree => match git.read_worktree_file(&path) {
-            Err(GitError::MissingFile { .. }) => return Ok(Rules::default()),
+            Err(GitError::MissingFile { .. }) => return Ok(None),
             bytes => (format!("{RULES_FILE} in the working tree"), bytes),
         },
     };
     let bytes = bytes.map_err(|error| format!("{place} could not be read: {error}"))?;
     let text = String::from_utf8(bytes).map_err(|_| format!("{place} is not UTF-8 text"))?;
-    Rules::parse(&text).map_err(|error| describe(&place, &text, &error))
+    Rules::parse(&text)
+        .map(Some)
+        .map_err(|error| describe(&place, &text, &error))
+}
+
+/// The rules at one side with their presets: those the rules file `own`
+/// names, after its own types, or, with no rules file, every preset whose
+/// layout is there.
+///
+/// # Errors
+///
+/// When a built-in preset is broken, which its tests rule out.
+pub(crate) fn with_presets(
+    git: &Git,
+    side: &Snapshot,
+    own: Option<Rules>,
+) -> Result<Setup, String> {
+    Setup::build(own, &files_at(git, side)).map_err(|error| {
+        let place = match side {
+            Snapshot::Commit(commit) => format!("the presets at commit {}", short(commit)),
+            Snapshot::Worktree => "the presets in the working tree".to_owned(),
+        };
+        format!("{place}: {error}")
+    })
 }
 
 /// The first 12 characters of a commit id, enough to find it again.

@@ -19,7 +19,7 @@ date: 2026-10-18
 
 - **Which files.** A Markdown file is one whose name ends in `.md` or `.markdown`, in any case. "Every Markdown file in the repository" means the files git tracks and the new files it would offer to track, as `docs/features/engine/git-ranges.md` says for the working tree. Ignored files are left out, and so are the files the `[lint]` table's `exclude` names.
 - **Paths** are read from the current folder. A folder means every Markdown file inside it, except the excluded ones. A file named on the command line is checked even when git ignores it, `exclude` names it, or its name does not end in `.md`.
-- **The rules file** is `driftmark.toml` at the repository root. Without one, every rule runs with its default settings.
+- **The rules file** is `driftmark.toml` at the repository root. Without one, every rule runs with its default settings, and the document types come from the presets whose layout the repository has (`docs/features/presets.md`). With one, they come from its own types and the presets it names.
 - **Where it runs.** It must run inside a git repository with a working tree.
 - **What it reads.** The files are read from disk as they are now, saved or not committed.
 - **Speed.** All files are checked at once, one per processor core.
@@ -647,7 +647,7 @@ The hook runs after every edit, so one document must be checked in under 50 mill
 - **Anchors from HTML.** An `id` or `name` set in raw HTML does not count as an anchor, and links inside raw HTML are not checked.
 - **Ignored files.** A link to a file git ignores counts as existing, because the check looks at the disk.
 - **Required keys in a masthead.** `required` reads front matter only.
-- **Fixing findings** automatically, presets, and a CI mode come later in M4.
+- **Fixing findings** automatically, and a CI mode, come later in M4.
 - **Hooks for other agents.**
   - Codex has a `PostToolUse` hook that also reports back through exit code 2 and standard error. Its edits arrive as a patch in `tool_input.command`, so a hook must read the file paths out of the patch. Project hooks need the user's trust review.
   - Cursor's `afterFileEdit` hook gets `file_path`, but its reference documents no output the agent sees. Its `postToolUse` hook can return `additional_context`, which reaches the conversation.
