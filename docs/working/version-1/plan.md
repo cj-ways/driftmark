@@ -176,4 +176,11 @@ flowchart LR
    - moves between documents;
    - several repos behind one server;
    - AI importance labels.
-8. **The maintainer's work repo.** Its rules file, the switch of the always-on site, and the retirement of the prototype each need their own approval there.
+8. **comrak bugs, reported by hand.** Two comrak bugs are worked around in driftmark's code: an escaped `\|` in a table cell shifts the positions of everything after it in that cell, and a code span across a Windows line ending keeps the carriage return. comrak's rules forbid issues written by AI, so only the maintainer can report them, in his own words. Until a trigger fires, we keep the workarounds and file nothing.
+   - **Trigger to write the reports:** whichever comes first:
+     - a comrak upgrade where both bugs are still there;
+     - a workaround causing a new defect;
+     - the week before this repo goes public.
+   - **Trigger to drop a workaround instead:** a comrak upgrade makes our workaround tests fail, because comrak fixed the bug itself. Then remove that workaround and report nothing.
+   - The checked facts for the reports sit in `private/upstream/comrak-bugs-facts.md`, outside git.
+9. **The maintainer's work repo.** Its rules file, the switch of the always-on site, and the retirement of the prototype each need their own approval there.
