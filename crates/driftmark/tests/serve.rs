@@ -7,7 +7,7 @@ mod support;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -58,7 +58,7 @@ fn branch_repo() -> TestRepo {
 
 /// A running `driftmark serve`, stopped when dropped.
 struct Server {
-    child: Child,
+    child: support::Running,
     addr: SocketAddr,
     token: Option<String>,
     lines: Vec<String>,
@@ -84,7 +84,7 @@ impl Server {
             .args(options)
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let mut child = command.spawn().expect("start driftmark serve");
+        let mut child = support::Running(command.spawn().expect("start driftmark serve"));
         let stdout = child.stdout.take().expect("standard output");
         let mut reader = BufReader::new(stdout);
         let mut lines = Vec::new();

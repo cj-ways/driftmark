@@ -6,7 +6,7 @@ mod support;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -40,22 +40,24 @@ fn repo() -> TestRepo {
 
 /// A running `driftmark serve`, stopped when dropped.
 struct Server {
-    child: Child,
+    child: support::Running,
     addr: SocketAddr,
 }
 
 impl Server {
     fn start(repo: &Path) -> Server {
-        let mut child = Command::new(PROGRAM)
-            .arg("serve")
-            .arg("--repo")
-            .arg(repo)
-            .args(["--addr", "127.0.0.1:0"])
-            .stdout(Stdio::piped())
-            .env_remove("DRIFTMARK_TOKEN")
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start driftmark serve");
+        let mut child = support::Running(
+            Command::new(PROGRAM)
+                .arg("serve")
+                .arg("--repo")
+                .arg(repo)
+                .args(["--addr", "127.0.0.1:0"])
+                .stdout(Stdio::piped())
+                .env_remove("DRIFTMARK_TOKEN")
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start driftmark serve"),
+        );
         let mut reader = BufReader::new(child.stdout.take().expect("standard output"));
         let mut port = None;
         loop {

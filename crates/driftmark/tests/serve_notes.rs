@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -38,7 +38,7 @@ fn repo() -> TestRepo {
 }
 
 struct Server {
-    child: Child,
+    child: support::Running,
     addr: SocketAddr,
     /// The token the start message printed.
     token: String,
@@ -51,17 +51,19 @@ const BROWSER: &str = "Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/141.0";
 
 impl Server {
     fn start(repo: &Path, options: &[&str]) -> Server {
-        let mut child = Command::new(PROGRAM)
-            .arg("serve")
-            .arg("--repo")
-            .arg(repo)
-            .args(["--addr", "127.0.0.1:0"])
-            .args(options)
-            .env_remove("DRIFTMARK_TOKEN")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start driftmark serve");
+        let mut child = support::Running(
+            Command::new(PROGRAM)
+                .arg("serve")
+                .arg("--repo")
+                .arg(repo)
+                .args(["--addr", "127.0.0.1:0"])
+                .args(options)
+                .env_remove("DRIFTMARK_TOKEN")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start driftmark serve"),
+        );
         let mut reader = BufReader::new(child.stdout.take().expect("standard output"));
         let mut open = None;
         loop {

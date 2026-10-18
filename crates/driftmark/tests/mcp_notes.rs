@@ -13,7 +13,7 @@ use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
@@ -34,7 +34,7 @@ const GUIDE: &str = "# Guide\n\n> Short version: how to run the cache.\n\n## Ins
 const BROWSER: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0";
 
 struct Server {
-    child: Child,
+    child: support::Running,
     addr: SocketAddr,
     /// The token the start message printed.
     token: String,
@@ -44,16 +44,18 @@ struct Server {
 
 impl Server {
     fn start(repo: &Path) -> Server {
-        let mut child = Command::new(PROGRAM)
-            .arg("serve")
-            .arg("--repo")
-            .arg(repo)
-            .args(["--addr", "127.0.0.1:0", "--reader", "Ana"])
-            .env_remove("DRIFTMARK_TOKEN")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start driftmark serve");
+        let mut child = support::Running(
+            Command::new(PROGRAM)
+                .arg("serve")
+                .arg("--repo")
+                .arg(repo)
+                .args(["--addr", "127.0.0.1:0", "--reader", "Ana"])
+                .env_remove("DRIFTMARK_TOKEN")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start driftmark serve"),
+        );
         let mut reader = BufReader::new(child.stdout.take().expect("standard output"));
         let mut open = None;
         loop {
@@ -178,7 +180,7 @@ struct Answer {
 
 /// A running `driftmark mcp` with a client attached.
 struct Client {
-    child: Child,
+    child: support::Running,
     stdin: Option<ChildStdin>,
     lines: Receiver<String>,
     next: u64,
@@ -187,14 +189,16 @@ struct Client {
 impl Client {
     /// Starts `driftmark mcp` in `dir` for a client named `name`.
     fn start(dir: &Path, name: &str) -> Client {
-        let mut child = Command::new(PROGRAM)
-            .arg("mcp")
-            .current_dir(dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start driftmark mcp");
+        let mut child = support::Running(
+            Command::new(PROGRAM)
+                .arg("mcp")
+                .current_dir(dir)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start driftmark mcp"),
+        );
         let stdout = child.stdout.take().expect("standard output");
         let (send, lines) = channel();
         std::thread::spawn(move || {

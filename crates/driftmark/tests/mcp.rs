@@ -9,7 +9,7 @@ mod support;
 use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -73,7 +73,7 @@ struct Answer {
 
 /// A running `driftmark mcp` with a client attached.
 struct Client {
-    child: Child,
+    child: support::Running,
     stdin: Option<ChildStdin>,
     lines: Receiver<String>,
     /// Lines on standard output that are not JSON: there must be none.
@@ -84,15 +84,17 @@ struct Client {
 impl Client {
     /// Starts `driftmark mcp` in `dir` with `args`, and opens the session.
     fn start(dir: &Path, args: &[&str]) -> Client {
-        let mut child = Command::new(PROGRAM)
-            .arg("mcp")
-            .args(args)
-            .current_dir(dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start driftmark mcp");
+        let mut child = support::Running(
+            Command::new(PROGRAM)
+                .arg("mcp")
+                .args(args)
+                .current_dir(dir)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start driftmark mcp"),
+        );
         let stdout = child.stdout.take().expect("standard output");
         let (send, lines) = channel();
         let stray = Arc::new(Mutex::new(Vec::new()));

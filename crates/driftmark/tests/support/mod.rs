@@ -355,3 +355,28 @@ pub fn examples(document: &str) -> Vec<(String, Value, Expected)> {
     }
     found
 }
+
+/// A child process that is stopped when dropped. A test holds its server in
+/// one of these from the moment it starts, so a test that fails while the
+/// server is still starting leaves nothing running behind it.
+pub struct Running(pub std::process::Child);
+
+impl std::ops::Deref for Running {
+    type Target = std::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Running {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
