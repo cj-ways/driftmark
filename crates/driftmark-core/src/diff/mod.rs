@@ -3,8 +3,9 @@
 //!
 //! [`compare`] takes the two parsed versions of one file with what the rules
 //! file says about each, and returns its [`DocumentChanges`]. [`ChangeList`]
-//! gathers the documents of a range and sorts them for a reader. Both are
-//! plain values that serialize to the JSON contract written out in
+//! gathers the documents of a range and sorts them for a reader, and
+//! [`SummaryList`] is the same list with only each document's counts. All
+//! are plain values that serialize to the JSON contract written out in
 //! `docs/features/engine/change-list.md`.
 
 mod align;
@@ -29,8 +30,9 @@ use crate::rules::Classification;
 use words::{Token, WordDiff};
 
 /// The version of the JSON shape. It goes up by one whenever a field changes
-/// meaning or is removed; adding a field keeps it.
-pub const SCHEMA_VERSION: u32 = 1;
+/// meaning or is removed; adding a field keeps it. Version 2 lists an added
+/// or removed document as one change instead of one change per block.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// An edited block keeping at least this share of its words in order is
 /// shown with inline word marks. From the private prototype.
@@ -72,6 +74,26 @@ pub struct ChangeList {
 }
 
 impl ChangeList {
+    /// The same list with only each document's counts, for a reader or a
+    /// tool that wants the overview without every change.
+    #[must_use]
+    pub fn summary_list(&self) -> SummaryList<'_> {
+        SummaryList {
+            schema_version: self.schema_version,
+            range: self.range.as_ref(),
+            totals: self.totals,
+            documents: self
+                .documents
+                .iter()
+                .map(|document| DocumentSummary {
+                    path: &document.path,
+                    file: document.file,
+                    summary: document.summary,
+                })
+                .collect(),
+        }
+    }
+
     /// Gathers documents into a change list, sorted for a reader.
     #[must_use]
     pub fn new(range: Option<RangeInfo>, mut documents: Vec<DocumentChanges>) -> ChangeList {
@@ -93,6 +115,33 @@ impl ChangeList {
             documents,
         }
     }
+}
+
+/// A change list without its changes: one entry per document with its path,
+/// what happened to the file, and its counts, which hold its highest level.
+/// The fields mean what they mean in [`ChangeList`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SummaryList<'a> {
+    /// [`SCHEMA_VERSION`].
+    pub schema_version: u32,
+    /// The two git points compared, when the program knows them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<&'a RangeInfo>,
+    /// The counts over all documents.
+    pub totals: Summary,
+    /// The changed documents, in the order of the change list.
+    pub documents: Vec<DocumentSummary<'a>>,
+}
+
+/// One document of a [`SummaryList`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DocumentSummary<'a> {
+    /// The file's path.
+    pub path: &'a str,
+    /// Whether the file was added, removed or modified.
+    pub file: FileState,
+    /// Its counts per level and kind, and its highest level.
+    pub summary: Summary,
 }
 
 /// The two git points of a change list, as text.
@@ -314,19 +363,68 @@ impl ChangeKind {
 /// One change.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Change {
-    /// What happened to the block.
+    /// What happened to the block, or to the whole document.
     pub kind: ChangeKind,
     /// How much it matters: the highest level among its signals.
     pub level: Level,
     /// Why it matters, in the order of [`Signal`].
     pub signals: Vec<Signal>,
-    /// Where the change is in the old version.
-    pub old: Side,
-    /// Where the change is in the new version.
-    pub new: Side,
+    /// What changed: one block, or a whole document. In JSON its fields sit
+    /// beside the ones above: `old` and `new`, or `document`.
+    #[serde(flatten)]
+    pub subject: Subject,
     /// How to draw an edit, for edited and moved-and-edited blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edit: Option<Edit>,
+}
+
+impl Change {
+    /// Where a block change is in the old and the new version; `None` for a
+    /// whole document.
+    #[must_use]
+    pub fn sides(&self) -> Option<(&Side, &Side)> {
+        match &self.subject {
+            Subject::Block { old, new } => Some((old, new)),
+            Subject::Document { .. } => None,
+        }
+    }
+}
+
+/// What one change is about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum Subject {
+    /// One block of a document on both sides.
+    Block {
+        /// Where the change is in the old version.
+        old: Side,
+        /// Where the change is in the new version.
+        new: Side,
+    },
+    /// A whole document that was added or removed. Its blocks are not listed
+    /// one by one: a reader opens the document to read it all.
+    Document {
+        /// The document, from the side that has it.
+        document: WholeDocument,
+    },
+}
+
+/// An added or removed document, as one change shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WholeDocument {
+    /// Its title, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Its summary, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// Its size in bytes.
+    pub bytes: usize,
+    /// How many lines it has.
+    pub lines: usize,
+    /// Its full text, as written, so a tool can show the whole document
+    /// without reading git again.
+    pub source: String,
 }
 
 /// Where a change is in one version.
@@ -421,8 +519,8 @@ pub fn compare(
 ) -> Option<DocumentChanges> {
     let (file, changes, unchanged, status) = match (old, new) {
         (None, None) => return None,
-        (None, Some(new)) => (FileState::Added, one_sided(new, true), Vec::new(), None),
-        (Some(old), None) => (FileState::Removed, one_sided(old, false), Vec::new(), None),
+        (None, Some(new)) => (FileState::Added, whole(new, true), Vec::new(), None),
+        (Some(old), None) => (FileState::Removed, whole(old, false), Vec::new(), None),
         (Some(old), Some(new)) => {
             let (changes, unchanged, status) = modified(old, new);
             (FileState::Modified, changes, unchanged, status)
@@ -489,21 +587,40 @@ fn gap_at(at: usize) -> Side {
     Side { at, block: None }
 }
 
-/// Every block of a file that exists on one side only.
-fn one_sided(version: Version<'_>, added: bool) -> Vec<Change> {
+/// The one change of a file that exists on one side only. Its signals are
+/// those its blocks would get as added or removed blocks, so a new decision
+/// record still ranks as a decision.
+fn whole(version: Version<'_>, added: bool) -> Vec<Change> {
+    let document = version.document;
     let sided = Sided::new(version);
-    (0..version.document.blocks.len())
-        .map(|index| {
-            let block = sided.block(index);
-            let signals = lone_signals(block, sided.decision[index]);
-            let (kind, old, new) = if added {
-                (ChangeKind::Added, gap_at(0), sided.side(index))
-            } else {
-                (ChangeKind::Removed, sided.side(index), gap_at(0))
-            };
-            change(kind, signals, old, new, None)
-        })
-        .collect()
+    let mut signals = Vec::new();
+    for (index, block) in document.blocks.iter().enumerate() {
+        block_signals(block, sided.decision[index], &mut signals);
+    }
+    let signals = finish_signals(signals);
+    let lines = match document.source.len() {
+        0 => 0,
+        size => sided.lines.line_of(size - 1),
+    };
+    let whole = WholeDocument {
+        title: document.meta.title.clone(),
+        summary: document.meta.summary.clone(),
+        bytes: document.source.len(),
+        lines,
+        source: document.source.clone(),
+    };
+    let kind = if added {
+        ChangeKind::Added
+    } else {
+        ChangeKind::Removed
+    };
+    vec![Change {
+        kind,
+        level: rank::level_of(&signals),
+        signals,
+        subject: Subject::Document { document: whole },
+        edit: None,
+    }]
 }
 
 fn change(
@@ -517,8 +634,7 @@ fn change(
         kind,
         level: rank::level_of(&signals),
         signals,
-        old,
-        new,
+        subject: Subject::Block { old, new },
         edit,
     }
 }
@@ -626,6 +742,9 @@ fn paired(old: &Sided<'_>, new: &Sided<'_>, o: usize, n: usize, moved: bool) -> 
         }
         rank::kind_signals(&old_block.kind, &mut signals);
         rank::kind_signals(&new_block.kind, &mut signals);
+        if rank::task_changed(&old_block.kind, &new_block.kind) {
+            signals.push(Signal::TaskState);
+        }
         let old_tokens = words::tokens(&old_block.text, &old_block.spans);
         let new_tokens = words::tokens(&new_block.text, &new_block.spans);
         if !is_code(&new_block.kind) {
@@ -665,18 +784,24 @@ fn content_signals(
     }
 }
 
-/// The signals of a block that was added or removed.
+/// The signals of a block that was added to or removed from a document that
+/// is on both sides.
 fn lone_signals(block: &Block, in_decision: bool) -> Vec<Signal> {
     let mut signals = Vec::new();
+    block_signals(block, in_decision, &mut signals);
+    finish_signals(signals)
+}
+
+/// Adds the signals a block gets for being there at all, as an added or
+/// removed block. Its normative words give none: such a word is a rule
+/// change only when an edit added or removed it (decision 0009).
+fn block_signals(block: &Block, in_decision: bool, signals: &mut Vec<Signal>) {
     if in_decision {
         signals.push(Signal::DecisionSection);
     }
-    rank::kind_signals(&block.kind, &mut signals);
+    rank::kind_signals(&block.kind, signals);
     if !is_code(&block.kind) {
         let tokens = words::tokens(&block.text, &block.spans);
-        if rank::has_normative(&tokens) {
-            signals.push(Signal::Normative);
-        }
         if rank::has_fact(&tokens) {
             signals.push(Signal::Number);
         }
@@ -684,10 +809,16 @@ fn lone_signals(block: &Block, in_decision: bool) -> Vec<Signal> {
             signals.push(Signal::Link);
         }
     }
+}
+
+/// Sorts the signals of an added or removed block or document, keeps each
+/// once, and adds the wording signal when no content signal is there.
+fn finish_signals(mut signals: Vec<Signal>) -> Vec<Signal> {
+    signals.sort_unstable();
+    signals.dedup();
     if rank::wording_only(&signals) {
         signals.push(Signal::Wording);
     }
-    signals.sort_unstable();
     signals
 }
 
@@ -890,10 +1021,11 @@ fn mark_status(changes: &mut [Change], status: &StatusChange) {
             .contains(&status.trim().to_lowercase()),
         _ => false,
     };
-    if let Some(change) = changes
-        .iter_mut()
-        .find(|change| holds(&change.old, &status.old) || holds(&change.new, &status.new))
-    {
+    if let Some(change) = changes.iter_mut().find(|change| {
+        change
+            .sides()
+            .is_some_and(|(old, new)| holds(old, &status.old) || holds(new, &status.new))
+    }) {
         change.signals.retain(|signal| *signal != Signal::Wording);
         change.signals.push(Signal::Status);
         change.signals.sort_unstable();

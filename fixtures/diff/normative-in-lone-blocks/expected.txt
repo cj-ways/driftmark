@@ -1,0 +1,15 @@
+file: Modified
+status: None
+changes: 3, highest: Some(Wording)
+levels: LevelCounts { decision: 0, rule: 0, fact: 0, wording: 3, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 0, added: 2, removed: 1, moved: 0, moved_edited: 0 }
+unchanged: [[0, 0], [1, 1]]
+
+removed — Wording [Wording] — old 2 (line 5), new @2
+    text: The old runner is the only one we keep.
+
+added — Wording [Wording] — old @3, new 2 (line 5)
+    text: Never deploy on a Friday.
+
+added — Wording [Wording] — old @3, new 3 (line 6)
+    text: Each deploy must name its owner.

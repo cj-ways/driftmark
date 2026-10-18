@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Rules file
 
-> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset (M4) is a rules file in this same format. An optional `[lint]` table holds the writing check's settings.
+> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset (M4) is a rules file in this same format. An optional `[lint]` table holds the writing check's settings, and an optional `[masthead]` table adds masthead keys to the known ones.
 
 ## Who reads it
 
@@ -13,6 +13,7 @@ date: 2026-10-18
 - `driftmark_core::rules::Rules::parse(text)` parses the text, so the core never touches a file.
 - `rules.classify(path, &document)` applies the rules to one parsed document. `path` is relative to the repository root, with `/` between folders, as git writes it.
 - With no rules file, `Rules::default()` has no types, so every file is a `document`.
+- `rules.masthead_keys()` gives the masthead keys to parse documents with: `Document::parse_with(bytes, rules.masthead_keys())`. See "Masthead keys" below.
 
 ## An example
 
@@ -74,7 +75,7 @@ What it gives for a few files of that project:
 
 ## The format
 
-The file is TOML. It holds a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
+The file is TOML. It holds a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes, and one `[masthead]` table. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
 
 ### Keys of a type
 
@@ -128,6 +129,24 @@ A location says where to find one value. It is a table with one or more of three
 
 `docs/features/engine/document-model.md` has the exact rules for reading front matter and mastheads.
 
+### Masthead keys
+
+A `Key: Value` line under the title is metadata only when its key is known (decision 0009). A quote with no known key stays the summary, however short, so `> Short version: …` is never a field. In a masthead that has known keys, a field with another key is left out. `docs/features/engine/document-model.md` has the exact rules. The known keys are:
+
+- the built-in ones: `Status`, `Date`, `Supersedes`, `Superseded by`, `Owner`, `Type`, `Tags` and `Version`;
+- every key a type's `masthead` location names, such as `Estado` in `status = { masthead = "Estado" }`;
+- the keys the `[masthead]` table lists.
+
+```toml
+[masthead]
+keys = ["Deciders", "Feature Branch", "Created"]
+```
+
+- Keys match without regard to case, with `-`, `_` and spaces the same.
+- A key must have the shape every masthead key has: it starts with a letter, has one to four words and at most 40 characters, and holds only letters, digits, spaces and `-_/.'()`. Any other key could never match a line, so it is a `Syntax` error with its line: `the masthead key "a*b" cannot match a masthead line; …`.
+- One list serves every type, because the masthead is read when a document is parsed, before its type is known.
+- A preset for GitHub Spec Kit or MADR 2 lists the keys its layout writes, such as `Created` or `Deciders`, when it needs them as fields. Their `Status` line is read without that, because `Status` is known.
+
 ### Status values and lifecycles
 
 A status value means current, superseded or archived when one of the three lists holds it.
@@ -168,7 +187,7 @@ Here `status: proposed` is allowed and has no lifecycle. `status: draft` gets a 
 
 | Error | When |
 |---|---|
-| `Syntax` | The file is not valid TOML, a key is unknown or missing, or a value has the wrong shape. The TOML reader's message names the line and column and shows the line. |
+| `Syntax` | The file is not valid TOML, a key is unknown or missing, a value has the wrong shape, or a `[masthead]` key cannot match a line. The TOML reader's message names the line and column and shows the line. |
 | `Invalid` | A type is valid TOML but says something impossible. The message names the type by its position and name, as in `the rules file's type 2 ("feature"): it lists no paths`. |
 | `Lint` | The `[lint]` table is valid TOML but names an HTML element that cannot exist, as in ``the rules file's [lint] table: `allowed-html` holds "<b>", …``. An unknown rule id or a limit of 0 is a `Syntax` error instead, because the TOML reader catches it with its line. |
 
@@ -211,6 +230,7 @@ Three more lookups serve the writing check:
 - `rule.allows_status(status)` says whether any of the four lists holds the status, and `rule.statuses()` lists every value in the order the file writes them.
 - `location.find(&document)` reads one location. It returns a `Located`: the value's text, the targets of its links, and the `Place` that held it (`FrontMatter`, `Masthead` or `Section`), so a finding can point at the right line.
 - `rules.lint()` returns the `[lint]` settings, or the defaults when the file has no `[lint]` table.
+- `rules.masthead_keys()` returns the known masthead keys: the built-in ones, the `[masthead]` table's, and those the types' `masthead` locations name.
 
 ## Presets
 
@@ -223,7 +243,7 @@ A preset is a rules file in this same format, built into driftmark (M4). M4 deci
 
 ## Not covered
 
-- Excluding files, and naming which folders hold documents at all. The program decides which files it reads.
+- Naming which folders hold documents at all, and leaving files out of the change view. The program decides which files it reads. Only the writing check has an exclude list, `[lint] exclude` (`docs/features/lint.md`).
 - Choosing between `{a,b}` in a pattern.
 - More than one rules file in a repository.
 - Reading a date as a date.

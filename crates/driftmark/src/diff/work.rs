@@ -265,7 +265,7 @@ impl Work<'_> {
             let start = Instant::now();
             let bytes = self.git.read_blob(id);
             local.steps.read += start.elapsed();
-            parse(bytes.map_err(Failure::Git)?, local)
+            parse(bytes.map_err(Failure::Git)?, self.rules, local)
         })
     }
 
@@ -277,13 +277,15 @@ impl Work<'_> {
         let start = Instant::now();
         let bytes = self.git.read_worktree_file(path);
         local.steps.read += start.elapsed();
-        parse(bytes.map_err(Failure::Git)?, local)
+        parse(bytes.map_err(Failure::Git)?, self.rules, local)
     }
 }
 
-fn parse(bytes: Vec<u8>, local: &mut Local) -> Loaded {
+/// Parses one version with the masthead keys the rules file knows, so its
+/// title, summary and masthead read as the rules say.
+fn parse(bytes: Vec<u8>, rules: &Rules, local: &mut Local) -> Loaded {
     let start = Instant::now();
-    let parsed = Document::parse(bytes);
+    let parsed = Document::parse_with(bytes, rules.masthead_keys());
     local.steps.parse += start.elapsed();
     local.counts.parsed += 1;
     parsed.map(Arc::new).map_err(Failure::Parse)

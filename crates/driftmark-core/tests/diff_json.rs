@@ -4,7 +4,7 @@
 
 use driftmark_core::diff::{
     ChangeKind, ChangeList, DocumentChanges, Edit, FileState, Level, Mark, MarkOp, RangeInfo,
-    SCHEMA_VERSION, Side, Signal, StatusChange, Summary, Version, View, compare,
+    SCHEMA_VERSION, Side, Signal, StatusChange, Summary, Version, View, WholeDocument, compare,
 };
 use driftmark_core::document::{
     AlertKind, BlockKind, DiagramLanguage, Document, ListItem, SpanKind, TaskState,
@@ -176,6 +176,7 @@ fn every_enum_serializes_in_snake_case() {
         Signal::Link,
         Signal::TableCell,
         Signal::CodeLine,
+        Signal::TaskState,
         Signal::Moved,
         Signal::Wording,
         Signal::Formatting,
@@ -191,6 +192,7 @@ fn every_enum_serializes_in_snake_case() {
             "link",
             "table_cell",
             "code_line",
+            "task_state",
             "moved",
             "wording",
             "formatting"
@@ -249,6 +251,17 @@ fn optional_fields_are_left_out_when_empty() {
         })
     );
     assert_eq!(to_json(&Side { at: 3, block: None }), json!({"at": 3}));
+    let untitled = WholeDocument {
+        title: None,
+        summary: None,
+        bytes: 2,
+        lines: 1,
+        source: "x\n".to_owned(),
+    };
+    assert_eq!(
+        to_json(&untitled),
+        json!({"bytes": 2, "lines": 1, "source": "x\n"})
+    );
     let list = ChangeList::new(None, Vec::new());
     assert_eq!(
         to_json(&list),
@@ -317,6 +330,86 @@ fn a_change_serializes_both_sides() {
 }
 
 #[test]
+fn a_whole_document_is_one_change_without_sides() {
+    let new = parse("# Plan\n\n> Short version: the plan.\n\nOnly 3 steps.\n");
+    let class = Rules::default().classify("doc.md", &new);
+    let changes = compare(
+        "doc.md",
+        None,
+        Some(Version {
+            document: &new,
+            classification: &class,
+        }),
+    )
+    .expect("one side");
+    assert_eq!(
+        to_json(&changes),
+        json!({
+            "path": "doc.md",
+            "file": "added",
+            "summary": {
+                "changes": 1,
+                "highest": "fact",
+                "levels": {"decision": 0, "rule": 0, "fact": 1, "wording": 0, "formatting": 0},
+                "kinds": {"formatting": 0, "edited": 0, "added": 1, "removed": 0, "moved": 0, "moved_edited": 0}
+            },
+            "changes": [{
+                "kind": "added",
+                "level": "fact",
+                "signals": ["heading", "number"],
+                "document": {
+                    "title": "Plan",
+                    "summary": "Short version: the plan.",
+                    "bytes": 50,
+                    "lines": 5,
+                    "source": "# Plan\n\n> Short version: the plan.\n\nOnly 3 steps.\n"
+                }
+            }],
+            "unchanged": []
+        })
+    );
+}
+
+#[test]
+fn the_summary_list_keeps_each_document_and_its_counts() {
+    let modified = diff("# T\n\nOld words here.\n", "# T\n\nOld words there.\n");
+    let range = RangeInfo {
+        base: None,
+        head: "worktree".to_owned(),
+        notes: Vec::new(),
+    };
+    let list = ChangeList::new(Some(range), vec![modified]);
+    assert_eq!(
+        to_json(&list.summary_list()),
+        json!({
+            "schema_version": SCHEMA_VERSION,
+            "range": {"base": null, "head": "worktree", "notes": []},
+            "totals": {
+                "changes": 1,
+                "highest": "wording",
+                "levels": {"decision": 0, "rule": 0, "fact": 0, "wording": 1, "formatting": 0},
+                "kinds": {"formatting": 0, "edited": 1, "added": 0, "removed": 0, "moved": 0, "moved_edited": 0}
+            },
+            "documents": [{
+                "path": "doc.md",
+                "file": "modified",
+                "summary": {
+                    "changes": 1,
+                    "highest": "wording",
+                    "levels": {"decision": 0, "rule": 0, "fact": 0, "wording": 1, "formatting": 0},
+                    "kinds": {"formatting": 0, "edited": 1, "added": 0, "removed": 0, "moved": 0, "moved_edited": 0}
+                }
+            }]
+        })
+    );
+    let empty = ChangeList::new(None, Vec::new());
+    let value = to_json(&empty.summary_list());
+    assert_eq!(value["schema_version"], json!(2));
+    assert_eq!(value.get("range"), None);
+    assert_eq!(value["documents"], json!([]));
+}
+
+#[test]
 fn range_info_names_both_points() {
     let id = |c: char| ObjectId::from_hex(&c.to_string().repeat(40)).expect("an id");
     let range = ResolvedRange {
@@ -348,8 +441,9 @@ fn range_info_names_both_points() {
 }
 
 /// The JSON example in `docs/features/engine/change-list.md` is what the
-/// code gives for the made-up pair in `fixtures/diff/contract-example`, so
-/// the contract and the code cannot drift apart.
+/// code gives for the made-up pair in `fixtures/diff/contract-example` and
+/// the made-up new file in `fixtures/diff/contract-added`, so the contract
+/// and the code cannot drift apart.
 #[test]
 fn the_documented_example_is_what_the_code_gives() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -371,12 +465,27 @@ fn the_documented_example_is_what_the_code_gives() {
         }),
     )
     .expect("both sides");
+    let added_path = "docs/notes/cache-sizes.md";
+    let added = parse(
+        &std::fs::read_to_string(root.join("fixtures/diff/contract-added/b.md"))
+            .expect("the fixture"),
+    );
+    let added_class = rules.classify(added_path, &added);
+    let added = compare(
+        added_path,
+        None,
+        Some(Version {
+            document: &added,
+            classification: &added_class,
+        }),
+    )
+    .expect("one side");
     let range = RangeInfo {
         base: Some("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678".to_owned()),
         head: "worktree".to_owned(),
         notes: vec!["compared with `origin/main`".to_owned()],
     };
-    let json = serde_json::to_string_pretty(&ChangeList::new(Some(range), vec![document]))
+    let json = serde_json::to_string_pretty(&ChangeList::new(Some(range), vec![added, document]))
         .expect("serializes");
     let written =
         std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("change-list-example.json");

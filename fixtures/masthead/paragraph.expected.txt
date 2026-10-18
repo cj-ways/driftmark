@@ -1,8 +1,6 @@
 title: Some("Feature Specification: Search")
 summary: None
 front matter error: None
-field: Masthead "Feature Branch" = Text("001-search"), links []
-field: Masthead "Created" = Text("2026-03-01"), links []
 field: Masthead "Status" = Text("Draft"), links []
 
 [0] Heading { level: 1 } at 0..31

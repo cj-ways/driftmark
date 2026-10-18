@@ -3,7 +3,8 @@
 //! The rules live in `driftmark_core`: ranges, documents, the rules file and
 //! the comparison. This module reads the command line, opens the repository,
 //! runs the comparison on several threads and prints the result, as a short
-//! summary for a person or as the whole change list in JSON for tools.
+//! summary for a person, or in JSON for tools: the whole change list, or
+//! only each document's counts.
 //! `docs/features/commands/diff.md` is the user's guide.
 
 mod args;
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant};
 use driftmark_core::diff::{ChangeList, RangeInfo};
 
 use crate::git::Git;
-use args::{Args, Request};
+use args::{Args, Json, Request};
 pub use text::Terminal;
 
 /// Exit code when the comparison ran, whether or not anything changed.
@@ -51,6 +52,7 @@ Ranges:
 Options:
   --repo <path>      a folder inside the repository (default: here)
   --json             print the whole change list as JSON
+  --json=summary     print one JSON entry per document with its counts
   --timings          print the time of each step on standard error
   --threads <n>      read and compare on n threads (default: one per core)
 
@@ -167,17 +169,24 @@ fn write_output(
     terminal: Terminal,
 ) -> std::io::Result<()> {
     let mut out = BufWriter::with_capacity(1 << 16, stdout);
-    if args.json {
-        serde_json::to_writer(&mut out, list)?;
-        out.write_all(b"\n")?;
-    } else {
-        let context = text::Context {
-            label: &args.label,
-            roots: &args.roots,
-            skipped,
-            terminal,
-        };
-        out.write_all(text::summary(list, &context).as_bytes())?;
+    match args.json {
+        Some(Json::Full) => {
+            serde_json::to_writer(&mut out, list)?;
+            out.write_all(b"\n")?;
+        }
+        Some(Json::Summary) => {
+            serde_json::to_writer(&mut out, &list.summary_list())?;
+            out.write_all(b"\n")?;
+        }
+        None => {
+            let context = text::Context {
+                label: &args.label,
+                roots: &args.roots,
+                skipped,
+                terminal,
+            };
+            out.write_all(text::summary(list, &context).as_bytes())?;
+        }
     }
     out.flush()
 }
@@ -259,7 +268,7 @@ mod tests {
         }
     }
 
-    fn args(json: bool) -> Args {
+    fn args(json: Option<Json>) -> Args {
         Args {
             label: "a..b".to_owned(),
             range: driftmark_core::git::RangeSpec::parse("a..b").unwrap(),
@@ -274,7 +283,7 @@ mod tests {
     #[test]
     fn output_errors_reach_the_caller() {
         let list = ChangeList::new(None, Vec::new());
-        for json in [false, true] {
+        for json in [None, Some(Json::Full), Some(Json::Summary)] {
             let mut full = Failing(ErrorKind::StorageFull);
             let error = write_output(&args(json), &list, 0, &mut full, Terminal::NONE).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::StorageFull);

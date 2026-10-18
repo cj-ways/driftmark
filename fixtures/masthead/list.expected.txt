@@ -2,7 +2,6 @@ title: Some("Use plain files")
 summary: None
 front matter error: None
 field: Masthead "Status" = Text("accepted"), links []
-field: Masthead "Deciders" = Text("Ana, Ben"), links []
 field: Masthead "Date" = Text("2026-03-02"), links []
 
 [0] Heading { level: 1 } at 0..17

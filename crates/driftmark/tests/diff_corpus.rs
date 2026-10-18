@@ -69,7 +69,9 @@ fn one_file(
     let new_bytes = change.new_blob().map(read);
     steps.read = start.elapsed();
     let start = Instant::now();
-    let parse = |bytes: Vec<u8>| Document::parse(bytes).expect("the corpus parses");
+    let parse = |bytes: Vec<u8>| {
+        Document::parse_with(bytes, rules.masthead_keys()).expect("the corpus parses")
+    };
     let old = old_bytes.map(parse);
     let new = new_bytes.map(parse);
     steps.parse = start.elapsed();
@@ -109,11 +111,19 @@ fn check(changes: &DocumentChanges, old_blocks: usize, new_blocks: usize) {
     }
     let mut last = 0;
     for change in &changes.changes {
-        if change.old.block.is_some() {
-            old_seen[change.old.at] += 1;
+        let Some((old, new)) = change.sides() else {
+            // A whole document stands for all its blocks, as its only change.
+            assert_eq!(changes.changes.len(), 1, "a document is its only change");
+            for seen in old_seen.iter_mut().chain(new_seen.iter_mut()) {
+                *seen += 1;
+            }
+            continue;
+        };
+        if old.block.is_some() {
+            old_seen[old.at] += 1;
         }
-        if let Some(block) = &change.new.block {
-            new_seen[change.new.at] += 1;
+        if let Some(block) = &new.block {
+            new_seen[new.at] += 1;
             if let Some(edit) = &change.edit {
                 let shown: String = edit
                     .marks
@@ -128,8 +138,8 @@ fn check(changes: &DocumentChanges, old_blocks: usize, new_blocks: usize) {
                 );
             }
         }
-        assert!(change.new.at >= last, "changes out of reading order");
-        last = change.new.at;
+        assert!(new.at >= last, "changes out of reading order");
+        last = new.at;
     }
     assert!(
         old_seen.iter().all(|&seen| seen == 1),
@@ -303,7 +313,10 @@ fn shares_and_rules(label: &str, list: &ChangeList, edits: &[&driftmark_core::di
         .iter()
         .flat_map(|document| &document.changes)
         .filter(|change| change.level == Level::Rule)
-        .filter_map(|change| change.new.block.as_ref().or(change.old.block.as_ref()))
+        .filter_map(|change| {
+            let (old, new) = change.sides()?;
+            new.block.as_ref().or(old.block.as_ref())
+        })
         .map(|block| block.text.to_lowercase())
         .collect();
     let words: Vec<String> = NORMATIVE_WORDS

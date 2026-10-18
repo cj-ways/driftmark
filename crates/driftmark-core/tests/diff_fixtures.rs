@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use driftmark_core::diff::{
-    Change, ChangeKind, DocumentChanges, Edit, Mark, MarkOp, Side, Version, View, compare,
+    Change, ChangeKind, DocumentChanges, Edit, Mark, MarkOp, Side, Subject, Version, View, compare,
 };
 use driftmark_core::document::Document;
 use driftmark_core::rules::{Classification, Rules};
@@ -125,14 +125,44 @@ fn kind(kind: ChangeKind) -> &'static str {
     }
 }
 
-fn text(change: &Change) -> String {
-    let block = change
-        .new
+fn text(old: &Side, new: &Side) -> String {
+    let block = new
         .block
         .as_ref()
-        .or(change.old.block.as_ref())
+        .or(old.block.as_ref())
         .expect("a change has a block on one side");
     block.text.replace('\n', "⏎").replace('\t', "⇥")
+}
+
+/// One change, written out: its kind, level and signals, then where it is
+/// and how it is drawn, or the whole document it stands for.
+fn dump_change(out: &mut String, change: &Change) {
+    let head = format!(
+        "\n{} — {:?} {:?} — ",
+        kind(change.kind),
+        change.level,
+        change.signals
+    );
+    match &change.subject {
+        Subject::Block { old, new } => {
+            writeln!(out, "{head}{}, {}", side("old", old), side("new", new)).expect("write");
+            match &change.edit {
+                Some(found) => edit(out, found),
+                None => writeln!(out, "    text: {}", text(old, new)).expect("write"),
+            }
+        }
+        Subject::Document { document } => {
+            writeln!(out, "{head}the whole document").expect("write");
+            writeln!(out, "    title: {:?}", document.title).expect("write");
+            writeln!(out, "    summary: {:?}", document.summary).expect("write");
+            writeln!(
+                out,
+                "    size: {} bytes, {} lines",
+                document.bytes, document.lines
+            )
+            .expect("write");
+        }
+    }
 }
 
 /// The change list as text: the summary, then one entry per change.
@@ -151,20 +181,7 @@ fn dump(changes: &DocumentChanges) -> String {
     writeln!(out, "kinds: {:?}", summary.kinds).expect("write");
     writeln!(out, "unchanged: {:?}", changes.unchanged).expect("write");
     for change in &changes.changes {
-        writeln!(
-            out,
-            "\n{} — {:?} {:?} — {}, {}",
-            kind(change.kind),
-            change.level,
-            change.signals,
-            side("old", &change.old),
-            side("new", &change.new),
-        )
-        .expect("write");
-        match &change.edit {
-            Some(found) => edit(&mut out, found),
-            None => writeln!(out, "    text: {}", text(change)).expect("write"),
-        }
+        dump_change(&mut out, change);
     }
     out
 }
@@ -185,22 +202,38 @@ fn check_invariants(
     }
     let mut last_at = 0;
     for change in &changes.changes {
-        if change.old.block.is_some() {
-            old_seen[change.old.at] += 1;
-        }
-        if change.new.block.is_some() {
-            new_seen[change.new.at] += 1;
-        }
-        assert!(
-            change.new.at >= last_at,
-            "{name}: changes are not in the new version's order"
-        );
-        last_at = change.new.at;
         assert!(
             !change.signals.is_empty(),
             "{name}: a change without signals"
         );
-        if let (Some(edit), Some(block)) = (&change.edit, &change.new.block) {
+        let Some((old_side, new_side)) = change.sides() else {
+            // A whole document stands for every block of the side that has
+            // it, and it is the document's only change.
+            assert_eq!(changes.changes.len(), 1, "{name}: more than a document");
+            let document = new.or(old).expect("one side exists");
+            let Subject::Document { document: whole } = &change.subject else {
+                unreachable!("a change without sides is a whole document");
+            };
+            assert_eq!(whole.source, document.source, "{name}: the source");
+            assert_eq!(whole.bytes, document.source.len(), "{name}: the size");
+            assert_eq!(whole.title, document.meta.title, "{name}: the title");
+            for seen in old_seen.iter_mut().chain(new_seen.iter_mut()) {
+                *seen += 1;
+            }
+            continue;
+        };
+        if old_side.block.is_some() {
+            old_seen[old_side.at] += 1;
+        }
+        if new_side.block.is_some() {
+            new_seen[new_side.at] += 1;
+        }
+        assert!(
+            new_side.at >= last_at,
+            "{name}: changes are not in the new version's order"
+        );
+        last_at = new_side.at;
+        if let (Some(edit), Some(block)) = (&change.edit, &new_side.block) {
             let shown: String = edit
                 .marks
                 .iter()

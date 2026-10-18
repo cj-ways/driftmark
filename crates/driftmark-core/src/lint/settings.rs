@@ -1,12 +1,15 @@
 //! The `[lint]` table of the rules file: which rules are on and how serious
-//! they are, the allowed HTML elements, and the four size limits.
+//! they are, the allowed HTML elements, the four size limits, and the files
+//! a walk of the repository leaves out.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 
+use glob::Pattern;
 use serde::Deserialize;
 
 use super::{Rule, Severity};
+use crate::rules::MATCHING;
 
 /// The HTML elements allowed when the rules file names none. They render the
 /// same on GitHub, GitLab and driftmark, and Markdown has no way to write
@@ -45,6 +48,11 @@ pub struct LintSettings {
     pub max_file_size: usize,
     /// The most characters a heading may have.
     pub max_heading_length: usize,
+    /// The path patterns a walk of the repository skips, as written. A file
+    /// named on its own is still checked.
+    pub exclude: Vec<String>,
+    /// `exclude`, parsed.
+    exclude_patterns: Vec<Pattern>,
 }
 
 impl Default for LintSettings {
@@ -56,6 +64,8 @@ impl Default for LintSettings {
             max_code_line_length: DEFAULT_MAX_CODE_LINE_LENGTH,
             max_file_size: DEFAULT_MAX_FILE_SIZE,
             max_heading_length: DEFAULT_MAX_HEADING_LENGTH,
+            exclude: Vec::new(),
+            exclude_patterns: Vec::new(),
         }
     }
 }
@@ -68,6 +78,16 @@ impl LintSettings {
             .get(&rule)
             .copied()
             .unwrap_or(Some(rule.default_severity()))
+    }
+
+    /// Whether a walk of the repository skips the file at `path`, relative to
+    /// the repository root with `/` between folders. Patterns match as the
+    /// rules file's `paths` do.
+    #[must_use]
+    pub fn excludes(&self, path: &str) -> bool {
+        self.exclude_patterns
+            .iter()
+            .any(|pattern| pattern.matches_with(path, MATCHING))
     }
 
     /// Checks the `[lint]` table and fills in the defaults.
@@ -90,6 +110,15 @@ impl LintSettings {
                 .collect::<Result<Vec<_>, _>>()?,
             None => defaults.allowed_html,
         };
+        let exclude = raw.exclude;
+        let exclude_patterns = exclude
+            .iter()
+            .map(|pattern| {
+                Pattern::new(pattern).map_err(|error| {
+                    format!("`exclude` holds {pattern:?}, which is not a valid pattern: {error}")
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let limit =
             |value: Option<NonZeroUsize>, default: usize| value.map_or(default, NonZeroUsize::get);
         Ok(LintSettings {
@@ -103,6 +132,8 @@ impl LintSettings {
             max_code_line_length: limit(raw.max_code_line_length, defaults.max_code_line_length),
             max_file_size: limit(raw.max_file_size, defaults.max_file_size),
             max_heading_length: limit(raw.max_heading_length, defaults.max_heading_length),
+            exclude,
+            exclude_patterns,
         })
     }
 }
@@ -116,6 +147,8 @@ pub(crate) struct RawLint {
     max_code_line_length: Option<NonZeroUsize>,
     max_file_size: Option<NonZeroUsize>,
     max_heading_length: Option<NonZeroUsize>,
+    #[serde(default)]
+    exclude: Vec<String>,
     #[serde(default)]
     rules: BTreeMap<Rule, Level>,
 }

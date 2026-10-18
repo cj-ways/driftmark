@@ -1,0 +1,22 @@
+title: Some("Cache pages")
+summary: Some("Short version: pages expire after an hour.")
+front matter error: None
+field: Masthead "Status" = Text("Accepted"), links []
+
+[0] Heading { level: 1 } at 0..13
+    headings: []
+    containers: [], parent: None
+    text: "Cache pages"
+    source: "# Cache pages"
+
+[1] Paragraph at 17..59
+    headings: ["Cache pages"]
+    containers: [BlockQuote], parent: None
+    text: "Short version: pages expire after an hour."
+    source: "Short version: pages expire after an hour."
+
+[2] Paragraph at 63..95
+    headings: ["Cache pages"]
+    containers: [BlockQuote], parent: None
+    text: "Status: Accepted | Deciders: Ana"
+    source: "Status: Accepted | Deciders: Ana"

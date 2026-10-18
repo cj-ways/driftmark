@@ -27,6 +27,58 @@ use serde::Serialize;
 /// entries long.
 pub const MAX_DEPTH: usize = 100;
 
+/// The masthead keys every document knows. A `Key: Value` line under the
+/// title is metadata only when its key is one of these or one the rules file
+/// adds. Any other key is not metadata, so `> Short version: …` stays the
+/// summary however short it is (decision 0009).
+pub const MASTHEAD_KEYS: [&str; 8] = [
+    "Status",
+    "Date",
+    "Supersedes",
+    "Superseded by",
+    "Owner",
+    "Type",
+    "Tags",
+    "Version",
+];
+
+/// The keys whose masthead lines count as metadata: [`MASTHEAD_KEYS`] and
+/// the keys a rules file adds. They match like [`Metadata::field`] keys,
+/// without regard to case and with `-`, `_` and spaces the same.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MastheadKeys {
+    /// Every known key, normalized, sorted and each once.
+    keys: Vec<String>,
+}
+
+impl Default for MastheadKeys {
+    /// [`MASTHEAD_KEYS`] alone.
+    fn default() -> MastheadKeys {
+        MastheadKeys::with(std::iter::empty::<&str>())
+    }
+}
+
+impl MastheadKeys {
+    /// [`MASTHEAD_KEYS`] and these keys too.
+    #[must_use]
+    pub fn with<K: AsRef<str>>(extra: impl IntoIterator<Item = K>) -> MastheadKeys {
+        let mut keys: Vec<String> = MASTHEAD_KEYS
+            .iter()
+            .map(|key| normalize_key(key))
+            .chain(extra.into_iter().map(|key| normalize_key(key.as_ref())))
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        MastheadKeys { keys }
+    }
+
+    /// Whether a masthead line with this key is metadata.
+    #[must_use]
+    pub fn knows(&self, key: &str) -> bool {
+        self.keys.binary_search(&normalize_key(key)).is_ok()
+    }
+}
+
 /// One Markdown file, parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
@@ -257,7 +309,8 @@ pub struct Metadata {
     /// The text of the plain-prose quote right under the title.
     pub summary: Option<String>,
     /// The fields of the front matter, then those of the masthead, in written
-    /// order. Every key is kept, known or not.
+    /// order. Every front matter key is kept; a masthead key only when it is
+    /// a known one ([`MastheadKeys`]).
     pub fields: Vec<Field>,
     /// Why the front matter could not be read, when it could not. The rest of
     /// the document is still parsed.
@@ -392,7 +445,19 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 impl Document {
-    /// Parses one Markdown file.
+    /// Parses one Markdown file, reading only [`MASTHEAD_KEYS`] from its
+    /// masthead. With a rules file, use [`Document::parse_with`] and the
+    /// rules' [`crate::rules::Rules::masthead_keys`].
+    ///
+    /// # Errors
+    ///
+    /// As for [`Document::parse_with`].
+    pub fn parse(source: Vec<u8>) -> Result<Document, ParseError> {
+        Document::parse_with(source, &MastheadKeys::default())
+    }
+
+    /// Parses one Markdown file. A masthead line is metadata only when `keys`
+    /// knows its key.
     ///
     /// # Errors
     ///
@@ -400,7 +465,7 @@ impl Document {
     /// than [`MAX_DEPTH`], or when the Markdown parser fails. A parser panic
     /// is caught and returned as [`ParseError::Internal`], so one bad file
     /// cannot stop a server.
-    pub fn parse(source: Vec<u8>) -> Result<Document, ParseError> {
+    pub fn parse_with(source: Vec<u8>, keys: &MastheadKeys) -> Result<Document, ParseError> {
         let source = String::from_utf8(source).map_err(|error| {
             let offset = error.utf8_error().valid_up_to();
             let valid = std::str::from_utf8(&error.as_bytes()[..offset]).unwrap_or("");
@@ -413,7 +478,7 @@ impl Document {
             let arena = Arena::new();
             let root = parse_document(&arena, &source, &markdown::options());
             let blocks = blocks::split(&source, root)?;
-            let meta = meta::read(root);
+            let meta = meta::read(root, keys);
             Ok((blocks, meta))
         })
         .map(|(blocks, meta)| Document {
@@ -564,6 +629,25 @@ mod tests {
         );
         assert_eq!(meta.field(FieldOrigin::Masthead, "date"), None);
         assert_eq!(normalize_key("  Last__updated - At "), "last updated at");
+    }
+
+    #[test]
+    fn known_keys_match_like_field_keys() {
+        let keys = MastheadKeys::default();
+        for key in MASTHEAD_KEYS {
+            assert!(keys.knows(key), "{key}");
+        }
+        assert!(keys.knows("superseded-BY"));
+        assert!(!keys.knows("Short version"));
+        assert!(!keys.knows("Deciders"));
+        let more = MastheadKeys::with(["Deciders", "status"]);
+        assert!(more.knows("deciders") && more.knows("Status"));
+        assert_eq!(more.keys.len(), MASTHEAD_KEYS.len() + 1);
+        let source = b"# T\n\n> Deciders: Ana | Status: Draft\n".to_vec();
+        let plain = Document::parse(source.clone()).expect("parses");
+        assert_eq!(plain.meta.fields.len(), 1);
+        let with = Document::parse_with(source, &more).expect("parses");
+        assert_eq!(with.meta.fields.len(), 2);
     }
 
     #[test]

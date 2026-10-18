@@ -228,6 +228,43 @@ fn a_wrong_lint_table_is_refused_with_its_line() {
 }
 
 #[test]
+fn exclude_patterns_name_the_files_a_walk_skips() {
+    let rules =
+        Rules::parse("[lint]\nexclude = [\"fixtures/**\", \"CLAUDE.md\", \"docs/*/draft-*.md\"]\n")
+            .expect("valid");
+    let lint = rules.lint();
+    assert_eq!(
+        lint.exclude,
+        ["fixtures/**", "CLAUDE.md", "docs/*/draft-*.md"]
+    );
+    for path in [
+        "fixtures/lint/title/fail.md",
+        "fixtures/a.md",
+        "CLAUDE.md",
+        "docs/x/draft-1.md",
+    ] {
+        assert!(lint.excludes(path), "{path}");
+    }
+    for path in [
+        "docs/CLAUDE.md",
+        "claude.md",
+        "docs/x/y/draft-1.md",
+        "fixtures.md",
+        "README.md",
+    ] {
+        assert!(!lint.excludes(path), "{path}");
+    }
+    assert!(!Rules::default().lint().excludes("CLAUDE.md"));
+    let error = Rules::parse("[lint]\nexclude = [\"a/**b\"]\n").expect_err("invalid");
+    assert_eq!(
+        error,
+        RulesError::Lint(
+            "`exclude` holds \"a/**b\", which is not a valid pattern: Pattern syntax error near position 4: recursive wildcards must form a single path component".to_owned()
+        )
+    );
+}
+
+#[test]
 fn a_file_that_is_not_markdown_gets_one_parse_finding() {
     let found = Linter {
         rules: &Rules::default(),

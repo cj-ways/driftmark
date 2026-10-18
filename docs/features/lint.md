@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Writing check
 
-> Short version: `driftmark lint` checks that Markdown files keep the shape driftmark renders well (decision 0002). It reports each problem with its file, line, column, rule and a message that names the fix. A `[lint]` table in `driftmark.toml` changes how serious a rule is, turns rules off and sets four size limits. `driftmark hook install` adds the check to Claude Code, so an agent sees the findings right after each edit.
+> Short version: `driftmark lint` checks that Markdown files keep the shape driftmark renders well (decision 0002). It reports each problem with its file, line, column, rule and a message that names the fix. A `[lint]` table in `driftmark.toml` changes how serious a rule is, turns rules off, sets four size limits and names files to leave out. `driftmark hook install` adds the check to Claude Code, so an agent sees the findings right after each edit.
 
 ## Running it
 
@@ -17,8 +17,8 @@ date: 2026-10-18
 | `driftmark lint --json docs` | The same, written as JSON. |
 | `driftmark lint --hook claude-code` | The file in a Claude Code event read from standard input. See "The Claude Code hook". |
 
-- **Which files.** A Markdown file is one whose name ends in `.md` or `.markdown`, in any case. "Every Markdown file in the repository" means the files git tracks and the new files it would offer to track, as `docs/features/engine/git-ranges.md` says for the working tree. Ignored files are left out.
-- **Paths** are read from the current folder. A folder means every Markdown file inside it. A file named on the command line is checked even when git ignores it or its name does not end in `.md`.
+- **Which files.** A Markdown file is one whose name ends in `.md` or `.markdown`, in any case. "Every Markdown file in the repository" means the files git tracks and the new files it would offer to track, as `docs/features/engine/git-ranges.md` says for the working tree. Ignored files are left out, and so are the files the `[lint]` table's `exclude` names.
+- **Paths** are read from the current folder. A folder means every Markdown file inside it, except the excluded ones. A file named on the command line is checked even when git ignores it, `exclude` names it, or its name does not end in `.md`.
 - **The rules file** is `driftmark.toml` at the repository root. Without one, every rule runs with its default settings.
 - **Where it runs.** It must run inside a git repository with a working tree.
 - **What it reads.** The files are read from disk as they are now, saved or not committed.
@@ -149,7 +149,7 @@ Each page is kept for one hour.
 
 Between the title and the first heading after it, there must be a paragraph or a `>` quote that is not a masthead. A list, a table, a code block or an alert does not count. Without a title, the search starts at the top of the file.
 
-The masthead rules come from `docs/features/engine/document-model.md`. One consequence surprises people: a quote with a single `Label: value` whose value has 12 words or fewer is a masthead field, not a summary. The message then says so.
+The masthead rules come from `docs/features/engine/document-model.md`. A quote is a masthead only when it holds a known masthead key, such as `Status` or `Owner`, or one the rules file's `[masthead]` table adds (decision 0009). So `> Short version: pages expire after an hour.` is a summary, however short.
 
 Fails, because the quote is a masthead:
 
@@ -165,7 +165,7 @@ Fails, because the quote is a masthead:
 fail.md:5:1: warning summary: the document has no summary before its first section; add a paragraph or a `>` quote under the title that says in a sentence or two what the document is for
 ```
 
-Fails, because the labelled quote is short:
+Passes, because `Short version` is not a masthead key:
 
 ```markdown
 # Cache pages
@@ -175,11 +175,7 @@ Fails, because the labelled quote is short:
 ## Decision
 ```
 
-```text
-fail.md:5:1: warning summary: the document has no summary before its first section: the `> Short version: …` quote reads as a masthead field, because its text has 12 words or fewer; write it as a longer sentence, or without the label
-```
-
-Passes:
+Passes too, with a masthead and then a summary paragraph:
 
 ```markdown
 # Cache pages
@@ -264,6 +260,8 @@ Passes: ```` ```toml ```` and ```` ```sh ```` fences around the same lines.
 ### `code-line-length`
 
 A line inside a code block has at most `max-code-line-length` characters, 120 by default. Each long line is one finding. Its column is the first character past the limit. Indentation and quote markers before the code do not count. Diagram code is not checked, because it is drawn, not shown.
+
+Program output is not checked either (decision 0009). A code block marked `text`, `console`, `output` or `log`, in any case, holds what a program printed, and pages wrap its long lines instead. The list is `OUTPUT_LANGUAGES` in `driftmark_core::lint`. The rule's `pass.md` fixture holds a `text` block and a `console` block whose lines are longer than 120 characters, and no finding.
 
 ```text
 fail.md:8:121: warning code-line-length: this code line has 123 characters, more than the limit of 120; break it into shorter lines
@@ -488,6 +486,7 @@ The rules file `driftmark.toml` may hold one `[lint]` table beside its `[[type]]
 
 ```toml
 [lint]
+exclude = ["fixtures/**", "CLAUDE.md"]
 allowed-html = ["details", "summary", "br", "sub", "sup", "kbd", "img"]
 max-table-columns = 6
 max-code-line-length = 100
@@ -502,6 +501,7 @@ summary = "warning"
 
 | Key | Default | Meaning |
 |---|---|---|
+| `exclude` | `[]` | Path patterns of files that `driftmark lint` skips when it walks the repository or a folder, and that the Claude Code hook leaves alone. A file named on the command line is still checked. |
 | `allowed-html` | `["details", "summary", "br", "sub", "sup", "kbd"]` | The HTML elements raw HTML may use. The list replaces the default; it does not add to it. Names are compared in lower case. |
 | `max-table-columns` | 8 | The most columns a table may have. |
 | `max-code-line-length` | 120 | The most characters a code line may have. |
@@ -510,6 +510,7 @@ summary = "warning"
 | `[lint.rules]` | every rule at its default severity | Rule ids as keys, each set to `"error"`, `"warning"` or `"off"`. |
 
 - A rule that is off does not run at all. So turning `diagram` off also skips the Mermaid parser.
+- `exclude` patterns are matched against the path from the repository root, as the rules file's `paths` are (`docs/features/engine/rules-file.md`): `*` stays within a folder, and `**` crosses folders. `fixtures/**` leaves out everything under `fixtures/`, and `CLAUDE.md` only the file at the root. Test files that break the rules on purpose belong here; this repository's own `driftmark.toml` excludes `fixtures/**` and `CLAUDE.md`.
 - `required` and `other-statuses` belong to each `[[type]]`, not to `[lint]`, because they differ by document type. `docs/features/engine/rules-file.md` lists them.
 
 These mistakes are refused, and `driftmark lint` exits with 2:
@@ -519,6 +520,7 @@ These mistakes are refused, and `driftmark lint` exits with 2:
 | An unknown rule id | The TOML reader's message, with the line and the list of real ids: ``unknown variant `titel`, expected one of `parse`, `title`, …`` |
 | A severity other than the three | The TOML reader's message with the line. |
 | A limit of 0 or below | The TOML reader's message with the line. |
+| An `exclude` entry that is not a valid pattern | ``the rules file's [lint] table: `exclude` holds "a/**b", which is not a valid pattern: …`` |
 | An `allowed-html` entry that is not an element name | ``the rules file's [lint] table: `allowed-html` holds "<b>", which is not an HTML element name; write names such as "details", without `<` or `>` `` |
 
 ### Why these defaults
@@ -594,7 +596,7 @@ Claude Code runs the command after each matching tool call, with the event as JS
    - the file is not Markdown;
    - the file no longer exists;
    - the file is not inside a git repository;
-3. reads that repository's `driftmark.toml` and lints the one file;
+3. reads that repository's `driftmark.toml`. When its `[lint]` table's `exclude` names the file, it stops, silent with exit code 0: the hook runs after every edit anywhere in the repository, as a walk does, and a fixture that breaks the rules on purpose must not send the agent off to fix it. Otherwise it lints the one file;
 4. with no findings, exits 0 and prints nothing;
 5. with findings, writes them to standard error and exits 2. The report starts with `driftmark lint found 2 problems in docs/cache.md. Fix them in the file:`, then has one finding per line, in the text format above. Warnings are reported too, because the agent can fix them as cheaply as errors.
 
@@ -641,7 +643,6 @@ The hook runs after every edit, so one document must be checked in under 50 mill
 
 ## Not covered
 
-- **Excluding files.** `driftmark lint` with no path checks every Markdown file, including test fixtures that fail on purpose. This repository's own `fixtures/lint/` is such a folder. Name the folders to check, such as `driftmark lint docs`, until the rules file gains an exclude list.
 - **D2 diagrams** are not parsed.
 - **Anchors from HTML.** An `id` or `name` set in raw HTML does not count as an anchor, and links inside raw HTML are not checked.
 - **Ignored files.** A link to a file git ignores counts as existing, because the check looks at the disk.

@@ -25,6 +25,7 @@ const GOLDEN: &[&str] = &[
     "masthead/paragraph.md",
     "masthead/quote-line.md",
     "masthead/quote-lines.md",
+    "masthead/short-summary.md",
     "masthead/summary.md",
     "nesting/input.md",
     "no-title/input.md",

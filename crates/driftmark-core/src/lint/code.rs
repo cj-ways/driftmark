@@ -4,6 +4,21 @@
 use super::{Context, Report, Rule};
 use crate::document::{Block, BlockKind, DiagramLanguage};
 
+/// The code block languages that hold program output rather than code. Their
+/// lines are not checked against `max-code-line-length`, because output is
+/// pasted as the program printed it, and pages wrap its long lines instead
+/// (decision 0009). They match without regard to case.
+pub const OUTPUT_LANGUAGES: [&str; 4] = ["text", "console", "output", "log"];
+
+/// Whether a code block's language marks program output.
+fn is_output(language: Option<&str>) -> bool {
+    language.is_some_and(|language| {
+        OUTPUT_LANGUAGES
+            .iter()
+            .any(|output| language.eq_ignore_ascii_case(output))
+    })
+}
+
 pub(super) fn check(context: &Context<'_>, report: &mut Report<'_>) {
     for block in &context.document.blocks {
         match &block.kind {
@@ -15,7 +30,9 @@ pub(super) fn check(context: &Context<'_>, report: &mut Report<'_>) {
                     None => missing_language(context, report, block),
                     Some(language) => diagram_spelling(context, report, block, language),
                 }
-                long_lines(context, report, block);
+                if !is_output(language.as_deref()) {
+                    long_lines(context, report, block);
+                }
             }
             BlockKind::Diagram { language, closed } => {
                 if !closed {
@@ -228,7 +245,7 @@ mod tests {
     fn long_code_lines_point_past_the_limit() {
         let rules = "[lint]\nmax-code-line-length = 5\n";
         let source = format!(
-            "{HEAD}```text\n12345\n123456\n```\n\n> ```text\n> 1234567\n> ```\n\n- item\n\n  ```text\n  abcdef\n  ```\n\nText:\n\n    abcdefg\n\n```mermaid\nflowchart TD\n  long --> line\n```\n"
+            "{HEAD}```sh\n12345\n123456\n```\n\n> ```sh\n> 1234567\n> ```\n\n- item\n\n  ```sh\n  abcdef\n  ```\n\nText:\n\n    abcdefg\n\n```mermaid\nflowchart TD\n  long --> line\n```\n"
         );
         assert_eq!(
             messages(&lint_with(rules, "t.md", &source)),
@@ -239,6 +256,25 @@ mod tests {
                 "22:5 warning code-language: this indented code block cannot name its language; write it as a fenced block instead, such as ```sh, or ```text for plain text",
                 "22:10 warning code-line-length: this code line has 7 characters, more than the limit of 5; break it into shorter lines",
             ]
+        );
+    }
+
+    #[test]
+    fn program_output_is_not_held_to_the_line_limit() {
+        let rules = "[lint]\nmax-code-line-length = 5\n";
+        let source = format!(
+            "{HEAD}```text\n123456\n```\n\n```Console\n$ abcdef\n```\n\n```output\n123456\n```\n\n```log\n123456\n```\n\n```sh\n123456\n```\n\n```textual\n123456\n```\n"
+        );
+        assert_eq!(
+            messages(&lint_with(rules, "t.md", &source)),
+            [
+                "22:6 warning code-line-length: this code line has 6 characters, more than the limit of 5; break it into shorter lines",
+                "26:6 warning code-line-length: this code line has 6 characters, more than the limit of 5; break it into shorter lines",
+            ]
+        );
+        assert_eq!(
+            super::OUTPUT_LANGUAGES,
+            ["text", "console", "output", "log"]
         );
     }
 

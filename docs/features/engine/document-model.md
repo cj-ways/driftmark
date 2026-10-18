@@ -9,7 +9,7 @@ date: 2026-10-18
 
 ## How a file is parsed
 
-`Document::parse(bytes)` in `driftmark_core::document` takes the file's bytes and returns a `Document` or a `ParseError`. The core reads no files; the program hands it the bytes.
+`Document::parse_with(bytes, keys)` in `driftmark_core::document` takes the file's bytes and the known masthead keys, and returns a `Document` or a `ParseError`. The core reads no files; the program hands it the bytes. With a rules file, the keys are `rules.masthead_keys()` (`docs/features/engine/rules-file.md`). `Document::parse(bytes)` uses the built-in keys alone.
 
 - **Parser.** comrak 0.56, with the options in `document::markdown::options()`. Every part of driftmark must parse with these options, so blocks, pages and note positions come from the same tree.
 - **Extensions on:** tables, strikethrough, autolinks, task lists, footnotes, GitHub alerts, and YAML front matter between `---` lines at the top of the file.
@@ -233,7 +233,7 @@ The fixtures in `fixtures/formatting-only/` and `fixtures/edited/` hold one made
 |---|---|
 | `title` | The plain text of the first level-1 heading (`#` or `===`) outside any container. `None` when there is none. |
 | `summary` | The plain text of the quote right under the title, when it is plain prose. |
-| `fields` | The front matter's top-level keys, then the masthead's keys, in written order. Every key is kept, known or not. |
+| `fields` | The front matter's top-level keys, then the masthead's known keys, in written order. Every front matter key is kept. A masthead key is kept only when it is known (see below). |
 | `front_matter_error` | Why the front matter could not be read, as a sentence. |
 
 ### Front matter
@@ -258,7 +258,7 @@ The masthead is a block of `Key: Value` lines right under the title. driftmark r
 * Deciders: Ana, Ben
 ```
 
-The quote is the brief's own form. The paragraph is how GitHub Spec Kit writes it, and the list is how MADR 2 writes it, so presets for those layouts can name masthead keys.
+The quote is the brief's own form. The paragraph is how GitHub Spec Kit writes it, and the list is how MADR 2 writes it, so presets for those layouts can name masthead keys. In the paragraph, `Created` is not a known key, so only `Status` is read unless a rules file adds `Created`. In the list, the same holds for `Deciders`.
 
 The rules:
 
@@ -266,11 +266,23 @@ The rules:
 2. A line splits into fields at ` | ` and ` · `. Each piece is `Key: Value`, split at the first colon. A piece that is not `Key: Value` belongs to the value before it, so `Affects: a | b` keeps `a | b`. The first piece of a line must be `Key: Value`.
 3. A key starts with a letter, has one to four words and at most 40 characters, and holds only letters, digits, spaces and `-_/.'()`. Bold markers do not matter, because the rendered text is read. A value that starts with `//` means the colon was part of a web address, so the piece is not a field.
 4. Every line of the block must be `Key: Value`, or the block is not a masthead.
-5. A block with one field and more than 12 words in its value is prose, not a masthead. So `> Short version: the tool keeps …` is a summary.
+5. **Only known keys are metadata** (decision 0009). The known keys are `Status`, `Date`, `Supersedes`, `Superseded by`, `Owner`, `Type`, `Tags` and `Version`, in `MASTHEAD_KEYS`, plus the keys the rules file adds. They match without regard to case, with `-`, `_` and spaces the same. A field with any other key is left out. A block with no known key is not a masthead, whatever the length of its values.
 6. The summary is the first quote under the title that holds only paragraphs and is not a masthead. Its paragraphs are joined by an empty line.
 7. A masthead value is its rendered text. The targets of links in it are kept in `field.links`, so "superseded by" can link to the newer document.
 
-A short summary that reads as `Label: value`, such as `> Note: read this first.`, is taken as a masthead field. Writing a full sentence after the label avoids that.
+So a summary written as `Label: value` stays the summary, however short, when its label is not a known key:
+
+```markdown
+# Cache pages
+
+> Short version: pages expire after an hour.
+
+> Status: Accepted | Deciders: Ana
+```
+
+Here the summary is `Short version: pages expire after an hour.`, and the masthead gives one field, `Status`. The fixture `fixtures/masthead/short-summary.md` holds this example. `Deciders` is not a known key, so it is left out. A rules file that lists `Deciders` in its `[masthead]` table keeps it too. Before decision 0009, a single `Label: value` of 12 words or fewer counted as a masthead field, which turned short `> Short version: …` quotes into metadata.
+
+`MastheadKeys` holds the known keys. `MastheadKeys::default()` is the built-in list, and `MastheadKeys::with(extra)` adds more; `keys.knows(key)` tests one.
 
 ### Looking up a field
 

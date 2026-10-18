@@ -15,3 +15,15 @@ Run the tests before tagging.
 shipit build --release \
   --target linux
 ```
+
+The build prints one long line when it is done:
+
+```text
+shipit: built the linux, macos and windows packages for the stable channel, signed and notarized them, then uploaded all three
+```
+
+And the status command:
+
+```console
+$ shipit status --channel stable --verbose --show-signatures --show-checksums --show-upload-times --format table --no-color
+```

@@ -6,6 +6,10 @@
 //! same lines are also read from a plain paragraph (GitHub Spec Kit writes
 //! `**Status**: Draft`) and from a list (MADR 2 writes `* Status: accepted`),
 //! so presets for those layouts can name masthead keys too.
+//!
+//! Only known keys are metadata ([`MastheadKeys`]). A block whose lines read
+//! as `Key: Value` but hold no known key is not a masthead, so a quote such
+//! as `> Short version: …` is the summary however short it is.
 
 use std::ops::Range;
 
@@ -14,7 +18,7 @@ use comrak::nodes::{AstNode, NodeValue};
 
 use super::content::front_matter_body;
 use super::markdown::{code_span_text, inline_text};
-use super::{Field, FieldOrigin, MetaValue, Metadata, yaml};
+use super::{Field, FieldOrigin, MastheadKeys, MetaValue, Metadata, yaml};
 
 /// How many blocks right under the title are looked at for the summary and
 /// the masthead.
@@ -23,13 +27,10 @@ const HEAD_BLOCKS: usize = 3;
 const KEY_WORDS: usize = 4;
 /// The most characters a masthead key may have.
 const KEY_CHARACTERS: usize = 40;
-/// A quote with a single `Key: Value` is a masthead only when its value has
-/// at most this many words. Above it, it is prose that happens to start with
-/// a label, such as `> Short version: …`.
-const SHORT_VALUE_WORDS: usize = 12;
 
-/// Reads the metadata of a parsed document.
-pub(crate) fn read<'a>(root: &'a AstNode<'a>) -> Metadata {
+/// Reads the metadata of a parsed document. Masthead fields are kept only
+/// when `keys` knows their key.
+pub(crate) fn read<'a>(root: &'a AstNode<'a>, keys: &MastheadKeys) -> Metadata {
     let mut meta = Metadata::default();
     for node in root.children() {
         match &node.data().value {
@@ -46,7 +47,7 @@ pub(crate) fn read<'a>(root: &'a AstNode<'a>) -> Metadata {
             },
             NodeValue::Heading(heading) if heading.level == 1 => {
                 meta.title = Some(inline_text(node).trim().to_owned());
-                read_head(node, &mut meta);
+                read_head(node, keys, &mut meta);
                 break;
             }
             _ => {}
@@ -64,11 +65,11 @@ pub(crate) enum Head {
 }
 
 /// Reads the summary and the masthead from the blocks right under the title.
-fn read_head<'a>(title: &'a AstNode<'a>, meta: &mut Metadata) {
+fn read_head<'a>(title: &'a AstNode<'a>, keys: &MastheadKeys, meta: &mut Metadata) {
     let mut next = title.next_sibling();
     for _ in 0..HEAD_BLOCKS {
         let Some(node) = next else { break };
-        match head(node) {
+        match head(node, keys) {
             Head::Masthead(fields) => meta.fields.extend(fields),
             Head::Prose(text) if meta.summary.is_none() => meta.summary = Some(text),
             Head::Prose(_) | Head::Other => break,
@@ -77,8 +78,9 @@ fn read_head<'a>(title: &'a AstNode<'a>, meta: &mut Metadata) {
     }
 }
 
-/// Reads one top-level block as a masthead, as prose or as neither.
-pub(crate) fn head<'a>(node: &'a AstNode<'a>) -> Head {
+/// Reads one top-level block as a masthead, as prose or as neither. Only
+/// fields whose key `keys` knows make a masthead.
+pub(crate) fn head<'a>(node: &'a AstNode<'a>, keys: &MastheadKeys) -> Head {
     let children: Vec<&'a AstNode<'a>> = node.children().collect();
     let only_paragraphs = !children.is_empty()
         && children
@@ -90,7 +92,7 @@ pub(crate) fn head<'a>(node: &'a AstNode<'a>) -> Head {
                 .iter()
                 .flat_map(|child| lines(child, true))
                 .collect::<Vec<_>>();
-            masthead(&lines).map_or_else(
+            masthead(&lines, keys).map_or_else(
                 || {
                     let paragraphs: Vec<String> = children
                         .iter()
@@ -101,7 +103,9 @@ pub(crate) fn head<'a>(node: &'a AstNode<'a>) -> Head {
                 Head::Masthead,
             )
         }
-        NodeValue::Paragraph => masthead(&lines(node, true)).map_or(Head::Other, Head::Masthead),
+        NodeValue::Paragraph => {
+            masthead(&lines(node, true), keys).map_or(Head::Other, Head::Masthead)
+        }
         NodeValue::List(_) => {
             // Each item must hold exactly one paragraph, which is one line.
             let paragraphs: Vec<&'a AstNode<'a>> = children
@@ -114,7 +118,7 @@ pub(crate) fn head<'a>(node: &'a AstNode<'a>) -> Head {
                     .iter()
                     .flat_map(|child| lines(child, false))
                     .collect();
-                masthead(&lines).map_or(Head::Other, Head::Masthead)
+                masthead(&lines, keys).map_or(Head::Other, Head::Masthead)
             } else {
                 Head::Other
             }
@@ -156,21 +160,17 @@ fn lines<'a>(paragraph: &'a AstNode<'a>, split_soft: bool) -> Vec<Line> {
     lines
 }
 
-/// The fields of masthead lines, when every line is `Key: Value` and the
-/// block reads as a masthead rather than as prose.
-fn masthead(lines: &[Line]) -> Option<Vec<Field>> {
+/// The fields of masthead lines whose key `keys` knows, when every line is
+/// `Key: Value` and at least one key is known. A field with another key is
+/// left out: it is not metadata. A block with no known key is not a
+/// masthead, whatever the length of its values.
+fn masthead(lines: &[Line], keys: &MastheadKeys) -> Option<Vec<Field>> {
     let mut fields = Vec::new();
     for line in lines {
         fields.extend(parse_line(line)?);
     }
-    let short = |field: &Field| {
-        field
-            .value
-            .as_text()
-            .is_some_and(|value| value.split_whitespace().count() <= SHORT_VALUE_WORDS)
-    };
-    let is_masthead = fields.len() >= 2 || fields.first().is_some_and(short);
-    is_masthead.then_some(fields)
+    fields.retain(|field| keys.knows(&field.key));
+    (!fields.is_empty()).then_some(fields)
 }
 
 /// Splits one line into `Key: Value` fields at ` | ` and ` · `. A piece that
@@ -232,15 +232,22 @@ fn pieces(text: &str) -> Vec<Range<usize>> {
 fn key_value(piece: &str) -> Option<(String, usize)> {
     let colon = piece.find(':')?;
     let key = piece[..colon].trim();
+    let valid = is_key(key) && !piece[colon + 1..].starts_with("//");
+    valid.then(|| (key.to_owned(), colon + 1))
+}
+
+/// Whether `key` has the shape of a masthead key: it starts with a letter,
+/// has one to four words and at most 40 characters, and holds only letters,
+/// digits, spaces and `-_/.'()`. The rules file's own masthead keys must have
+/// it too, or no line could ever match them.
+pub(crate) fn is_key(key: &str) -> bool {
     let words = key.split_whitespace().count();
-    let valid = (1..=KEY_WORDS).contains(&words)
+    (1..=KEY_WORDS).contains(&words)
         && key.chars().count() <= KEY_CHARACTERS
         && key.starts_with(char::is_alphabetic)
         && key
             .chars()
             .all(|c| c.is_alphanumeric() || " -_/.'()".contains(c))
-        && !piece[colon + 1..].starts_with("//");
-    valid.then(|| (key.to_owned(), colon + 1))
 }
 
 #[cfg(test)]
@@ -250,9 +257,13 @@ mod tests {
     use comrak::{Arena, parse_document};
 
     fn meta(source: &str) -> Metadata {
+        meta_with(source, &MastheadKeys::default())
+    }
+
+    fn meta_with(source: &str, keys: &MastheadKeys) -> Metadata {
         let arena = Arena::new();
         let root = parse_document(&arena, source, &options());
-        read(root)
+        read(root, keys)
     }
 
     fn masthead_field(key: &str, value: &str, links: &[&str]) -> Field {
@@ -333,13 +344,17 @@ mod tests {
 
     #[test]
     fn only_three_blocks_under_the_title_are_read() {
-        let found = meta("# T\n\n> A: 1\n\n> B: 2\n\n> C: 3\n\n> D: 4\n");
+        let found = meta("# T\n\n> Type: 1\n\n> Tags: 2\n\n> Owner: 3\n\n> Date: 4\n");
         assert_eq!(found.fields.len(), 3);
     }
 
     #[test]
     fn a_paragraph_or_a_list_can_be_the_masthead() {
-        let spec_kit = meta("# T\n\n**Created**: 2026-01-05  \n**Status**: Draft\n");
+        let keys = MastheadKeys::with(["Created", "Deciders"]);
+        let spec_kit = meta_with(
+            "# T\n\n**Created**: 2026-01-05  \n**Status**: Draft\n",
+            &keys,
+        );
         assert_eq!(
             spec_kit.fields,
             vec![
@@ -347,7 +362,10 @@ mod tests {
                 masthead_field("Status", "Draft", &[])
             ]
         );
-        let madr = meta("# T\n\n* Status: accepted\n* Deciders: Ana,\n  Ben\n");
+        let madr = meta_with(
+            "# T\n\n* Status: accepted\n* Deciders: Ana,\n  Ben\n",
+            &keys,
+        );
         assert_eq!(
             madr.fields,
             vec![
@@ -362,17 +380,39 @@ mod tests {
     }
 
     #[test]
-    fn a_single_long_value_is_prose() {
-        let twelve = "one two three four five six seven eight nine ten eleven twelve";
-        assert_eq!(meta(&format!("# T\n\n> Note: {twelve}\n")).fields.len(), 1);
-        let found = meta(&format!("# T\n\n> Note: {twelve} thirteen\n"));
-        assert_eq!(found.fields, []);
-        assert!(found.summary.is_some());
+    fn only_known_keys_are_metadata_whatever_the_length() {
+        let short = meta("# T\n\n> Short version: pages expire after an hour.\n");
+        assert_eq!(short.fields, []);
+        assert_eq!(
+            short.summary.as_deref(),
+            Some("Short version: pages expire after an hour.")
+        );
+        let long = format!("# T\n\n> Status: {}\n", "word ".repeat(30).trim_end());
+        let found = meta(&long);
+        assert_eq!(found.fields.len(), 1);
+        assert_eq!(found.summary, None);
+        let mixed = meta("# T\n\n> Status: Draft | Deciders: Ana\n> Owner: Ben\n");
+        assert_eq!(
+            mixed.fields,
+            vec![
+                masthead_field("Status", "Draft", &[]),
+                masthead_field("Owner", "Ben", &[])
+            ]
+        );
+        let unknown = meta("# T\n\n**Created**: 2026-01-05  \n**Input**: a request\n");
+        assert_eq!(unknown.fields, []);
+        assert_eq!(unknown.summary, None);
+        let custom = meta_with(
+            "# T\n\n> Short version: kept as a field.\n",
+            &MastheadKeys::with(["short-version"]),
+        );
+        assert_eq!(custom.fields.len(), 1);
+        assert_eq!(custom.summary, None);
     }
 
     #[test]
     fn front_matter_fields_come_first() {
-        let found = meta("---\nstatus: accepted\ntags: [a]\n---\n\n# T\n\n> Owner: Ana\n");
+        let found = meta("---\nstatus: accepted\nanything: [a]\n---\n\n# T\n\n> Owner: Ana\n");
         let keys: Vec<(&str, FieldOrigin)> = found
             .fields
             .iter()
@@ -382,7 +422,7 @@ mod tests {
             keys,
             vec![
                 ("status", FieldOrigin::FrontMatter),
-                ("tags", FieldOrigin::FrontMatter),
+                ("anything", FieldOrigin::FrontMatter),
                 ("Owner", FieldOrigin::Masthead)
             ]
         );
@@ -425,6 +465,8 @@ mod tests {
             Some(26)
         );
         assert_eq!(key_value("https://example.com"), None);
+        assert!(is_key("Superseded by") && is_key("Feature Branch"));
+        assert!(!is_key("") && !is_key("a*b") && !is_key("a b c d e"));
         assert_eq!(
             key_value("სტატუსი: x").map(|(key, _)| key),
             Some("სტატუსი".to_owned())

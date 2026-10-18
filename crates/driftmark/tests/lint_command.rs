@@ -69,6 +69,31 @@ driftmark lint: 4 files checked, 2 errors and 2 warnings in 2 files
 }
 
 #[test]
+fn exclude_skips_files_in_a_walk_but_not_files_named_on_their_own() {
+    let repo = repo();
+    repo.write(
+        "driftmark.toml",
+        "[lint]\nexclude = [\"docs/bad.md\", \"notes/**\"]\n",
+    );
+    let (code, out, err) = driftmark(&repo.dir, &["lint"], "");
+    assert_eq!(err, "");
+    assert_eq!(out, "driftmark lint: 2 files checked, no problems found\n");
+    assert_eq!(code, 0);
+    let (_, out, _) = driftmark(&repo.dir, &["lint", "docs"], "");
+    assert_eq!(out, "driftmark lint: 1 file checked, no problems found\n");
+    let (code, out, _) = driftmark(&repo.dir, &["lint", "docs/bad.md"], "");
+    assert!(
+        out.ends_with("1 file checked, 2 errors and 1 warning in 1 file\n"),
+        "a file named on its own is checked: {out}"
+    );
+    assert_eq!(code, 1);
+    repo.write("driftmark.toml", "[lint]\nexclude = [\"a/**b\"]\n");
+    let (code, out, err) = driftmark(&repo.dir, &["lint"], "");
+    assert_eq!((code, out.as_str()), (2, ""));
+    assert!(err.contains("`exclude` holds \"a/**b\""), "{err}");
+}
+
+#[test]
 fn paths_name_files_or_folders_from_the_current_folder() {
     let repo = repo();
     let (code, out, _) = driftmark(&repo.dir, &["lint", "docs/good.md"], "");

@@ -3,7 +3,6 @@ summary: Some("The plan in one sentence.")
 front matter error: None
 field: Masthead "Status" = Text("Draft"), links []
 field: Masthead "Owner" = Text("Ana"), links []
-field: Masthead "Last updated" = Text("2026-02-01"), links []
 
 [0] Heading { level: 1 } at 0..8
     headings: []

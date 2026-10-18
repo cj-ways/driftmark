@@ -1,18 +1,11 @@
 file: Added
 status: None
-changes: 4, highest: Some(Rule)
-levels: LevelCounts { decision: 0, rule: 1, fact: 1, wording: 2, formatting: 0 }
-kinds: KindCounts { formatting: 0, edited: 0, added: 4, removed: 0, moved: 0, moved_edited: 0 }
+changes: 1, highest: Some(Fact)
+levels: LevelCounts { decision: 0, rule: 0, fact: 1, wording: 0, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 0, added: 1, removed: 0, moved: 0, moved_edited: 0 }
 unchanged: []
 
-added — Wording [Wording] — old @0, new 0 (line 1)
-    text: status: draft
-
-added — Fact [Heading] — old @0, new 1 (line 5)
-    text: New plan
-
-added — Rule [Normative, Number] — old @0, new 2 (line 7)
-    text: The plan must cover the 3 steps below.
-
-added — Wording [Wording] — old @0, new 3 (line 9)
-    text: Write the brief.
+added — Fact [Heading, Number] — the whole document
+    title: Some("New plan")
+    summary: Some("Short version: the plan in one line.")
+    size: 134 bytes, 11 lines

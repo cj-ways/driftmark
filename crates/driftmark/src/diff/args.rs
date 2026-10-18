@@ -16,6 +16,15 @@ pub(crate) enum Request {
     Diff(Args),
 }
 
+/// Which JSON `--json` asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Json {
+    /// `--json`: the whole change list.
+    Full,
+    /// `--json=summary`: one entry per document with its counts.
+    Summary,
+}
+
 /// The arguments of one comparison.
 #[derive(Debug, PartialEq)]
 pub(crate) struct Args {
@@ -29,8 +38,9 @@ pub(crate) struct Args {
     pub roots: Roots,
     /// A folder inside the repository.
     pub repo: PathBuf,
-    /// Print the whole change list as JSON instead of the summary.
-    pub json: bool,
+    /// Print JSON instead of the text summary: the whole change list, or
+    /// only each document's counts.
+    pub json: Option<Json>,
     /// Print the time of each step on standard error.
     pub timings: bool,
     /// How many threads read, parse and compare files; `None` means one per
@@ -48,7 +58,7 @@ pub(crate) struct Args {
 ///
 /// A sentence for the user when the command line is wrong.
 pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
-    let mut json = false;
+    let mut json = None;
     let mut timings = false;
     let mut repo = None;
     let mut threads = None;
@@ -83,7 +93,17 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
                     folders.push(folder.to_owned());
                 }
             }
-            "--json" => flag(&mut json)?,
+            "--json" => {
+                json = Some(match inline {
+                    None => Json::Full,
+                    Some("summary") => Json::Summary,
+                    Some(other) => {
+                        return Err(format!(
+                            "`--json` takes only `summary` after `=`, not `{other}`"
+                        ));
+                    }
+                });
+            }
             "--timings" => flag(&mut timings)?,
             "--help" | "-h" => return Ok(Request::Help),
             "--repo" => repo = Some(PathBuf::from(value(&mut args, name, inline)?)),
@@ -205,7 +225,7 @@ mod tests {
                 range: RangeSpec::parse("main...feature").unwrap(),
                 roots: Roots::all(),
                 repo: PathBuf::from("."),
-                json: false,
+                json: None,
                 timings: false,
                 threads: None,
             }
@@ -228,12 +248,18 @@ mod tests {
         assert_eq!(args.range, RangeSpec::Auto);
         assert_eq!(args.label, "auto");
         assert_eq!(args.repo, PathBuf::from("/work/docs-repo"));
-        assert!(args.json && args.timings);
+        assert_eq!(args.json, Some(Json::Full));
+        assert!(args.timings);
         assert_eq!(args.threads, NonZeroUsize::new(3));
         assert_eq!(args.roots, Roots::new(["docs", "specs/api"]).unwrap());
         let args = diff(&["a..b", "--repo=elsewhere", "--threads", "1"]);
         assert_eq!(args.repo, PathBuf::from("elsewhere"));
         assert_eq!(args.threads, NonZeroUsize::new(1));
+        assert_eq!(args.json, None);
+        let args = diff(&["--json=summary", "a..b"]);
+        assert_eq!(args.json, Some(Json::Summary));
+        let args = diff(&["--json=summary", "a..b", "--json"]);
+        assert_eq!(args.json, Some(Json::Full), "the last one counts");
     }
 
     #[test]
@@ -258,13 +284,20 @@ mod tests {
 
     #[test]
     fn mistakes_are_named() {
-        let cases: [(&[&str], &str); 16] = [
+        let cases: [(&[&str], &str); 17] = [
             (&[], "give a range, such as `main...feature` or `auto`"),
             (&["main"], "`main` is not a range"),
             (&["a..b", "docs"], "give one range; put folders after `--`"),
             (&["--nope", "a..b"], "unknown option `--nope`"),
             (&["-x"], "unknown option `-x`"),
-            (&["a..b", "--json=yes"], "`--json` takes no value"),
+            (
+                &["a..b", "--json=yes"],
+                "`--json` takes only `summary` after `=`, not `yes`",
+            ),
+            (
+                &["a..b", "--json="],
+                "`--json` takes only `summary` after `=`, not ``",
+            ),
             (&["a..b", "--timings=1"], "`--timings` takes no value"),
             (&["a..b", "--repo"], "`--repo` needs a value"),
             (

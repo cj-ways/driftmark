@@ -1,0 +1,7 @@
+# driftmark's rules file for its own repository.
+#
+# The fixtures break the writing rules on purpose, and CLAUDE.md is an import
+# line for Claude Code, not a document, so `driftmark lint` leaves them out.
+
+[lint]
+exclude = ["fixtures/**", "CLAUDE.md"]

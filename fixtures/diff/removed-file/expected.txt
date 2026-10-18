@@ -1,21 +1,11 @@
 file: Removed
 status: None
-changes: 5, highest: Some(Fact)
-levels: LevelCounts { decision: 0, rule: 0, fact: 5, wording: 0, formatting: 0 }
-kinds: KindCounts { formatting: 0, edited: 0, added: 0, removed: 5, moved: 0, moved_edited: 0 }
+changes: 1, highest: Some(Fact)
+levels: LevelCounts { decision: 0, rule: 0, fact: 1, wording: 0, formatting: 0 }
+kinds: KindCounts { formatting: 0, edited: 0, added: 0, removed: 1, moved: 0, moved_edited: 0 }
 unchanged: []
 
-removed — Fact [Heading] — old 0 (line 1), new @0
-    text: Old notes
-
-removed — Fact [Link] — old 1 (line 3), new @0
-    text: See the guide for details.
-
-removed — Fact [TableCell] — old 2 (line 5), new @0
-    text: Name⇥Value
-
-removed — Fact [Number, TableCell] — old 3 (line 7), new @0
-    text: size⇥10
-
-removed — Fact [CodeLine] — old 4 (line 9), new @0
-    text: driftmark diff main..
+removed — Fact [Heading, Number, Link, TableCell, CodeLine] — the whole document
+    title: Some("Old notes")
+    summary: None
+    size: 127 bytes, 11 lines

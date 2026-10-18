@@ -32,7 +32,8 @@ fn the_example_rules_classify_the_example_tree() {
     let mut actual = String::new();
     for path in DOCUMENTS {
         let bytes = fs::read(folder().join(path)).expect("the document exists");
-        let document = Document::parse(bytes).expect("the document parses");
+        let document =
+            Document::parse_with(bytes, rules.masthead_keys()).expect("the document parses");
         let classification = rules.classify(path, &document);
         writeln!(actual, "{path}\n    {classification:?}").expect("writing to a string");
     }

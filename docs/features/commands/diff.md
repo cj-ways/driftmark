@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # The diff command
 
-> Short version: `driftmark diff <range>` compares the Markdown files of a git repository between two points. It prints one line per changed document with its highest level and its counts, then the totals. `--json` prints the whole change list instead, for tools. The rules file is read at the newer side of the range. The exit code is 0 when it ran, 1 when it could not finish, and 2 when the command line is wrong.
+> Short version: `driftmark diff <range>` compares the Markdown files of a git repository between two points. It prints one line per changed document with its highest level and its counts, then the totals. `--json` prints the whole change list instead, for tools, and `--json=summary` prints only each document's counts. The rules file is read at the newer side of the range. The exit code is 0 when it ran, 1 when it could not finish, and 2 when the command line is wrong.
 
 ## Running it
 
@@ -31,11 +31,12 @@ driftmark diff [<options>] --since <date> [<branch>] [-- <folder>...]
 |---|---|
 | `--repo <path>` | A folder inside the repository. The default is the current folder. |
 | `--json` | Print the whole change list as JSON instead of the summary. |
+| `--json=summary` | Print one JSON entry per document instead: its path, what happened to the file, its highest level and its counts. |
 | `--timings` | Print the time of each step on standard error. Standard output does not change. |
 | `--threads <n>` | Read, parse and compare files on `n` threads. The default is one per processor core. |
 | `--help` | Print the usage text. |
 
-- Options may come before or after the range, and take their value as the next word or after `=`, as in `--threads=4`.
+- Options may come before or after the range, and take their value as the next word or after `=`, as in `--threads=4`. `--json` takes its value only after `=`, as in `--json=summary`, and `summary` is the only value.
 - **Folders** come after `--`. They start at the repository root, wherever the command runs, so `-- docs` means the same from every subfolder. A folder inside another adds nothing. Without folders, every Markdown file in the repository counts.
 - **Which files.** A file counts when its name ends in `.md` or `.markdown`, in any case, and it is a regular file. A moved file is one deleted file and one new file. `git-ranges.md` has the details.
 
@@ -86,18 +87,18 @@ main..feature: from 3828db3aa184 to 2cc1179a6f87
 
 level       changes  document
 decision     3 of 5  docs/decisions/0002-cache.md (status proposed -> accepted)
-fact         2 of 2  docs/new.md (new)
-fact         1 of 2  docs/old.md (deleted)
 fact         1 of 1  README.md (deleted)
+fact         1 of 1  docs/new.md (new)
+fact         1 of 1  docs/old.md (deleted)
 fact         1 of 1  docs/readme.md (new)
 wording      1 of 1  docs/guide.md
 
-6 documents changed, 12 changes
-By level: 3 decision, 6 fact, 3 wording
-By kind: 3 edited, 4 added, 5 removed
+6 documents changed, 10 changes
+By level: 3 decision, 5 fact, 2 wording
+By kind: 3 edited, 3 added, 4 removed
 ```
 
-`crates/driftmark/tests/diff_command.rs` builds this repository and checks this exact text.
+`crates/driftmark/tests/diff_command.rs` builds this repository and checks this exact text. Each new or deleted document is one change (`docs/features/engine/change-list.md`), so the four files that came or went count one change each.
 
 ## The summary
 
@@ -120,9 +121,28 @@ When nothing changed, the summary says `No Markdown files changed.` after the fi
 
 ## JSON
 
-`--json` prints the change list on one line, followed by a line break. Its shape is the public contract in `docs/features/engine/change-list.md`, with `schema_version` 1. `range.base` and `range.head` are full commit ids, or `null` before the first commit and `worktree` for the files on disk.
+`--json` prints the change list on one line, followed by a line break. Its shape is the public contract in `docs/features/engine/change-list.md`, with `schema_version` 2. `range.base` and `range.head` are full commit ids, or `null` before the first commit and `worktree` for the files on disk.
 
-The JSON holds the plain text of every block that changed, so it grows with the size of the changes. A range that adds or deletes whole documents makes it large: 30 days of the private corpus give 95.5 MB.
+The JSON holds the plain text of every block that changed, and the full text of every new or deleted document, so it grows with the size of the changes. 30 days of the private corpus give 47.0 MB.
+
+### The summary form
+
+`--json=summary` prints the same list with one entry per document and no changes, also on one line. It has the same `schema_version`, `range` and `totals`. Each entry of `documents` holds the document's `path`, what happened to the file (`file`: `added`, `removed` or `modified`) and its `summary`: the number of changes, the highest level, and the counts per level and per kind. The documents come in the order of the summary text. For the example above, the first entry, written out over several lines:
+
+```json
+{
+  "path": "docs/decisions/0002-cache.md",
+  "file": "modified",
+  "summary": {
+    "changes": 5,
+    "highest": "decision",
+    "levels": {"decision": 3, "rule": 0, "fact": 1, "wording": 1, "formatting": 0},
+    "kinds": {"formatting": 0, "edited": 2, "added": 1, "removed": 2, "moved": 0, "moved_edited": 0}
+  }
+}
+```
+
+30 days of the private corpus give 0.76 MB this way, against 47.0 MB for `--json`. A tool reads the summary first, then asks for the whole list only when it needs the changes.
 
 ## Files that cannot be compared
 
@@ -189,12 +209,12 @@ Decision 0008 sets the limits: under 1 second on all cores and under 5 seconds o
 
 - **Where the time goes.** For 30 days of `docs` on one thread: reading 161 ms, parsing 895 ms, classifying and comparing 662 ms. Resolving the range takes 8 ms and listing the changes 6 ms. On 12 threads the per-file work runs about 11 times faster.
 - **The cache.** The 30-day range of `docs` names 3,550 file versions and parses 3,283 of them. The other 267 are blobs that two files share, such as a file moved with its bytes unchanged.
-- **JSON.** The 30-day change list is 95.5 MB for `docs` and 108.7 MB for the whole repository. Writing it takes 118 to 137 ms to `/dev/null`, and 165 to 200 ms to a file.
+- **JSON.** Before decision 0009, the 30-day change list was 95.5 MB for `docs` and 108.7 MB for the whole repository. Writing it took 118 to 137 ms to `/dev/null`, and 165 to 200 ms to a file. "After decision 0009" below has the sizes now.
 - **Memory.** For 30 days the program peaks at 259 to 294 MB on all cores and 188 to 211 MB on one thread. For the branch it peaks at 20 to 37 MB.
 - **Starting and ending.** The time a shell measures is about 4 ms more than `total` for the branch, and 75 to 80 ms more for 30 days. The larger gap is probably the end of the process, when the change list's memory is freed. That was not measured on its own.
 - **Width.** For 30 days of the whole repository in an 80-column terminal, no document line was wider than 80 columns, and 1,953 of the 2,943 paths were shortened. Sent to a pipe, where paths stay whole, 66% of the lines were wider.
 
-What fills the 95.5 MB of the 30-day range of `docs`:
+What filled the 95.5 MB of the 30-day range of `docs` before decision 0009:
 
 | Part | Size |
 |---|---|
@@ -205,10 +225,30 @@ What fills the 95.5 MB of the 30-day range of `docs`:
 | The list without the `changes` of added and removed files, keeping their summaries | 16.8 MB in all |
 | Only each document's summary, without any changes | 0.8 MB in all |
 
+### After decision 0009
+
+A new or deleted document is now one change, and `--json=summary` exists. Both builds, from before and after the decision, ran the 30-day range of `docs` case by case on 2026-10-18, at a load of 10 to 13. Each figure is the `total` line, the median of 3 runs after one warm-up run, with the output sent to `/dev/null`.
+
+| 30 days, `-- docs` | Before | After |
+|---|---|---|
+| All cores, summary | 223 ms | 227 ms |
+| All cores, `--json` | 421 ms | 258 ms |
+| All cores, `--json=summary` | | 231 ms |
+| 1 thread, summary | 1,748 ms | 1,676 ms |
+| 1 thread, `--json` | 1,982 ms | 1,839 ms |
+| 1 thread, `--json=summary` | | 1,708 ms |
+| Size of `--json` | 95.5 MB | 47.0 MB |
+| Size of `--json=summary` | | 0.76 MB |
+| Writing `--json` | 137 to 143 ms | 47 to 48 ms |
+| Writing `--json=summary` | | 0.9 ms |
+
+- Every row stays inside the limits of decision 0008. The branch took 22 to 44 ms in every form, at a load of about 19.
+- Of the 47.0 MB, 29.7 MB is the full text of the 1,754 new and deleted documents. The rest of the list is 17.3 MB.
+- The text summary does the same work as before, so its time did not change beyond the noise of a shared server.
+
 ## Not covered
 
 - **Relative dates** such as `30 days ago`. `--since` takes a date or a moment.
-- **A slimmer JSON.** The change list is always written whole. The speed section shows what a slimmer form could save.
 - **Folders in the rules file.** Folders are given on the command line. The rules file cannot yet say which folders hold documents.
 - **Renamed files** are one deleted and one new document, as in `git-ranges.md`.
 - **Colour settings.** There is no `--color` option; `NO_COLOR` turns colours off.

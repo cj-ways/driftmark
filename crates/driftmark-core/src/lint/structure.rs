@@ -120,22 +120,16 @@ fn summary(context: &Context<'_>, report: &mut Report<'_>) {
         |node| matches!(&node.data().value, NodeValue::Heading(heading) if heading.level == 1),
     );
     let after_title = title.map_or(0, |at| at + 1);
+    let keys = context.rules.masthead_keys();
     let mut next_heading = None;
-    // A quote with one short `Label: value` reads as a masthead field. Its
-    // label is kept so the message can say why it is no summary.
-    let mut short_label = None;
     for &node in &nodes[after_title..] {
         match &node.data().value {
             NodeValue::Heading(_) => {
                 next_heading = Some(node);
                 break;
             }
-            value @ (NodeValue::Paragraph | NodeValue::BlockQuote) => match head(node) {
-                Head::Masthead(fields) => {
-                    if let ([field], NodeValue::BlockQuote) = (fields.as_slice(), value) {
-                        short_label = Some(field.key.clone());
-                    }
-                }
+            NodeValue::Paragraph | NodeValue::BlockQuote => match head(node, keys) {
+                Head::Masthead(_) => {}
                 Head::Prose(_) | Head::Other => return,
             },
             _ => {}
@@ -145,13 +139,11 @@ fn summary(context: &Context<'_>, report: &mut Report<'_>) {
         .or_else(|| title.map(|at| nodes[at]))
         .and_then(|node| context.positions.range(node))
         .map_or((1, 1), |range| context.lines.at(range.start));
-    let message = match short_label {
-        Some(label) => format!(
-            "the document has no summary before its first section: the `> {label}: …` quote reads as a masthead field, because its text has 12 words or fewer; write it as a longer sentence, or without the label"
-        ),
-        None => "the document has no summary before its first section; add a paragraph or a `>` quote under the title that says in a sentence or two what the document is for".to_owned(),
-    };
-    report.add(Rule::Summary, at, message);
+    report.add(
+        Rule::Summary,
+        at,
+        "the document has no summary before its first section; add a paragraph or a `>` quote under the title that says in a sentence or two what the document is for".to_owned(),
+    );
 }
 
 fn heading_levels(context: &Context<'_>, report: &mut Report<'_>) {
@@ -261,13 +253,20 @@ mod tests {
             []
         );
         assert_eq!(lint("t.md", "# Title\n\n> - a quoted list\n"), []);
+        let short = "# Title\n\n> Short version: a few words only.\n\n**Owner**: Ana\n\n## Part\n";
         assert_eq!(
-            messages(&lint(
+            lint("t.md", short),
+            [],
+            "an unknown label is no masthead key"
+        );
+        assert_eq!(
+            messages(&lint_with(
+                "[masthead]\nkeys = [\"Short version\"]\n",
                 "t.md",
-                "# Title\n\n> Short version: a few words only.\n\n**Owner**: Ana\n\n## Part\n"
+                short
             )),
             [
-                "7:1 warning summary: the document has no summary before its first section: the `> Short version: …` quote reads as a masthead field, because its text has 12 words or fewer; write it as a longer sentence, or without the label"
+                "7:1 warning summary: the document has no summary before its first section; add a paragraph or a `>` quote under the title that says in a sentence or two what the document is for"
             ]
         );
         assert_eq!(

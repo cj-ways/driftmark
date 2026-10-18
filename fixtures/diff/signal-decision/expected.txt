@@ -13,5 +13,5 @@ edited — Decision [DecisionSection, Wording] — old 4 (line 9), new 4 (line 9
     view: side by side, kept in order 0.667
     marks: Notes live in one file [-next to-]{+inside+} the [-repository-]{+git folder+}.
 
-added — Decision [DecisionSection, Normative] — old @5, new 5 (line 11)
+added — Decision [DecisionSection, Wording] — old @5, new 5 (line 11)
     text: The file is never committed.

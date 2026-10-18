@@ -19,5 +19,5 @@ removed — Fact [Heading] — old 4 (line 11), new @4
 removed — Wording [Wording] — old 5 (line 13), new @4
     text: The cache lives in memory.
 
-added — Decision [DecisionSection, Normative] — old @6, new 4 (line 11)
+added — Decision [DecisionSection, Wording] — old @6, new 4 (line 11)
     text: Never cache a page with open notes.

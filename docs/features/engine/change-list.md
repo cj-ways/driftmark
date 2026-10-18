@@ -5,18 +5,20 @@ date: 2026-10-18
 
 # Change list
 
-> Short version: `driftmark-core` compares two versions of one document block by block. It pairs the old blocks with the new ones, says what happened to each (formatting, edited, added, removed, moved, or moved and edited), where it happened in both versions, how an edit should be drawn, and how much it matters. The importance comes from rules, never from AI: each change gets signals, and its level is the highest level among them, from decision down to formatting. A change list gathers the documents of a range and sorts them, highest level first. It is plain data with a JSON form, and that JSON is a public contract with a schema version.
+> Short version: `driftmark-core` compares two versions of one document block by block. It pairs the old blocks with the new ones, says what happened to each (formatting, edited, added, removed, moved, or moved and edited), where it happened in both versions, how an edit should be drawn, and how much it matters. The importance comes from rules, never from AI: each change gets signals, and its level is the highest level among them, from decision down to formatting. A new or deleted document is one change, with its title, summary and size. A change list gathers the documents of a range and sorts them, highest level first. It is plain data with a JSON form, and that JSON is a public contract with a schema version. A summary form keeps only each document's counts.
 
 ## How it is called
 
 `driftmark_core::diff::compare(path, old, new)` compares the two versions of the file at `path`.
 
 - `old` and `new` are each a `Version`: the parsed `Document` and its `Classification` from the rules file (`docs/features/engine/rules-file.md`). Without a rules file, use `Rules::default().classify(path, document)`.
-- Give `None` for a side where the file does not exist. The file is then added or removed, and every block is an added or removed change.
+- Give `None` for a side where the file does not exist. The file is then added or removed, and the whole document is one change (see "A new or deleted document").
 - It returns `DocumentChanges`, or `None` when both sides are `None`.
 - It reads nothing and keeps no state, so documents can be compared on many threads at once.
 
-`ChangeList::new(range, documents)` gathers the documents of one range, sorts them for a reader and adds up the totals. `RangeInfo::of(&resolved_range)` turns a resolved git range (`docs/features/engine/git-ranges.md`) into the text the list shows.
+`ChangeList::new(range, documents)` gathers the documents of one range, sorts them for a reader and adds up the totals. `change_list.summary_list()` gives the same list with only each document's counts. `RangeInfo::of(&resolved_range)` turns a resolved git range (`docs/features/engine/git-ranges.md`) into the text the list shows.
+
+Parse both versions with the rules file's masthead keys, `Document::parse_with(bytes, rules.masthead_keys())`, so a document's title, summary and masthead read as the rules say (`docs/features/engine/document-model.md`).
 
 The `driftmark diff` command (`docs/features/commands/diff.md`) does this for every changed file of a range, and prints the list as a summary or as the JSON below.
 
@@ -51,8 +53,8 @@ The values are named constants in `driftmark_core::diff`:
 | Unchanged | (not listed) | A pair in place with equal source bytes, content and nesting. Its indexes are in `unchanged`. |
 | Formatting only | `formatting` | A pair in place with equal content but other source bytes or other nesting: wrapping, emphasis style, list markers, numbering, an item indented under another. |
 | Edited | `edited` | A pair in place whose content changed. |
-| Added | `added` | A new block with no pair. |
-| Removed | `removed` | An old block with no pair. |
+| Added | `added` | A new block with no pair, or a new document. |
+| Removed | `removed` | An old block with no pair, or a deleted document. |
 | Moved | `moved` | A pair out of place with equal content. |
 | Moved and edited | `moved_edited` | A pair out of place whose content changed. |
 
@@ -123,19 +125,21 @@ The levels, highest first: **decision**, **rule**, **fact**, **wording**, **form
 |---|---|---|---|
 | Status | `status` | decision | The document's status changed, and this block holds it. |
 | Decision section | `decision_section` | decision | The block sits, on either side, in a section the rules file marks as a decision. Not for formatting-only changes. |
-| Normative word | `normative` | rule | A word or phrase from the normative list came or went. An added or removed block gets it when it holds one. |
+| Normative word | `normative` | rule | A word or phrase from the normative list came into or went out of an edited block. An added or removed block never gets it, whatever words it holds. |
 | Heading | `heading` | fact | A heading was added, removed, renamed or moved to another level. |
 | Number | `number` | fact | A number, date, version or identifier came or went: a word holding a digit, or a code span. |
 | Link | `link` | fact | A link or image target came, went or changed. |
 | Table cell | `table_cell` | fact | A table row was added, removed or edited. |
 | Code line | `code_line` | fact | A code or diagram block was added, removed or edited, its language included. |
+| Task state | `task_state` | fact | A task item's checkbox went from open (`[ ]`) to done (`[x]`), or back. |
 | Moved | `moved` | wording | The block moved. |
-| Wording | `wording` | wording | Words changed, and none of status, normative, heading, number, link, table cell or code line applies. |
+| Wording | `wording` | wording | Words changed, and none of status, normative, heading, number, link, table cell, code line or task state applies. |
 | Formatting | `formatting` | formatting | Only formatting changed. It is the only signal of a formatting change. |
 
 How the signals compare two versions of a block:
 
-- **Normative words** are counted per word or phrase on each side; a different count is the signal. Moving `must` within a sentence is not.
+- **Normative words** are counted per word or phrase on each side of an edited block; a different count is the signal. Moving `must` within a sentence is not. A block that is new or gone gets no normative signal from the words it merely holds (decision 0009). Before that rule, `only` alone tagged 13,206 changes over 30 days of the private corpus.
+- **A task's checkbox** counts only when both sides are task items and the state differs. A plain list item that gains a checkbox did not change state; it ranks by its words.
 - **Numbers and identifiers** are counted per token text on each side; a different count is the signal. `30 days, then 7` turned into `7 days, then 30` has the same counts, so it is not.
 - **Link targets** are counted per target on each side, links without text included.
 - Code and diagram blocks get only the code-line signal from their content; their words are not searched for numbers or normative words.
@@ -147,6 +151,27 @@ How the signals compare two versions of a block:
 `must not`, `should not`, `shall not`, `must`, `never`, `always`, `only`, `required`, `forbidden`, `should`, `shall`.
 
 The brief named the nine without `should not` and `shall not`. Those two are added so that `should` turned into `should not` counts, like `must` turned into `must not`. Words inside code spans and links do not count.
+
+## A new or deleted document
+
+A file that exists on one side only is one change at document level. Its blocks are not listed one by one, so a new 300-line spec does not push every other change down the list. A reader who wants every block opens the document; the change carries its full text for that.
+
+- `kind` is `added` or `removed`.
+- `document` replaces `old` and `new`. It holds the document's `title` and `summary` from its metadata, its size as `bytes` and `lines`, and its full text as written, `source`.
+- The signals are those its blocks would get as added or removed blocks, each signal once. So a new decision record whose `## Decision` section the rules file marks still ranks as a decision, and a document with a heading and a number ranks as a fact. Its normative words give no rule signal, as for any new block.
+- `unchanged` is empty.
+
+A new file, `docs/notes/cache-sizes.md`, made up:
+
+```markdown
+# Cache sizes
+
+> Short version: the size limit of the page cache.
+
+It holds 500 pages.
+```
+
+It is one `added` change with the signals `heading` and `number`, so its level is fact. Its `document` holds the title `Cache sizes`, the summary `Short version: the size limit of the page cache.`, 87 bytes, 5 lines and the text above. The JSON example below shows it whole.
 
 ## A document's summary, and the order of documents
 
@@ -167,14 +192,17 @@ A change list sorts its documents for a reader:
 
 `totals` adds up every document's summary. Its `highest` is the highest level in the whole list.
 
+`summary_list()` returns a `SummaryList`: the change list with one entry per document and no changes. Each entry holds the document's `path`, what happened to the file (`file`) and its `summary`, whose `highest` is the document's highest level. `driftmark diff --json=summary` prints it (`docs/features/commands/diff.md`).
+
 ## The JSON contract
 
 The change list serializes with `serde`. The shape below is a public contract: the MCP connector (M3), the change pages (M2) and the merge-request diff (M5) read it.
 
-- `schema_version` is 1. It goes up by one when a field changes meaning or is removed. Adding a field keeps it.
+- `schema_version` is 2. It goes up by one when a field changes meaning or is removed. Adding a field keeps it. Version 2 (decision 0009) lists an added or removed document as one change with `document` instead of one change per block, and an added or removed block no longer gets the `normative` signal.
 - Names are in snake case: fields, kinds, levels, signals, views and mark operations.
 - A block kind is an object whose `type` names the kind, with its details beside it, as the document model states them: `{"type": "heading", "level": 2}`, `{"type": "list_item", "depth": 0, "ordered": false, "number": null, "task": "done"}`, `{"type": "table_row", "header": false, "cells": ["Home", "10 min"]}`.
-- Left out when empty: `range`, a document's `status`, a side's `block`, a change's `edit`, and an edit's `marks`, `sentences`, `lines`, `cells` and `fallback`.
+- Left out when empty: `range`, a document's `status`, a side's `block`, a change's `edit`, an edit's `marks`, `sentences`, `lines`, `cells` and `fallback`, and a whole document's `title` and `summary`.
+- A change holds either `old` and `new`, for one block, or `document`, for a whole document. Never both.
 - `unchanged` lists `[old index, new index]` for each unchanged block. Pages use it to line up the two versions, and notes to follow a sentence to the next version.
 - Byte offsets (`start`, `end`) index the version's source text, in UTF-8 bytes.
 
@@ -183,16 +211,18 @@ The change list serializes with `serde`. The shape below is a public contract: t
 | change list | `schema_version`, `range` (`base`, `head`, `notes`), `totals`, `documents` |
 | document | `path`, `file`, `status` (`old`, `new`), `summary`, `changes`, `unchanged` |
 | summary | `changes`, `highest`, `levels` (`decision`, `rule`, `fact`, `wording`, `formatting`), `kinds` (`formatting`, `edited`, `added`, `removed`, `moved`, `moved_edited`) |
-| change | `kind`, `level`, `signals`, `old`, `new`, `edit` |
+| change | `kind`, `level`, `signals`, then `old` and `new` or `document`, then `edit` |
+| whole document | `title`, `summary`, `bytes`, `lines`, `source` |
 | side | `at`, `block` (`kind`, `start`, `end`, `line`, `heading_path`, `text`) |
 | edit | `view`, `kept_in_order`, `marks`, `sentences`, `lines`, `cells`, `fallback` |
 | mark | `op` (`kept`, `deleted`, `inserted`), `text` |
+| summary list | `schema_version`, `range`, `totals`, `documents`, each with `path`, `file` and `summary` |
 
 `range.head` is a commit id, or `worktree` for the files on disk. `range.base` is `null` before the first commit.
 
 ### A made-up example
 
-A decision record changes in an agent's working tree. Before:
+A decision record changes in an agent's working tree, and the new note `docs/notes/cache-sizes.md` from "A new or deleted document" appears beside it. The decision record before:
 
 ```markdown
 ---
@@ -226,11 +256,11 @@ Keep each rendered page in the cache for 90 minutes.
 Never cache a page with open notes.
 ```
 
-The rules file says that files under `docs/decisions/` keep their status in front matter, and that `## Decision` opens a decision section. The change list, as `tests/diff_json.rs` checks it against this text:
+The rules file says that files under `docs/decisions/` keep their status in front matter, and that `## Decision` opens a decision section. The note matches no type. The change list, as `tests/diff_json.rs` checks it against this text:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "range": {
     "base": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
     "head": "worktree",
@@ -239,19 +269,19 @@ The rules file says that files under `docs/decisions/` keep their status in fron
     ]
   },
   "totals": {
-    "changes": 5,
+    "changes": 6,
     "highest": "decision",
     "levels": {
       "decision": 3,
       "rule": 0,
-      "fact": 1,
+      "fact": 2,
       "wording": 1,
       "formatting": 0
     },
     "kinds": {
       "formatting": 0,
       "edited": 2,
-      "added": 1,
+      "added": 2,
       "removed": 2,
       "moved": 0,
       "moved_edited": 0
@@ -455,7 +485,7 @@ The rules file says that files under `docs/decisions/` keep their status in fron
           "level": "decision",
           "signals": [
             "decision_section",
-            "normative"
+            "wording"
           ],
           "old": {
             "at": 6
@@ -488,6 +518,47 @@ The rules file says that files under `docs/decisions/` keep their status in fron
           2
         ]
       ]
+    },
+    {
+      "path": "docs/notes/cache-sizes.md",
+      "file": "added",
+      "summary": {
+        "changes": 1,
+        "highest": "fact",
+        "levels": {
+          "decision": 0,
+          "rule": 0,
+          "fact": 1,
+          "wording": 0,
+          "formatting": 0
+        },
+        "kinds": {
+          "formatting": 0,
+          "edited": 0,
+          "added": 1,
+          "removed": 0,
+          "moved": 0,
+          "moved_edited": 0
+        }
+      },
+      "changes": [
+        {
+          "kind": "added",
+          "level": "fact",
+          "signals": [
+            "heading",
+            "number"
+          ],
+          "document": {
+            "title": "Cache sizes",
+            "summary": "Short version: the size limit of the page cache.",
+            "bytes": 87,
+            "lines": 5,
+            "source": "# Cache sizes\n\n> Short version: the size limit of the page cache.\n\nIt holds 500 pages.\n"
+          }
+        }
+      ],
+      "unchanged": []
     }
   ]
 }
@@ -499,15 +570,17 @@ What it says, change by change:
 2. The decision paragraph's number changed inside the decision section: a decision change, shown inline.
 3. The `## Notes` heading was removed: a fact change. Its `new.at` of 4 puts it after block 3 of the new version, the paragraph it followed.
 4. The paragraph under it was removed: a wording change, at the same place.
-5. The new sentence under `## Decision` holds `never`: a decision change, because it sits in a decision section. It is listed after the removed blocks of the same gap, and `old.at` of 6 puts it at the end of the old version.
+5. The new sentence under `## Decision` holds `never`. It is a new block, so `never` gives no rule signal, and its words alone would make it a wording change. It is a decision change because it sits in a decision section. It is listed after the removed blocks of the same gap, and `old.at` of 6 puts it at the end of the old version.
 
 The title and the `## Decision` heading did not change; they are the two `unchanged` pairs.
 
+The new note is the second document, because its highest level, fact, is below the decision record's. It is one change with its `document`, and no `old`, `new` or `unchanged` pairs.
+
 ## Tests
 
-- `fixtures/diff/<behaviour>/` holds one made-up pair per behaviour: `a.md`, `b.md`, an optional `driftmark.toml`, and `expected.txt`, the change list written out for reading. A missing `a.md` or `b.md` means the file was added or removed. There is a folder for each change kind, each view, each signal, a table with one changed cell, rows paired by their first cell, a move inside a decision section, and the three cases the private prototype got wrong: a new block between two edited blocks (`inserted-between-edits`), a block that moved and was edited (`moved-and-edited`), and an edited list item that marks only itself (`edited-list-item`).
-- `tests/diff_fixtures.rs` also checks on every pair that each block of each version is listed exactly once, as a change or as unchanged, that changes come in reading order, and that the marks spell the new text.
-- `tests/diff_json.rs` checks the JSON of every type and variant, and the example above.
+- `fixtures/diff/<behaviour>/` holds one made-up pair per behaviour: `a.md`, `b.md`, an optional `driftmark.toml`, and `expected.txt`, the change list written out for reading. A missing `a.md` or `b.md` means the file was added or removed. There is a folder for each change kind, each view, each signal, a new and a deleted document (`added-file`, `removed-file`), normative words in added and removed blocks (`normative-in-lone-blocks`), ticked and unticked checkboxes (`signal-task-state`), a table with one changed cell, rows paired by their first cell, a move inside a decision section, and the three cases the private prototype got wrong: a new block between two edited blocks (`inserted-between-edits`), a block that moved and was edited (`moved-and-edited`), and an edited list item that marks only itself (`edited-list-item`).
+- `tests/diff_fixtures.rs` also checks on every pair that each block of each version is listed exactly once, as a change or as unchanged, that changes come in reading order, and that the marks spell the new text. A whole document counts for all its blocks and must be the document's only change.
+- `tests/diff_json.rs` checks the JSON of every type and variant, the summary list, and the example above. The example's two documents are `fixtures/diff/contract-example/` and `fixtures/diff/contract-added/`.
 
 ## Speed on the private corpus
 
@@ -518,19 +591,24 @@ Measured on the server on 2026-10-18 with `crates/driftmark/tests/diff_corpus.rs
 | A 19-commit branch against its merge base | 20 | 2,341, 3,459 | 13 to 33 ms | 33 to 39 ms |
 | 30 days of the main branch | 2,652 | 143,811, 178,205 | 180 to 251 ms | 1,754 to 1,790 ms |
 
-The limits in decision 0008 are under 1 second on all cores and under 5 seconds on one core for 30 days, and under 0.1 seconds for a typical branch. On one thread, the 30 days split into about 160 ms reading, 920 ms parsing and 650 ms classifying and comparing. Serializing the 30-day change list gives 95.5 MB of JSON in about 170 to 190 ms, most of it the text of added and removed files.
+The limits in decision 0008 are under 1 second on all cores and under 5 seconds on one core for 30 days, and under 0.1 seconds for a typical branch. On one thread, the 30 days split into about 160 ms reading, 920 ms parsing and 650 ms classifying and comparing. Those timings predate decision 0009, which made the list smaller: the 30-day change list is now 47.0 MB of JSON, against 95.5 MB before.
 
-| Over 30 days | Count |
-|---|---|
-| Changes | 161,799: 96,119 added, 61,725 removed, 3,836 edited, 70 formatting, 29 moved, 20 moved and edited |
-| Levels | 24,504 rule, 107,202 fact, 30,023 wording, 70 formatting, 0 decision (the corpus has no rules file) |
-| Edits by view | 1,867 inline, 215 sentences, 1,109 side by side, 427 rewritten, 238 lines |
-| Guard fallbacks | 0 |
+The counts over the same 30 days, from the release build of `driftmark diff` before and after decision 0009. The corpus has no rules file, so no change is a decision.
+
+| Over 30 days | Before decision 0009 | After |
+|---|---|---|
+| Changes | 161,799: 96,119 added, 61,725 removed, 3,836 edited, 70 formatting, 29 moved, 20 moved and edited | 13,641: 6,188 added, 3,498 removed, 3,836 edited, 70 formatting, 29 moved, 20 moved and edited |
+| Changes per level | 24,504 rule, 107,202 fact, 30,023 wording, 70 formatting | 316 rule, 11,117 fact, 2,138 wording, 70 formatting |
+| Documents per highest level, of 2,652 | 1,897 rule, 676 fact, 79 wording | 141 rule, 2,431 fact, 80 wording |
+| Edits by view | 1,867 inline, 215 sentences, 1,109 side by side, 427 rewritten, 238 lines | the same |
+| Guard fallbacks | 0 | 0 |
+
+The 1,098 new and 656 deleted documents are one change each, and each ranks as a fact: every one has a heading. No checkbox was ticked or unticked in a modified document in that range, so the task-state signal does not show here.
 
 ## Not covered
 
 - Moves between two documents. A block that moves to another file is removed from one and added to the other. This is not decided yet (decision 0005).
 - AI labels for importance.
 - Drawing the views as HTML (M2).
-- A signal for a task checkbox, a list type or an alert kind that changed while the words stayed the same. These rank as wording.
+- A signal for a list type or an alert kind that changed while the words stayed the same. These rank as wording.
 - Rename detection between files. A renamed file is one removed and one added document, as in `git-ranges.md`.

@@ -327,7 +327,10 @@ fn removed_blocks_sit_before_added_ones_in_a_gap() {
     .changes;
     let found: Vec<(ChangeKind, usize, usize)> = changes
         .iter()
-        .map(|change| (change.kind, change.old.at, change.new.at))
+        .filter_map(|change| {
+            let (old, new) = change.sides()?;
+            Some((change.kind, old.at, new.at))
+        })
         .collect();
     assert_eq!(
         found,
@@ -415,4 +418,100 @@ fn a_block_that_leaves_a_decision_section_keeps_the_signal() {
     )
     .expect("both sides");
     assert_eq!(edited(&changes), [Signal::DecisionSection, Signal::Wording]);
+}
+
+#[test]
+fn a_new_or_deleted_document_is_one_change() {
+    let rules = Rules::parse(
+        "[[type]]\nname = \"d\"\npaths = [\"*.md\"]\ndecision-headings = [\"Decision\"]\n",
+    )
+    .expect("rules");
+    let source =
+        "# Pages\n\n## Decision\n\nKeep pages for an hour.\n\nOnly admins may clear them.\n";
+    let new = parse(source);
+    let class = rules.classify("doc.md", &new);
+    let added = compare(
+        "doc.md",
+        None,
+        Some(Version {
+            document: &new,
+            classification: &class,
+        }),
+    )
+    .expect("one side");
+    assert_eq!(added.file, FileState::Added);
+    assert_eq!(added.changes.len(), 1);
+    assert_eq!(added.summary.kinds.get(ChangeKind::Added), 1);
+    let change = &added.changes[0];
+    assert_eq!(change.kind, ChangeKind::Added);
+    assert_eq!(
+        change.signals,
+        [Signal::DecisionSection, Signal::Heading],
+        "`only` in a new block is no rule change"
+    );
+    assert_eq!(change.level, Level::Decision);
+    assert_eq!(change.sides(), None);
+    assert_eq!(change.edit, None);
+    let whole = |changes: &DocumentChanges| match &changes.changes[0].subject {
+        Subject::Document { document } => document.clone(),
+        Subject::Block { .. } => panic!("a block change"),
+    };
+    assert_eq!(
+        whole(&added),
+        WholeDocument {
+            title: Some("Pages".to_owned()),
+            summary: None,
+            bytes: source.len(),
+            lines: 7,
+            source: source.to_owned(),
+        }
+    );
+    let empty = parse("");
+    let class = classify(&empty);
+    let removed = compare(
+        "doc.md",
+        Some(Version {
+            document: &empty,
+            classification: &class,
+        }),
+        None,
+    )
+    .expect("one side");
+    assert_eq!(removed.file, FileState::Removed);
+    assert_eq!(removed.changes[0].kind, ChangeKind::Removed);
+    assert_eq!(removed.changes[0].signals, [Signal::Wording]);
+    assert_eq!((whole(&removed).bytes, whole(&removed).lines), (0, 0));
+    let lines_of = |source: &str| {
+        let document = parse(source);
+        let class = classify(&document);
+        let added = compare(
+            "doc.md",
+            None,
+            Some(Version {
+                document: &document,
+                classification: &class,
+            }),
+        )
+        .expect("one side");
+        whole(&added).lines
+    };
+    assert_eq!(lines_of("x"), 1);
+    assert_eq!(lines_of("x\n"), 1);
+    assert_eq!(lines_of("x\ny"), 2);
+    assert_eq!(lines_of("x\r\ny\r\n"), 2);
+}
+
+#[test]
+fn a_ticked_checkbox_is_a_fact_whatever_the_words() {
+    let changes = diff(
+        "# T\n\n- [ ] Tag the commit.\n- [x] Ship it.\n",
+        "# T\n\n- [x] Tag the new commit.\n- [x] Ship it now.\n",
+    )
+    .changes;
+    let signals: Vec<&[Signal]> = changes
+        .iter()
+        .map(|change| change.signals.as_slice())
+        .collect();
+    assert_eq!(signals, [&[Signal::TaskState][..], &[Signal::Wording][..]]);
+    assert_eq!(changes[0].level, Level::Fact);
 }

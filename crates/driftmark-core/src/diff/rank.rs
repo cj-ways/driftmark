@@ -18,9 +18,11 @@ pub enum Level {
     Formatting,
     /// Words changed, or a block moved, and no rule below applies.
     Wording,
-    /// A heading, a number, a link, a table cell or a code line changed.
+    /// A heading, a number, a link, a table cell, a code line or a task's
+    /// checkbox changed.
     Fact,
-    /// A normative word such as `must` or `never` came or went.
+    /// A normative word such as `must` or `never` came into or went out of
+    /// an edited block.
     Rule,
     /// A status changed, or the change sits in a decision section.
     Decision,
@@ -46,7 +48,9 @@ pub enum Signal {
     /// The block sits, on either side, in a section the rules file marks as a
     /// decision.
     DecisionSection,
-    /// A normative word or phrase from [`NORMATIVE_WORDS`] came or went.
+    /// A normative word or phrase from [`NORMATIVE_WORDS`] came into or went
+    /// out of an edited block. A block that is new or gone gets no rule
+    /// signal from words it merely holds.
     Normative,
     /// A heading was added, removed, renamed or moved to another level.
     Heading,
@@ -59,6 +63,8 @@ pub enum Signal {
     TableCell,
     /// A code or diagram block was added, removed or edited.
     CodeLine,
+    /// A task item's checkbox went from open to done, or back.
+    TaskState,
     /// The block moved to another place in the document.
     Moved,
     /// Words changed, and none of the content signals above apply.
@@ -78,7 +84,8 @@ impl Signal {
             | Signal::Number
             | Signal::Link
             | Signal::TableCell
-            | Signal::CodeLine => Level::Fact,
+            | Signal::CodeLine
+            | Signal::TaskState => Level::Fact,
             Signal::Moved | Signal::Wording => Level::Wording,
             Signal::Formatting => Level::Formatting,
         }
@@ -148,18 +155,6 @@ pub(crate) fn normative_counts(tokens: &[Token<'_>]) -> Vec<usize> {
     counts
 }
 
-/// Whether a block that was added or removed holds a normative word. Every
-/// phrase in [`NORMATIVE_WORDS`] starts with a word that is in the list on
-/// its own, so looking for the single words finds the phrases too.
-pub(crate) fn has_normative(tokens: &[Token<'_>]) -> bool {
-    tokens.iter().any(|token| match token.key {
-        Key::Word(word) => NORMATIVE_WORDS
-            .iter()
-            .any(|entry| !entry.contains(' ') && word.eq_ignore_ascii_case(entry)),
-        _ => false,
-    })
-}
-
 /// Whether a token is a number, date, version or identifier: a word that
 /// holds a digit, or a code span.
 fn is_fact(token: &Token<'_>) -> bool {
@@ -220,6 +215,17 @@ pub(crate) fn kind_signals(kind: &BlockKind, signals: &mut Vec<Signal>) {
     }
 }
 
+/// Whether a task item's checkbox went from open to done, or back. A list
+/// item that gains or loses its checkbox is not this: it was not ticked.
+pub(crate) fn task_changed(old: &BlockKind, new: &BlockKind) -> bool {
+    match (old, new) {
+        (BlockKind::ListItem(old), BlockKind::ListItem(new)) => {
+            matches!((old.task, new.task), (Some(a), Some(b)) if a != b)
+        }
+        _ => false,
+    }
+}
+
 /// Whether a change with these signals changed only words: none of the
 /// signals that name what kind of content changed applies.
 pub(crate) fn wording_only(signals: &[Signal]) -> bool {
@@ -233,6 +239,7 @@ pub(crate) fn wording_only(signals: &[Signal]) -> bool {
                 | Signal::Link
                 | Signal::TableCell
                 | Signal::CodeLine
+                | Signal::TaskState
         )
     })
 }
@@ -241,7 +248,7 @@ pub(crate) fn wording_only(signals: &[Signal]) -> bool {
 mod tests {
     use super::*;
     use crate::diff::words::tokens;
-    use crate::document::{DiagramLanguage, ListItem};
+    use crate::document::{DiagramLanguage, ListItem, TaskState};
 
     #[test]
     fn every_signal_has_its_level() {
@@ -254,6 +261,7 @@ mod tests {
             (Signal::Link, Level::Fact),
             (Signal::TableCell, Level::Fact),
             (Signal::CodeLine, Level::Fact),
+            (Signal::TaskState, Level::Fact),
             (Signal::Moved, Level::Wording),
             (Signal::Wording, Level::Wording),
             (Signal::Formatting, Level::Formatting),
@@ -355,9 +363,6 @@ mod tests {
 
     #[test]
     fn added_blocks_only_ask_whether_a_signal_is_there() {
-        assert!(has_normative(&tokens("Agents Must run it", &[])));
-        assert!(has_normative(&tokens("you should not", &[])));
-        assert!(!has_normative(&tokens("not mustard", &[])));
         assert!(has_fact(&tokens("in 3 steps", &[])));
         assert!(!has_fact(&tokens("in three steps", &[])));
         let code = TextSpan {
@@ -452,6 +457,27 @@ mod tests {
     }
 
     #[test]
+    fn only_a_ticked_or_unticked_checkbox_changes_the_task_state() {
+        let item = |task: Option<TaskState>| {
+            BlockKind::ListItem(ListItem {
+                depth: 0,
+                ordered: false,
+                number: None,
+                task,
+            })
+        };
+        let (open, done) = (item(Some(TaskState::Open)), item(Some(TaskState::Done)));
+        assert!(task_changed(&open, &done));
+        assert!(task_changed(&done, &open));
+        assert!(!task_changed(&open, &open));
+        assert!(!task_changed(&done, &done));
+        assert!(!task_changed(&item(None), &done));
+        assert!(!task_changed(&open, &item(None)));
+        assert!(!task_changed(&BlockKind::Paragraph, &done));
+        assert!(!task_changed(&open, &BlockKind::Paragraph));
+    }
+
+    #[test]
     fn wording_only_means_no_content_signal() {
         assert!(wording_only(&[]));
         assert!(wording_only(&[Signal::DecisionSection, Signal::Moved]));
@@ -463,6 +489,7 @@ mod tests {
             Signal::Link,
             Signal::TableCell,
             Signal::CodeLine,
+            Signal::TaskState,
         ] {
             assert!(!wording_only(&[signal]), "{signal:?}");
         }

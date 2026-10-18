@@ -6,32 +6,35 @@
 //! reads the file; this module only parses its text, so the core stays free of
 //! file access. A preset (M4) is a rules file in this same format. The file's
 //! `[lint]` table holds the writing check's settings; [`crate::lint`] reads it.
+//! Its `[masthead]` table adds masthead keys to the known ones.
 
 use std::fmt;
 
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
 
-use crate::document::{BlockKind, Document, FieldOrigin, normalize_key};
+use crate::document::{BlockKind, Document, FieldOrigin, MastheadKeys, normalize_key};
 use crate::lint::{LintSettings, RawLint};
 
 /// The type of a document that no rule matches.
 pub const DEFAULT_TYPE: &str = "document";
 
 /// How path patterns match: case matters, `*` and `?` never cross a `/`, and
-/// `*` matches names that start with a dot.
-const MATCHING: MatchOptions = MatchOptions {
+/// `*` matches names that start with a dot. The lint's `exclude` patterns
+/// match the same way.
+pub(crate) const MATCHING: MatchOptions = MatchOptions {
     case_sensitive: true,
     require_literal_separator: true,
     require_literal_leading_dot: false,
 };
 
-/// A parsed rules file: an ordered list of document types, and the writing
-/// check's settings.
+/// A parsed rules file: an ordered list of document types, the writing
+/// check's settings, and the masthead keys documents are read with.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Rules {
     types: Vec<TypeRule>,
     lint: LintSettings,
+    masthead_keys: MastheadKeys,
 }
 
 /// One `[[type]]` entry of a rules file.
@@ -193,6 +196,36 @@ struct RawRules {
     types: Vec<RawType>,
     #[serde(default)]
     lint: RawLint,
+    #[serde(default)]
+    masthead: RawMasthead,
+}
+
+/// The `[masthead]` table: keys to read as metadata beside the known ones.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMasthead {
+    #[serde(default)]
+    keys: Vec<KeyName>,
+}
+
+/// A masthead key from the rules file. It must have the shape every masthead
+/// key has, or no line could match it; the TOML reader then names its line.
+#[derive(Deserialize)]
+#[serde(try_from = "String")]
+struct KeyName(String);
+
+impl TryFrom<String> for KeyName {
+    type Error = String;
+
+    fn try_from(key: String) -> Result<KeyName, String> {
+        if crate::document::meta::is_key(key.trim()) {
+            Ok(KeyName(key))
+        } else {
+            Err(format!(
+                "the masthead key {key:?} cannot match a masthead line; a key starts with a letter, has one to four words and at most 40 characters, and holds only letters, digits, spaces and -_/.'()"
+            ))
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -239,7 +272,31 @@ impl Rules {
             .map(|(index, raw)| TypeRule::new(index + 1, raw))
             .collect::<Result<Vec<_>, _>>()?;
         let lint = LintSettings::from_raw(raw.lint).map_err(RulesError::Lint)?;
-        Ok(Rules { types, lint })
+        let named = types
+            .iter()
+            .flat_map(|rule| [&rule.status, &rule.date, &rule.superseded_by])
+            .flatten()
+            .filter_map(|location| location.masthead.clone());
+        let masthead_keys = MastheadKeys::with(
+            raw.masthead
+                .keys
+                .into_iter()
+                .map(|KeyName(key)| key)
+                .chain(named),
+        );
+        Ok(Rules {
+            types,
+            lint,
+            masthead_keys,
+        })
+    }
+
+    /// The masthead keys documents should be parsed with
+    /// ([`Document::parse_with`]): the known ones, those in the `[masthead]`
+    /// table, and every key a type's `masthead` location names.
+    #[must_use]
+    pub fn masthead_keys(&self) -> &MastheadKeys {
+        &self.masthead_keys
     }
 
     /// The writing check's settings from the `[lint]` table, or the defaults
@@ -645,6 +702,35 @@ current = ["accepted"]
         assert_eq!(classification.status, None);
         assert_eq!(classification.lifecycle, None);
         assert_eq!(classification.decision_blocks, []);
+    }
+
+    #[test]
+    fn the_masthead_table_and_masthead_locations_add_known_keys() {
+        let rules = Rules::parse(
+            "[masthead]\nkeys = [\"Deciders\", \" Feature Branch \"]\n\n[[type]]\nname = \"t\"\npaths = [\"*.md\"]\nstatus = { masthead = \"Estado\" }\ndate = { front-matter = \"date\", masthead = \"Fecha\" }\n",
+        )
+        .expect("valid");
+        let keys = rules.masthead_keys();
+        for key in ["Deciders", "feature-branch", "Estado", "Fecha", "Status"] {
+            assert!(keys.knows(key), "{key}");
+        }
+        assert!(!keys.knows("Short version"));
+        assert!(!Rules::default().masthead_keys().knows("Deciders"));
+        let source = b"# T\n\n> Estado: Aceptado | Deciders: Ana | Short version: x\n".to_vec();
+        let parsed = Document::parse_with(source, keys).expect("parses");
+        assert_eq!(parsed.meta.fields.len(), 2);
+        assert_eq!(
+            rules.classify("a.md", &parsed).status.as_deref(),
+            Some("Aceptado")
+        );
+        let message = unreadable("[masthead]\nkeys = [\"Status\", \"a*b\"]\n");
+        assert!(message.contains("line 2"), "{message}");
+        assert!(
+            message.contains("the masthead key \"a*b\" cannot match a masthead line"),
+            "{message}"
+        );
+        assert!(unreadable("[masthead]\nkeys = [\" \"]\n").contains("cannot match"));
+        assert!(unreadable("[masthead]\nother = 1\n").contains("other"));
     }
 
     #[test]

@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use driftmark_core::git::{GitRead, Roots, Snapshot};
-use driftmark_core::lint::{Finding, Linter, Severity};
+use driftmark_core::lint::{Finding, LintSettings, Linter, Severity};
 use driftmark_core::rules::Rules;
 use serde_json::json;
 
@@ -47,7 +47,9 @@ usage: driftmark lint [--json] [<path>...]
 
 Checks Markdown files against driftmark's writing rules. With no path, it
 checks every Markdown file in the repository; a folder means every Markdown
-file in it. The rules file is driftmark.toml at the repository root.
+file in it. Both skip the files that `exclude` in the rules file's [lint]
+table names; a file named on its own is always checked. The rules file is
+driftmark.toml at the repository root.
 
   --json               print the findings as JSON
   --hook claude-code   read a Claude Code PostToolUse event on standard input
@@ -264,7 +266,7 @@ fn run_paths(paths: &[PathBuf], json: bool, stdout: &mut dyn Write, stderr: &mut
         Ok(workspace) => workspace,
         Err(message) => return fail(stderr, &message),
     };
-    let files = match select(&root, &cwd, paths) {
+    let files = match select(&root, &cwd, paths, workspace.rules.lint()) {
         Ok(files) => files,
         Err(message) => return fail(stderr, &message),
     };
@@ -283,8 +285,15 @@ fn run_paths(paths: &[PathBuf], json: bool, stdout: &mut dyn Write, stderr: &mut
 
 /// The files to check, relative to the root: every Markdown file in the
 /// repository when no path is given, the Markdown files inside each folder
-/// given, and each file given as it is.
-fn select(root: &Path, cwd: &Path, paths: &[PathBuf]) -> Result<Vec<String>, String> {
+/// given, and each file given as it is. Files found inside a folder are left
+/// out when the `[lint]` table's `exclude` names them; a file given by name
+/// is kept, because the person asked for it.
+fn select(
+    root: &Path,
+    cwd: &Path,
+    paths: &[PathBuf],
+    settings: &LintSettings,
+) -> Result<Vec<String>, String> {
     let mut wanted = Vec::new();
     let mut folders = Vec::new();
     for path in paths {
@@ -325,7 +334,7 @@ fn select(root: &Path, cwd: &Path, paths: &[PathBuf]) -> Result<Vec<String>, Str
                         .strip_prefix(folder.as_str())
                         .is_some_and(|rest| rest.starts_with('/'))
             });
-            if in_folder {
+            if in_folder && !settings.excludes(path) {
                 wanted.push(path.to_owned());
             }
         }
@@ -478,6 +487,12 @@ fn run_hook(stdin: &mut dyn Read, stderr: &mut dyn Write) -> u8 {
             return 2;
         }
     };
+    // The hook runs after every edit anywhere in the repository, as a walk
+    // does. A file the rules file excludes, such as a fixture that breaks the
+    // rules on purpose, must not send the agent off to "fix" it.
+    if workspace.rules.lint().excludes(&inside) {
+        return EXIT_CLEAN;
+    }
     let reports = workspace.lint(std::slice::from_ref(&inside));
     let findings: Vec<&Finding> = reports.iter().flat_map(|report| &report.findings).collect();
     if findings.is_empty() {

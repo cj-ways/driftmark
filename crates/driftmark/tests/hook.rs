@@ -115,6 +115,15 @@ fn the_hook_is_silent_when_it_has_nothing_to_say() {
 }
 
 #[test]
+fn the_hook_skips_a_file_the_rules_file_excludes() {
+    let repo = repo();
+    repo.write("driftmark.toml", "[lint]\nexclude = [\"docs/bad.md\"]\n");
+    let input = event(&repo.dir.join("docs/bad.md"), &repo.dir);
+    let (code, out, err) = driftmark(&repo.dir, &["lint", "--hook", "claude-code"], &input);
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
+}
+
+#[test]
 fn a_relative_path_is_read_from_the_event_folder() {
     let repo = repo();
     let input = event(Path::new("docs/bad.md"), &repo.dir);

@@ -32,6 +32,7 @@ use crate::document::{DiagramLanguage, Document, ParseError};
 use crate::rules::Rules;
 
 pub use anchors::Anchors;
+pub use code::OUTPUT_LANGUAGES;
 pub(crate) use settings::RawLint;
 pub use settings::{
     DEFAULT_ALLOWED_HTML, DEFAULT_MAX_CODE_LINE_LENGTH, DEFAULT_MAX_FILE_SIZE,
@@ -266,7 +267,7 @@ impl Linter<'_> {
     pub fn lint(&self, path: &str, bytes: Vec<u8>) -> Vec<Finding> {
         let size = bytes.len();
         let mut report = Report::new(self.rules.lint());
-        match Document::parse(bytes) {
+        match Document::parse_with(bytes, self.rules.masthead_keys()) {
             Ok(document) => self.check(path, size, &document, &mut report),
             Err(error) => report.parse_error(&error),
         }

@@ -100,15 +100,15 @@ main..feature: from {} to {}
 
 level       changes  document
 decision     3 of 5  docs/decisions/0002-cache.md (status proposed -> accepted)
-fact         2 of 2  docs/new.md (new)
-fact         1 of 2  docs/old.md (deleted)
 fact         1 of 1  README.md (deleted)
+fact         1 of 1  docs/new.md (new)
+fact         1 of 1  docs/old.md (deleted)
 fact         1 of 1  docs/readme.md (new)
 wording      1 of 1  docs/guide.md
 
-6 documents changed, 12 changes
-By level: 3 decision, 6 fact, 3 wording
-By kind: 3 edited, 4 added, 5 removed
+6 documents changed, 10 changes
+By level: 3 decision, 5 fact, 2 wording
+By kind: 3 edited, 3 added, 4 removed
 ",
             short(&r.main),
             short(&r.feature)
@@ -122,15 +122,16 @@ By kind: 3 edited, 4 added, 5 removed
 fn the_rules_file_comes_from_the_head_side() {
     let r = repo();
     // Backwards, the head is `main`, which has no rules file: the decision
-    // record has no status and no decision section, so `never` going away
-    // ranks it as a rule change.
+    // record has no status and no decision section. The sentence with
+    // `never` goes away whole, which gives no rule signal, so the changed
+    // number makes it a fact change.
     let (code, out, _) = driftmark(&r.repo.dir, &["diff", "feature..main"]);
     assert_eq!(code, 0);
     let line = out
         .lines()
         .find(|line| line.contains("0002-cache.md"))
         .expect("the decision record is listed");
-    assert_eq!(line, "rule         1 of 5  docs/decisions/0002-cache.md");
+    assert_eq!(line, "fact         2 of 5  docs/decisions/0002-cache.md");
 
     // A broken rules file in the working tree does not matter to a range
     // whose head is a commit, and is an error for `auto`.
@@ -164,11 +165,11 @@ fn json_holds_the_whole_change_list() {
     assert_eq!((code, err.as_str()), (0, ""));
     assert!(out.ends_with("}\n") && out.lines().count() == 1, "one line");
     let list: serde_json::Value = serde_json::from_str(&out).expect("JSON");
-    assert_eq!(list["schema_version"], 1);
+    assert_eq!(list["schema_version"], 2);
     assert_eq!(list["range"]["base"], r.main.as_str());
     assert_eq!(list["range"]["head"], r.feature.as_str());
     assert_eq!(list["range"]["notes"], serde_json::json!([]));
-    assert_eq!(list["totals"]["changes"], 12);
+    assert_eq!(list["totals"]["changes"], 10);
     assert_eq!(list["totals"]["highest"], "decision");
     let documents = list["documents"].as_array().expect("documents");
     let paths: Vec<&str> = documents
@@ -179,12 +180,23 @@ fn json_holds_the_whole_change_list() {
         paths,
         [
             "docs/decisions/0002-cache.md",
+            "README.md",
             "docs/new.md",
             "docs/old.md",
-            "README.md",
             "docs/readme.md",
             "docs/guide.md"
         ]
+    );
+    let added = &documents[2]["changes"];
+    assert_eq!(added.as_array().map(Vec::len), Some(1), "one change");
+    assert_eq!(
+        added[0]["document"],
+        serde_json::json!({
+            "title": "New",
+            "bytes": 30,
+            "lines": 3,
+            "source": "# New\n\nVersion 2 adds export.\n"
+        })
     );
     let decision = &documents[0];
     assert_eq!(decision["file"], "modified");
@@ -201,6 +213,50 @@ fn json_holds_the_whole_change_list() {
         &["diff", "main...feature", "--json", "--threads", "1"],
     );
     assert_eq!(single, out);
+}
+
+#[test]
+fn json_summary_lists_each_document_with_its_counts() {
+    let r = repo();
+    let (code, out, err) = driftmark(&r.repo.dir, &["diff", "main...feature", "--json=summary"]);
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert!(out.ends_with("}\n") && out.lines().count() == 1, "one line");
+    let summary: serde_json::Value = serde_json::from_str(&out).expect("JSON");
+    let (_, full, _) = driftmark(&r.repo.dir, &["diff", "main...feature", "--json"]);
+    let full: serde_json::Value = serde_json::from_str(&full).expect("JSON");
+    assert_eq!(summary["schema_version"], 2);
+    assert_eq!(summary["range"], full["range"]);
+    assert_eq!(summary["totals"], full["totals"]);
+    let documents = summary["documents"].as_array().expect("documents");
+    assert_eq!(documents.len(), 6);
+    for (document, whole) in documents
+        .iter()
+        .zip(full["documents"].as_array().expect("documents"))
+    {
+        assert_eq!(
+            document,
+            &serde_json::json!({
+                "path": whole["path"],
+                "file": whole["file"],
+                "summary": whole["summary"],
+            })
+        );
+    }
+    // The entry `docs/features/commands/diff.md` shows.
+    assert_eq!(
+        documents[0],
+        serde_json::json!({
+            "path": "docs/decisions/0002-cache.md",
+            "file": "modified",
+            "summary": {
+                "changes": 5,
+                "highest": "decision",
+                "levels": {"decision": 3, "rule": 0, "fact": 1, "wording": 1, "formatting": 0},
+                "kinds": {"formatting": 0, "edited": 2, "added": 1, "removed": 2, "moved": 0, "moved_edited": 0}
+            }
+        })
+    );
+    assert_eq!(documents[1]["file"], "removed");
 }
 
 #[test]
@@ -221,14 +277,14 @@ fn auto_compares_the_working_tree_with_where_the_branch_started() {
     );
     assert_eq!(lines[1], "Note: compared with `main`");
     assert!(
-        lines.contains(&"fact         1 of 2  docs/draft.md (new)"),
+        lines.contains(&"fact         1 of 1  docs/draft.md (new)"),
         "{out}"
     );
     assert!(
         lines.contains(&"wording      1 of 1  docs/guide.md"),
         "{out}"
     );
-    assert!(lines.contains(&"7 documents changed, 14 changes"), "{out}");
+    assert!(lines.contains(&"7 documents changed, 11 changes"), "{out}");
     let (_, json, _) = driftmark(&r.repo.dir, &["diff", "auto", "--json"]);
     let list: serde_json::Value = serde_json::from_str(&json).expect("JSON");
     assert_eq!(list["range"]["head"], "worktree");
@@ -260,7 +316,7 @@ fn since_and_folders_narrow_the_range() {
         ]
     );
     assert!(!out.contains("README.md"), "outside `docs`: {out}");
-    assert!(out.contains("5 documents changed, 11 changes"), "{out}");
+    assert!(out.contains("5 documents changed, 9 changes"), "{out}");
 
     // Before the first commit, every file is new.
     let (code, out, _) = driftmark(&r.repo.dir, &["diff", "--since=2025-12-31"]);
