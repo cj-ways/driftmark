@@ -180,6 +180,14 @@ impl GitRead for Git {
         )
     }
 
+    fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError> {
+        self.ask(
+            "find a file",
+            |g| g.blob_at(commit, path),
+            |c| c.blob_at(commit, path),
+        )
+    }
+
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         self.ask("read a file", |g| g.read_blob(id), |c| c.read_blob(id))
     }

@@ -75,10 +75,12 @@ fn a_sha256_repo_is_read_with_the_git_command() {
     let head = git.resolve("HEAD").expect("head");
     assert_eq!(head.as_hex().len(), 64);
     let files = git
-        .markdown_files(&Snapshot::Commit(head), &Roots::all())
+        .markdown_files(&Snapshot::Commit(head.clone()), &Roots::all())
         .expect("files");
     assert_eq!(files.len(), 1);
     assert_eq!(git.read_blob(&files[0].id), Ok(b"# A\n".to_vec()));
+    let found = git.blob_at(&head, &files[0].path).expect("an answer");
+    assert_eq!(found.as_ref(), Some(&files[0].id), "a 64-character id");
     let worktree = git
         .markdown_files(&Snapshot::Worktree, &Roots::all())
         .expect("files");

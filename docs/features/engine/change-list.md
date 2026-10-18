@@ -18,6 +18,8 @@ date: 2026-10-18
 
 `ChangeList::new(range, documents)` gathers the documents of one range, sorts them for a reader and adds up the totals. `RangeInfo::of(&resolved_range)` turns a resolved git range (`docs/features/engine/git-ranges.md`) into the text the list shows.
 
+The `driftmark diff` command (`docs/features/commands/diff.md`) does this for every changed file of a range, and prints the list as a summary or as the JSON below.
+
 ## How blocks pair
 
 Blocks come from the document model (`docs/features/engine/document-model.md`). Pairing runs in six steps. Each step pairs only blocks that no earlier step paired.
@@ -529,7 +531,6 @@ The limits in decision 0008 are under 1 second on all cores and under 5 seconds 
 
 - Moves between two documents. A block that moves to another file is removed from one and added to the other. This is not decided yet (decision 0005).
 - AI labels for importance.
-- The `driftmark diff` command, which the `cli` lane builds on this.
 - Drawing the views as HTML (M2).
 - A signal for a task checkbox, a list type or an alert kind that changed while the words stayed the same. These rank as wording.
 - Rename detection between files. A renamed file is one removed and one added document, as in `git-ranges.md`.

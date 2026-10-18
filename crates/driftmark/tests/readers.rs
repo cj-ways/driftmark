@@ -118,6 +118,7 @@ fn check_everything(readers: &Readers, names: &[&str]) -> Vec<ObjectId> {
 
     let mut blobs = BTreeSet::new();
     for commit in &commits {
+        check_blob_at(readers, commit);
         let raw = readers
             .same("read_commit", |g| g.read_commit(commit))
             .expect("a commit");
@@ -180,6 +181,46 @@ fn check_everything(readers: &Readers, names: &[&str]) -> Vec<ObjectId> {
     commits
 }
 
+/// Paths that are not plain Markdown files in some test repo: other files,
+/// folders, links, submodules, paths through a file or a submodule, and paths
+/// that exist nowhere.
+const OTHER_PATHS: [&str; 12] = [
+    "notes.txt",
+    "docs",
+    "docs/sub",
+    "missing.md",
+    "docs/a.md/inner.md",
+    "docs/link.md",
+    "docs/sub.md",
+    "docs/sub.md/inner.md",
+    "docs/new.md",
+    "docs/new.md/inner.md",
+    "other.md",
+    "docs/caf\u{e9}.md",
+];
+
+/// `blob_at` finds every Markdown file the commit lists, with the same blob,
+/// and the readers agree on every other path.
+fn check_blob_at(readers: &Readers, commit: &ObjectId) {
+    let at = Snapshot::Commit(commit.clone());
+    let files = readers
+        .same("markdown_files", |g| g.markdown_files(&at, &Roots::all()))
+        .expect("files");
+    for file in &files {
+        let found = readers
+            .same("blob_at a listed file", |g| g.blob_at(commit, &file.path))
+            .expect("found");
+        assert_eq!(found.as_ref(), Some(&file.id), "{:?}", file.path);
+    }
+    for other in OTHER_PATHS {
+        readers
+            .same(&format!("blob_at {other}"), |g| {
+                g.blob_at(commit, &path(other))
+            })
+            .expect("an answer");
+    }
+}
+
 fn sorted(mut ids: Vec<ObjectId>) -> Vec<ObjectId> {
     ids.sort();
     ids
@@ -225,6 +266,32 @@ fn both_readers_agree_on_a_history_with_branches_and_merges() {
     for wanted in [&h.c1, &h.c2, &h.f1, &h.f2, &h.m3, &h.merge, &h.m5, &h.other] {
         assert!(commits.contains(&id(wanted)));
     }
+}
+
+#[test]
+fn any_file_is_found_by_its_path_at_a_commit() {
+    let h = history();
+    let readers = h.repo.readers();
+    let blob_at = |commit: &str, p: &str| {
+        let commit = id(commit);
+        readers
+            .same(p, |g| g.blob_at(&commit, &path(p)))
+            .expect("an answer")
+    };
+    let text = h.repo.git(&["rev-parse", &format!("{}:notes.txt", h.c1)]);
+    assert_eq!(
+        blob_at(&h.c1, "notes.txt"),
+        Some(id(&text)),
+        "not only Markdown"
+    );
+    let run = h.repo.git(&["rev-parse", &format!("{}:docs/run.md", h.c2)]);
+    assert_eq!(blob_at(&h.c2, "docs/run.md"), Some(id(&run)), "executable");
+    assert_eq!(blob_at(&h.c1, "docs"), None, "a folder");
+    assert!(blob_at(&h.c1, "docs/sub/b.markdown").is_some());
+    assert_eq!(blob_at(&h.c2, "docs/sub/b.markdown"), None, "deleted");
+    assert_eq!(blob_at(&h.c1, "docs/a.md/x.md"), None, "through a file");
+    assert_eq!(blob_at(&h.f2, "docs/new.md"), None, "now a folder");
+    assert!(blob_at(&h.f2, "docs/new.md/inner.md").is_some());
 }
 
 #[test]
@@ -479,6 +546,19 @@ fn odd_index_entries_read_alike() {
 
     check_everything(&repo.readers(), &["HEAD", "HEAD~1"]);
     let readers = repo.readers();
+    let commit = id(&c1);
+    for (odd, found) in [
+        (&b"docs/link.md"[..], false),
+        (b"docs/sub.md", false),
+        (b"docs/sub.md/inner.md", false),
+        (b"docs/caf\xe9.md", true),
+    ] {
+        let odd = RepoPath::new(odd).expect("a path");
+        let answer = readers
+            .same("blob_at an odd entry", |g| g.blob_at(&commit, &odd))
+            .expect("an answer");
+        assert_eq!(answer.is_some(), found, "{odd:?}");
+    }
     let at = Snapshot::Commit(id(&c1));
     let files = readers
         .same("odd files", |g| g.markdown_files(&at, &Roots::all()))

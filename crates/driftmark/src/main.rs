@@ -1,8 +1,8 @@
-//! The `driftmark` program. Version 1 adds `serve`, `diff`, `mcp`, `init` and
-//! `export` to the commands here.
+//! The `driftmark` program. Version 1 adds `serve`, `mcp`, `init` and `export`
+//! to the commands here.
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 
 /// Exit code for a command the program does not know, the shell convention for
@@ -13,6 +13,7 @@ const USAGE: &str = "\
 usage: driftmark <command> [<arguments>]
 
 Commands:
+  diff           show what changed between two git points, ranked by meaning
   lint           check Markdown files against the writing rules
   hook install   run the lint after each edit Claude Code makes
 
@@ -30,6 +31,14 @@ fn main() -> ExitCode {
         Some("--help" | "-h" | "help") => {
             let _ = writeln!(stdout, "{USAGE}");
             0
+        }
+        Some("diff") => {
+            let terminal = driftmark::diff::Terminal::detect(
+                std::io::stdout().is_terminal(),
+                |name| std::env::var_os(name),
+                cfg!(windows),
+            );
+            driftmark::diff::run(&args[1..], &mut stdout, &mut stderr, terminal)
         }
         Some("lint") => driftmark::lint::run(
             &args[1..],

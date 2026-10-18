@@ -156,6 +156,12 @@ impl GitRead for GixReader {
         Ok(changes)
     }
 
+    fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError> {
+        let commit = to_gix(commit)?;
+        let found = self.with(|repo| blob_in_tree(repo, commit_tree(repo, commit)?, path))?;
+        found.map(from_gix).transpose()
+    }
+
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         self.read_object(id, ObjectKind::Blob)
     }
@@ -163,6 +169,41 @@ impl GitRead for GixReader {
     fn read_worktree_file(&self, path: &RepoPath) -> Result<Vec<u8>, GitError> {
         worktree::read(self.workdir(), path)
     }
+}
+
+/// The blob of the regular file at `path` under `tree`. It walks one folder
+/// at a time and stops at the first part that is not a folder, so a path
+/// through a file or a submodule finds nothing, as `git ls-tree` does. gix's
+/// own lookup would instead try to read a submodule's commit, which is not in
+/// the repo.
+fn blob_in_tree(
+    repo: &gix::Repository,
+    mut tree: gix::ObjectId,
+    path: &RepoPath,
+) -> Result<Option<gix::ObjectId>, GitError> {
+    let mut parts = path.as_bytes().split(|&b| b == b'/').peekable();
+    while let Some(part) = parts.next() {
+        let data = repo.find_tree(tree).map_err(|error| other(&error))?;
+        let mut found = None;
+        for entry in TreeRefIter::from_bytes(&data.data, repo.object_hash()) {
+            let entry = entry.map_err(|error| other(&error))?;
+            if entry.filename.as_bytes() == part {
+                found = Some((entry.mode, entry.oid.to_owned()));
+                break;
+            }
+        }
+        let Some((mode, id)) = found else {
+            return Ok(None);
+        };
+        if parts.peek().is_none() {
+            return Ok(mode.is_blob().then_some(id));
+        }
+        if !mode.is_tree() {
+            return Ok(None);
+        }
+        tree = id;
+    }
+    Ok(None)
 }
 
 /// A root folder's path, and its tree if the folder exists.

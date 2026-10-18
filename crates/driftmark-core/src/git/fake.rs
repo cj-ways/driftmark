@@ -134,6 +134,10 @@ impl GitRead for FakeGit {
         Ok(diff_files(&old, &new))
     }
 
+    fn blob_at(&self, _: &ObjectId, _: &RepoPath) -> Result<Option<ObjectId>, GitError> {
+        Ok(None)
+    }
+
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         Err(GitError::MissingObject { id: id.clone() })
     }
@@ -151,6 +155,7 @@ fn the_fake_has_no_blobs_or_worktree_files() {
         Err(GitError::MissingObject { id: id('1') })
     );
     let path = RepoPath::new("a.md").unwrap();
+    assert_eq!(git.blob_at(&id('1'), &path), Ok(None));
     assert_eq!(
         git.read_worktree_file(&path),
         Err(GitError::MissingFile { path })

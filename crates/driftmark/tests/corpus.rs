@@ -52,6 +52,9 @@ impl GitRead for Counting<'_> {
     ) -> Result<Vec<FileChange>, GitError> {
         self.inner.markdown_changes(a, b, roots)
     }
+    fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError> {
+        self.inner.blob_at(commit, path)
+    }
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         self.inner.read_blob(id)
     }

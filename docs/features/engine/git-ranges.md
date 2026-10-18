@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Git ranges and readers
 
-> Short version: driftmark asks a git repo five kinds of question through one interface, `GitRead`, in `driftmark-core`. Two readers in the `driftmark` program answer them: gix, and the `git` command. Both must give identical answers. A range is written as `<base>..<head>`, `<base>...<head>`, `--since <date>` or `auto`. `auto` includes changes not committed yet. Only `.md` and `.markdown` files count, and renames are not detected.
+> Short version: driftmark asks a git repo six kinds of question through one interface, `GitRead`, in `driftmark-core`. Two readers in the `driftmark` program answer them: gix, and the `git` command. Both must give identical answers. A range is written as `<base>..<head>`, `<base>...<head>`, `--since <date>` or `auto`. `auto` includes changes not committed yet. Only `.md` and `.markdown` files count, and renames are not detected.
 
 ## What driftmark asks git
 
@@ -18,6 +18,7 @@ The interface is `driftmark_core::git::GitRead`. Every method has one answer, an
 | When was a commit made, and what came before it? | `read_commit(id)` | The raw commit bytes. `CommitInfo::parse` reads the parents and the committer date from them. |
 | Which Markdown files exist here? | `markdown_files(at, roots)` | Each file's path and blob id, at a commit or in the working tree. |
 | Which Markdown files changed between two commits? | `markdown_changes(base, head, roots)` | Each changed file: added, removed or modified, with its old and new blob ids. |
+| Which file is at this path in a commit? | `blob_at(commit, path)` | The blob id of the regular file there, or none when the path is missing, a folder, a symbolic link or a submodule. It finds any file, not only Markdown, such as the rules file. A path through a file or a submodule finds none. |
 | What is in this file? | `read_blob(id)` | The blob's bytes, exactly as stored. |
 | What is in this working-tree file? | `read_worktree_file(path)` | The bytes on disk now. |
 
@@ -156,7 +157,7 @@ Both readers hash every listed file on every call. For about 3,400 files that re
 
 - `rev-parse --verify` to resolve names;
 - `merge-base --all` for merge-bases;
-- `ls-tree -r -z` to list files at a commit;
+- `ls-tree -r -z` to list files at a commit, and `ls-tree -z` without `-r` to find one file;
 - `diff-tree -r -z --no-renames` to list changes;
 - one long-lived `cat-file --batch` process to read commits and blobs;
 - `ls-files` and `hash-object` for the working tree.
@@ -193,6 +194,6 @@ Fallback tests cover a SHA-256 repo, which gix cannot open; a partial clone, whe
 - **SHA-256 and reftable repos in gix.** gix opens SHA-1 repos only. The chooser uses the `git` command for these. The types already hold 64-character ids.
 - **Shallow clones.** `--since` and `...` need the history they walk. When it was cut off, they fail with `MissingObject`. CI jobs that clone with a depth of 1 must fetch more history.
 - **Sparse checkouts.** A tracked file left off the disk by a sparse checkout counts as removed in the working tree.
-- **Local time for a date alone.** `--since 2026-10-01` means UTC. Relative dates such as `30 days ago` are not read; the `diff` command can turn them into a date.
+- **Local time for a date alone.** `--since 2026-10-01` means UTC. Relative dates such as `30 days ago` are not read, here or by the `diff` command.
 - **Rare revision syntax.** gix and git agree on branch names, tags, ids, `~`, `^` and `@`. Rarer forms, such as reflog dates (`main@{yesterday}`), may resolve in git and not in gix. The chooser does not switch for an unknown name.
 - **Skipping unchanged working-tree files.** Every working-tree file is hashed on each call.

@@ -1,9 +1,9 @@
 //! What driftmark asks of a git repo, and the rules for reading the answers.
 //!
-//! driftmark needs five answers from git: which commit a name points to, where
+//! driftmark needs six answers from git: which commit a name points to, where
 //! two branches parted, which Markdown files exist at a commit, which of them
-//! changed between two points, and the bytes of a file. [`GitRead`] states those
-//! questions. The `driftmark` program answers them twice, with gix and with the
+//! changed between two points, where one other file is, such as the rules
+//! file, and the bytes of a file. [`GitRead`] states those questions. The `driftmark` program answers them twice, with gix and with the
 //! `git` command, and checks the two against each other.
 //!
 //! Everything that is a rule rather than a lookup lives here, so both readers
@@ -295,6 +295,18 @@ pub trait GitRead: Send + Sync {
         head: &ObjectId,
         roots: &Roots,
     ) -> Result<Vec<FileChange>, GitError>;
+
+    /// The blob of the regular file at `path` in a commit, or `None` when no
+    /// regular file is there: nothing has that path, it is a folder, or it is
+    /// a symbolic link or a submodule.
+    ///
+    /// The other questions only see Markdown files. This one finds any file,
+    /// such as the rules file at the head of a range.
+    ///
+    /// # Errors
+    ///
+    /// When the commit or one of its trees cannot be read.
+    fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError>;
 
     /// The bytes of a blob, exactly as stored.
     ///

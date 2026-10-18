@@ -288,6 +288,26 @@ impl GitRead for CommandReader {
         Ok(changes)
     }
 
+    fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError> {
+        let mut command = self.git();
+        command.args(["ls-tree", "-z", "--full-tree", commit.as_hex(), "--"]);
+        command.arg(path_arg(path)?);
+        let listing = run_ok(&mut command)?;
+        // "<mode> <type> <id>\t<path>": the entry itself, even when it is a
+        // folder; nothing when no entry has that path.
+        for record in records(&listing) {
+            let (meta, found) = split_tab(record)?;
+            let fields: Vec<&[u8]> = meta.split(|&b| b == b' ').collect();
+            let [mode, _kind, id] = fields.as_slice() else {
+                return Err(odd_output("ls-tree", record));
+            };
+            if found == path.as_bytes() && is_regular_file(mode) {
+                return parse_id(&String::from_utf8_lossy(id)).map(Some);
+            }
+        }
+        Ok(None)
+    }
+
     fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
         self.read_object(id, ObjectKind::Blob)
     }
