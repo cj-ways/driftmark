@@ -381,8 +381,11 @@ fn the_documented_example_is_what_the_code_gives() {
     let written =
         std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("change-list-example.json");
     std::fs::write(&written, &json).expect("a dump");
+    // Git for Windows checks Markdown out with CRLF line endings; the example is
+    // compared as text, so the document's line-ending style must not matter.
     let doc = std::fs::read_to_string(root.join("docs/features/engine/change-list.md"))
-        .expect("the contract document");
+        .expect("the contract document")
+        .replace("\r\n", "\n");
     let example = doc
         .split("```json\n")
         .nth(1)
