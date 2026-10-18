@@ -109,7 +109,12 @@ pub(crate) fn revision(raw: &str) -> Result<Revision, BadAddress> {
 /// `<base>...<head>` and `auto`. `--since` becomes `since/<date>`, for the
 /// current branch, or `since/<date>/<branch>`.
 pub(crate) fn range(raw: &str) -> Result<RangeAddress, BadAddress> {
-    let label = decode_text(raw, "range")?;
+    range_text(decode_text(raw, "range")?)
+}
+
+/// Reads a range written as plain text, in the forms of [`range`]. The MCP
+/// connector takes ranges this way, never percent-encoded.
+pub(crate) fn range_text(label: String) -> Result<RangeAddress, BadAddress> {
     let since = label
         .strip_prefix("since/")
         .map(|rest| match rest.split_once('/') {
@@ -132,7 +137,12 @@ pub(crate) fn range(raw: &str) -> Result<RangeAddress, BadAddress> {
 /// Reads a document path, still percent-encoded. Only a Markdown file that
 /// git could store is accepted.
 pub(crate) fn document_path(raw: &str) -> Result<RepoPath, BadAddress> {
-    let bytes: Vec<u8> = percent_decode_str(raw).collect();
+    markdown_path(percent_decode_str(raw).collect())
+}
+
+/// Reads a document path given as bytes, already decoded. Only a Markdown
+/// file that git could store is accepted.
+pub(crate) fn markdown_path(bytes: Vec<u8>) -> Result<RepoPath, BadAddress> {
     let shown = String::from_utf8_lossy(&bytes).into_owned();
     let path = RepoPath::new(bytes).ok_or_else(|| {
         BadAddress(format!(

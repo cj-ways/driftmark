@@ -10,6 +10,7 @@ mod blocks;
 mod content;
 pub mod markdown;
 pub(crate) mod meta;
+pub mod outline;
 mod yaml;
 
 use std::any::Any;

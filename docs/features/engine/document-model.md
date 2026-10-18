@@ -291,6 +291,30 @@ Here the summary is `Short version: pages expire after an hour.`, and the masthe
 
 The status, the date and "superseded by" are not read here. Where they live depends on the document's type, which the rules file decides. `docs/features/engine/rules-file.md` says how.
 
+## Sections and the outline
+
+`Outline::of(&document)` in `driftmark_core::document::outline` lists the document's sections, in reading order. A tool that reads part of a long document asks for one section instead of the whole text: the MCP connector's `document_read` does (`docs/features/commands/mcp.md`).
+
+- **A section** starts at a heading outside every container. It holds that heading and every block after it, up to the next heading outside every container whose level is the same or higher. So sections nest: a `##` section holds the `###` sections under it.
+- **A heading inside a container** (a quote, a list item, an alert or a footnote) opens no section, as in `heading_path`.
+- **Blocks before the first heading**, such as front matter, belong to no section.
+
+Each `Section` holds:
+
+| Field | What it holds |
+|---|---|
+| `block` | The heading's block index. |
+| `level` | The heading's level, 1 to 6. |
+| `title` | The heading's plain text. |
+| `path` | The `heading_path` of the heading, then its own title. |
+| `anchor` | The heading's anchor, as GitHub and the reading page make it, without `#`. |
+| `blocks` | The block indexes it covers, end exclusive. |
+| `bytes` | Its source bytes: from the heading's first byte up to the next heading that ends it, without the white space before that heading. |
+
+`outline.containing(block)` gives the innermost section that holds a block. `outline.find(anchor)` gives the section a heading's anchor names: the heading's own section, or, for a heading inside a container, the section around it. An anchor in another case finds its heading when no heading has it exactly.
+
+In the example above, the outline holds `Cache pages` (blocks 1 to 10, the whole document after the front matter) and `Decision` (blocks 3 to 10, anchor `decision`).
+
 ## The comrak layer, for pages and notes
 
 `driftmark_core::document::markdown` holds what M2 needs to map rendered text back to source bytes:

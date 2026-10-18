@@ -11,16 +11,18 @@
 //! `docs/features/commands/serve.md` is the user's guide and the contract of
 //! the routes.
 
-mod address;
+// `address`, `compare`, `repo` and `search` are shared with the MCP
+// connector, which answers the same questions over another channel.
+pub(crate) mod address;
 mod app;
 mod args;
 mod assets;
 mod cache;
-mod compare;
+pub(crate) mod compare;
 mod guard;
 mod page;
-mod repo;
-mod search;
+pub(crate) mod repo;
+pub(crate) mod search;
 mod watch;
 
 use std::ffi::OsString;

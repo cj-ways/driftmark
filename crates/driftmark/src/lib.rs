@@ -11,5 +11,6 @@ pub mod diff;
 pub mod git;
 pub mod hook;
 pub mod lint;
+pub mod mcp;
 pub mod search;
 pub mod serve;

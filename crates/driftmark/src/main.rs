@@ -1,4 +1,4 @@
-//! The `driftmark` program. Version 1 adds `mcp`, `init` and `export` to the
+//! The `driftmark` program. Version 1 adds `init` and `export` to the
 //! commands here.
 
 use std::ffi::OsString;
@@ -16,12 +16,21 @@ Commands:
   diff           show what changed between two git points, ranked by meaning
   lint           check Markdown files against the writing rules
   serve          serve the documents and their changes as pages
+  mcp            answer an agent over MCP: changes, documents, search, lint
+  mcp install    add the MCP connector to this repository's .mcp.json
   hook install   run the lint after each edit Claude Code makes
 
 Run `driftmark <command> --help` for a command's options.";
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if args.first().and_then(|arg| arg.to_str()) == Some("mcp") {
+        // The protocol writes to standard output from the runtime's
+        // threads, so this thread must not hold its lock, as the other
+        // commands do below.
+        let code = driftmark::mcp::run(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
+        return ExitCode::from(code);
+    }
     let mut stdout = std::io::stdout().lock();
     // Standard error is locked per write, never for the whole command:
     // worker threads write to it too, such as the git reader saying it

@@ -140,21 +140,38 @@ pub fn install(root: &Path, write: bool) -> Result<String, String> {
         ));
     }
     groups.push(entry());
-    let text = render(&settings, original.as_deref())?;
+    save(&path, &settings, original.as_deref(), SETTINGS_FILE)?;
+    Ok(format!(
+        "Added `{HOOK_COMMAND}` as a PostToolUse hook in {SETTINGS_FILE}. Claude Code picks up the change by itself."
+    ))
+}
+
+/// Writes a JSON settings file the way its original was written (see
+/// [`render`]), making its folder when missing. The new file is written
+/// beside the old one and then moved over it, so a crash never leaves half
+/// a file. `name` is the file as the user knows it, for messages.
+///
+/// # Errors
+///
+/// A sentence when the folder or the file cannot be written.
+pub(crate) fn save(
+    path: &Path,
+    settings: &Value,
+    original: Option<&str>,
+    name: &str,
+) -> Result<(), String> {
+    let text = render(settings, original)?;
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder)
             .map_err(|error| format!("{} could not be made: {error}", folder.display()))?;
     }
     let temporary = path.with_extension("json.driftmark-new");
     std::fs::write(&temporary, text)
-        .and_then(|()| std::fs::rename(&temporary, &path))
+        .and_then(|()| std::fs::rename(&temporary, path))
         .map_err(|error| {
             let _ = std::fs::remove_file(&temporary);
-            format!("{SETTINGS_FILE} could not be written: {error}")
-        })?;
-    Ok(format!(
-        "Added `{HOOK_COMMAND}` as a PostToolUse hook in {SETTINGS_FILE}. Claude Code picks up the change by itself."
-    ))
+            format!("{name} could not be written: {error}")
+        })
 }
 
 /// The `hooks.PostToolUse` list of a settings object, made when missing.

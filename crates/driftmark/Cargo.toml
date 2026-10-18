@@ -71,6 +71,11 @@ getrandom = "0.4.3"
 # Reads and writes the paths and branch names in page addresses; already a
 # dependency of gix.
 percent-encoding = "2.3.2"
+# The MCP connector of `driftmark mcp` (decision 0003): the Model Context
+# Protocol over standard input and output. Pinned: rmcp had three major
+# versions in 2026, so only `src/mcp/protocol.rs` names it. No macros and no
+# HTTP: the server side and the stdio transport are all the command needs.
+rmcp = { version = "=3.5.1", default-features = false, features = ["server", "transport-io"] }
 # Serializes the server's JSON answers.
 serde = { version = "1.0.228", features = ["derive"] }
 # Reads Claude Code's hook input and `.claude/settings.json`, and writes

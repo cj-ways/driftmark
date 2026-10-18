@@ -18,7 +18,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use driftmark_core::git::{GitError, GitRead, RepoPath, Roots, Snapshot, tree_of};
+use driftmark_core::git::{GitError, GitRead, ObjectId, RepoPath, Roots, Snapshot, tree_of};
 use driftmark_core::search::{Filter, Query, search};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use serde::Serialize;
@@ -399,29 +399,7 @@ pub(crate) fn answer(
         (found, matches, WORKTREE.to_owned(), layers.unindexed())
     } else {
         let commit = repo.git.resolve(&revision)?;
-        let tree = tree_of(&repo.git.read_commit(&commit)?).ok_or_else(|| {
-            Problem::failed(format!(
-                "git could not be read: commit {commit} names no tree"
-            ))
-        })?;
-        let rules = repo.rules_at(&Snapshot::Commit(commit.clone()))?;
-        let layer = repo.cache.get_or_load(&Key::Search(tree), || {
-            let files: Vec<File> = repo
-                .git
-                .markdown_files(&Snapshot::Commit(commit.clone()), &Roots::all())?
-                .into_iter()
-                .map(|file| File {
-                    path: file.path,
-                    read: Read::Blob(file.id),
-                })
-                .collect();
-            let layer = program::build(&repo.git, &files, &rules.rules, repo.threads)?;
-            let bytes = layer.bytes();
-            Ok::<_, Problem>(Sized {
-                value: layer,
-                bytes,
-            })
-        })?;
+        let (layer, rules) = commit_layer(repo, &commit)?;
         let found = search(&[&layer.index], &params.query, &params.filter, params.limit);
         let matches = program::matches(&params.query, &found, repo.threads, |hit| {
             let blob = layer.blobs[hit.doc].as_ref()?;
@@ -458,6 +436,43 @@ pub(crate) fn answer(
         results,
         skipped,
     })
+}
+
+/// The search index of every Markdown file of `commit`, with the rules file
+/// it was built with. It is built on first use and kept in the cache under
+/// the commit's tree id.
+///
+/// # Errors
+///
+/// When git cannot be read or the rules file is broken.
+pub(crate) fn commit_layer(
+    repo: &Repo,
+    commit: &ObjectId,
+) -> Result<(Arc<Layer>, Arc<RulesAt>), Problem> {
+    let tree = tree_of(&repo.git.read_commit(commit)?).ok_or_else(|| {
+        Problem::failed(format!(
+            "git could not be read: commit {commit} names no tree"
+        ))
+    })?;
+    let rules = repo.rules_at(&Snapshot::Commit(commit.clone()))?;
+    let layer = repo.cache.get_or_load(&Key::Search(tree), || {
+        let files: Vec<File> = repo
+            .git
+            .markdown_files(&Snapshot::Commit(commit.clone()), &Roots::all())?
+            .into_iter()
+            .map(|file| File {
+                path: file.path,
+                read: Read::Blob(file.id),
+            })
+            .collect();
+        let layer = program::build(&repo.git, &files, &rules.rules, repo.threads)?;
+        let bytes = layer.bytes();
+        Ok::<_, Problem>(Sized {
+            value: layer,
+            bytes,
+        })
+    })?;
+    Ok((layer, rules))
 }
 
 /// Characters left as they are in an anchor after `#`: letters, digits, `-`
