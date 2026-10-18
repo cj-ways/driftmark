@@ -8,7 +8,20 @@ all-features = true
 yanked = "deny"
 
 [licenses]
-allow = ["MIT", "Apache-2.0"]
+# Reasons: docs/decisions/0008-engine-choices-from-the-m1-spikes.md, item 8.
+# BSD-2-Clause: comrak. Zlib: gix. Unicode-*: Unicode data tables.
+# BSD-3-Clause, MPL-2.0: merman's dependencies. EPL-2.0: merman's ELK layout.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "Zlib",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "MPL-2.0",
+  "EPL-2.0",
+]
 confidence-threshold = 0.9
 
 [bans]

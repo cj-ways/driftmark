@@ -69,7 +69,7 @@ flowchart LR
   - a block that moved and was edited is found;
   - an edited list item marks only that item.
 - The core crate has 100% line coverage.
-- The full private corpus diffs within the time set after spike 3.
+- On the maintainer's server, 30 days of changes diff in under 1 second with all cores and under 5 seconds on one core, and a typical branch in under 0.1 seconds (decision 0008).
 
 **Who:** up to 3 agent lanes after the spikes (parsing and rules, diff and moves, ranking). The limit is 3 because each lane runs heavy builds.
 
