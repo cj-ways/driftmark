@@ -1,0 +1,59 @@
+q = "ᲥᲐᲠᲗᲣᲚᲘ "
+  1 of 1 documents
+  1. words.md  0.866  document  "Words in many scripts"
+     block 2  Words in many scripts  #words-in-many-scripts
+     [ქართული] ტექსტი და [ᲥᲐᲠᲗᲣᲚᲘ] ᲡᲘᲢᲧᲕᲐ.
+q = "ქართულ"
+  1 of 1 documents
+  1. words.md  0.866  document  "Words in many scripts"
+     block 2  Words in many scripts  #words-in-many-scripts
+     [ქართული] ტექსტი და [ᲥᲐᲠᲗᲣᲚᲘ] ᲡᲘᲢᲧᲕᲐ.
+q = "სიტყვა "
+  1 of 1 documents
+  1. words.md  0.693  document  "Words in many scripts"
+     block 2  Words in many scripts  #words-in-many-scripts
+     ქართული ტექსტი და ᲥᲐᲠᲗᲣᲚᲘ [ᲡᲘᲢᲧᲕᲐ].
+q = "strasse "
+  1 of 1 documents
+  1. words.md  0.866  document  "Words in many scripts"
+     block 3  Words in many scripts  #words-in-many-scripts
+     Greek ΟΔΟΣ and οδος, German [Straße] and [STRASSE], and don’t with a curly apostrophe.
+q = "don't "
+  1 of 1 documents
+  1. words.md  0.866  document  "Words in many scripts"
+     block 1  Words in many scripts  #words-in-many-scripts
+     English: [Don't] cache read-only pages; keep snake_case names, v0.89 and 3.14 whole.
+q = "ΟΔΟΣ "
+  1 of 1 documents
+  1. words.md  0.866  document  "Words in many scripts"
+     block 3  Words in many scripts  #words-in-many-scripts
+     Greek [ΟΔΟΣ] and [οδος], German Straße and STRASSE, and don’t with a curly apostrophe.
+q = "👩\u{200d}💻 ✅"
+  0 of 1 documents
+q = "文章"
+  1 of 1 documents
+  1. words.md  0.693  document  "Words in many scripts"
+     block 5  Words in many scripts  #words-in-many-scripts
+     中文[文章] and カタカナ and ひらがな.
+q = "カタカナ "
+  1 of 1 documents
+  1. words.md  0.693  document  "Words in many scripts"
+     block 5  Words in many scripts  #words-in-many-scripts
+     中文文章 and [カタカナ] and ひらがな.
+q = "snake "
+  0 of 1 documents
+q = "snake"
+  1 of 1 documents
+  1. words.md  0.693  document  "Words in many scripts"
+     block 1  Words in many scripts  #words-in-many-scripts
+     English: Don't cache read-only pages; keep [snake_case] names, v0.89 and 3.14 whole.
+q = "v0.89 "
+  1 of 1 documents
+  1. words.md  0.693  document  "Words in many scripts"
+     block 1  Words in many scripts  #words-in-many-scripts
+     English: Don't cache read-only pages; keep snake_case names, [v0.89] and 3.14 whole.
+q = "e.g "
+  1 of 1 documents
+  1. words.md  0.693  document  "Words in many scripts"
+     block 7  Words in many scripts  #words-in-many-scripts
+     [e.g]. · for example

@@ -1,0 +1,7 @@
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+
+[[type]]
+name = "feature"
+paths = ["docs/features/**/*.md"]

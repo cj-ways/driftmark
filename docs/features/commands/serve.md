@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # The serve command
 
-> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, and one document's changes, each also as JSON. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default; any other address needs a token, which a browser presents once and then keeps in a cookie.
+> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, and one document's changes, each also as JSON. `/api/search` searches every document at a revision. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default; any other address needs a token, which a browser presents once and then keeps in a cookie.
 
 ## Running it
 
@@ -90,6 +90,7 @@ The separator is `/-/` because branch names hold `/`, as in `feature/login`. The
 | `GET /api/changes/<range>` | A range's change list, JSON: the summary form of `driftmark diff`. |
 | `GET /changes/<range>/-/<path>` | One document's changes, HTML. |
 | `GET /api/changes/<range>/-/<path>` | One document's changes, JSON: a change list with that one document. |
+| `GET /api/search?q=<query>` | Full-text search over every document at a revision, JSON. |
 | `GET /events` | The working tree's changes, as server-sent events. |
 | `GET /static/<hash>/<name>` | The files the pages load, built into the program: the page script, the style sheet, the diagram font, Prism and mermaid.js (see "Static files"). |
 | `GET /api/status` | The cache's counts and the watcher's state, JSON. |
@@ -259,6 +260,84 @@ The JSON is a change list, in the shape of `driftmark diff --json` (`docs/featur
 
 A path that did not change in the range answers `404`.
 
+### Search
+
+`/api/search` finds the documents that hold every word of a query, best first, each with the block that matches best and a short snippet of it. There is no search page; pages draw the box and the results from this answer. `docs/features/engine/search.md` states the query syntax, the ranking and the snippet rules.
+
+```text
+GET /api/search?q=cache+%22one+hour%22&rev=main&path=docs/&type=decision&limit=20
+```
+
+| Parameter | Meaning |
+|---|---|
+| `q` | The query as typed. A missing or empty `q` finds nothing. |
+| `rev` | A revision, as in `/doc/<revision>/-/<path>`: a branch, a tag, a commit or an expression such as `main~2`, or `worktree` for the files on disk. The default is `worktree`, or `HEAD` in a bare repository. |
+| `path` | Keep only documents whose path starts with this text, as written: `docs/decisions/` keeps that folder, and `docs/d` also keeps `docs/drafts/`. |
+| `type` | Keep only documents of this type from the rules file, such as `decision`. It may be given several times, to keep several types. A file that no type matches has the type `document`. |
+| `limit` | The most results, from 1 to 100. The default is 20. |
+
+The parameters are form-encoded, as a browser's `URLSearchParams` writes them: `+` and `%20` are spaces. Other parameters are ignored.
+
+The answer, for a made-up repository with three documents at `main`. Its rules file makes `docs/decisions/*.md` decisions, and its decision record `docs/decisions/0001-cache-pages.md` has front matter, the title `# Cache pages`, the summary `> Short version: pages are kept in a cache.`, and "Keep each page for one hour." under `## Decision`. The test `crates/driftmark/tests/serve_search.rs` checks this answer:
+
+```json
+{
+  "schema_version": 1,
+  "query": "cache \"one hour\"",
+  "revision": "main",
+  "commit": "67e144003ae9156fa9a2f4e55fa51b512a938c53",
+  "documents": 3,
+  "total": 1,
+  "results": [
+    {
+      "path": "docs/decisions/0001-cache-pages.md",
+      "url": "/doc/main/-/docs/decisions/0001-cache-pages.md#decision",
+      "title": "Cache pages",
+      "type": "decision",
+      "block": 4,
+      "headings": ["Cache pages", "Decision"],
+      "anchor": "decision",
+      "snippet": [
+        {"text": "Keep each page for ", "hit": false},
+        {"text": "one hour", "hit": true},
+        {"text": ".", "hit": false}
+      ]
+    }
+  ],
+  "skipped": []
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | 1, the version of the server's own JSON. |
+| `query` | The query as typed. |
+| `revision` | The revision as asked, or the default that was used. |
+| `commit` | The commit it resolved to, or `worktree`. |
+| `documents` | How many documents were searched: every Markdown file at the revision that could be parsed. |
+| `total` | How many documents matched, before `limit`. |
+| `results` | The matches, best first, at most `limit`. |
+| `skipped` | The files that could not be searched, each with its `path` and the `reason`, such as a file that is not UTF-8. |
+
+Each result:
+
+| Field | Meaning |
+|---|---|
+| `path` | The document's path from the repository root. |
+| `url` | The document's reading page at the same revision, with `#` and the section's anchor when there is one. |
+| `title` | The document's title, or `null`. |
+| `type` | Its type from the rules file at that revision. |
+| `block` | The block that matches best, by its index in the document model. On the reading page, the elements with `data-k` of this value hold it (`docs/features/engine/html.md`). |
+| `headings` | The titles of the headings above that block, outermost first. When the block is itself a heading outside any container, its own title comes last. Empty for a block before the first heading. |
+| `anchor` | The page id of the nearest heading at or above the block, without `#`, or `null` when no heading comes before it. |
+| `snippet` | Up to about 160 characters of the block's plain text, as pieces. Joined, the pieces give the snippet; each piece with `hit` set is a match, to be marked. A cut end shows `…`. |
+
+A page writes each piece as text, never as HTML: a snippet holds the document's own words, which may contain `<` or `&`.
+
+- **A revision's index** is built the first time it is searched, from every Markdown file of the commit, on all cores, and kept in the cache (see "The cache"). Requests that arrive while it is built wait for that one build.
+- **The working tree's index** is built on the first search of `worktree`, then kept up to date from the change signal that reloads open pages (see "Live reload"): the files that changed are read again, and the next search finds their new text. When more than 256 files changed since the last full build, or `driftmark.toml` changed, the whole working tree is indexed again in the background. Searches meanwhile use the last index.
+- A query with more than 32 words, a `limit` outside 1 to 100, or a parameter that is not valid text answers `400`.
+
 ### Status
 
 `/api/status` shows what the cache holds and what the watcher does, for a person checking memory or a test:
@@ -274,7 +353,8 @@ A path that did not change in the range answers `404`.
       "rules": {"entries": 1, "bytes": 16544, "hits": 3, "misses": 1, "evicted": 0},
       "documents": {"entries": 4, "bytes": 5345, "hits": 5, "misses": 4, "evicted": 0},
       "ranges": {"entries": 1, "bytes": 644, "hits": 0, "misses": 1, "evicted": 0},
-      "branches": {"entries": 1, "bytes": 672, "hits": 0, "misses": 1, "evicted": 0}
+      "branches": {"entries": 1, "bytes": 672, "hits": 0, "misses": 1, "evicted": 0},
+      "search": {"entries": 1, "bytes": 5120, "hits": 2, "misses": 1, "evicted": 0}
     }
   },
   "worktree": {
@@ -285,16 +365,20 @@ A path that did not change in the range answers `404`.
     "listeners": 0,
     "counted_at": 1792332186,
     "count_ms": 10
+  },
+  "search": {
+    "worktree": {"documents": 3, "changed": 1, "bytes": 4096}
   }
 }
 ```
 
-A kind of entry shows once it was asked for: `rules`, `documents`, `pages`, `ranges` or `branches`. `worktree` is `null` in a bare repository. Its `files` are the Markdown files watched, `changes` counts the changes announced, `listeners` the open event streams, and `count_ms` how long the last count took.
+A kind of entry shows once it was asked for: `rules`, `documents`, `pages`, `ranges`, `branches` or `search`. `worktree` is `null` in a bare repository. Its `files` are the Markdown files watched, `changes` counts the changes announced, `listeners` the open event streams, and `count_ms` how long the last count took. `search.worktree` is the working tree's search index: the documents it searches, the files read again since its last full build, and its estimated memory. It is `null` before the first search of the working tree, and in a bare repository.
 
 ## Errors
 
 | Status | When | Example message |
 |---|---|---|
+| 400 | A search's parameters are wrong: a query with more than 32 words, a `limit` outside 1 to 100, or a parameter that is not valid text. | `` `limit` must be a number from 1 to 100 `` |
 | 404 | The address names nothing: an unknown revision, text that is not a range, a date in neither form, two points without a common history, a path that is not a Markdown file in the repository, a document missing at that revision, a document that did not change in the range, a named default branch that does not exist, or a working tree in a bare repository. | `` `nope` does not name a commit `` |
 | 500 | Reading git failed, or the rules file is broken. The message names the cause. | ``git could not be read: object 3f2a… is not in the repo`` |
 
@@ -355,6 +439,7 @@ The server keeps what it read between requests, keyed by what fixes its content:
 | `pages` | The blob id, the rules version and the path; or the two blob ids, the rules version and the path. | A document's HTML and its headings; or one document's changes, their HTML and its title. Without the page around them, which changes with the branches. |
 | `ranges` | The two commit ids. | Each document's counts. |
 | `branches` | The default branch's tip and the branch's tip. | The branch's counts. |
+| `search` | The commit's tree id. | The search index of every Markdown file in it. |
 
 The rules version is part of a document's key because the rules file's masthead keys change how a title and a summary are read. The path is part of a page's key because the page shows it.
 
@@ -362,6 +447,7 @@ The rules version is part of a document's key because the rules file's masthead 
 - **The working tree is never cached.** Its bytes can change while its name stays. A document at `worktree`, the `auto` range and its documents are read and compared on every request.
 - **Drawings have a cache of their own**, 32 MB, keyed by a hash of the diagram's language and text (`docs/features/pages.md`, "Diagrams"). A document read again from the working tree, or another document with the same diagram, draws nothing again.
 - **The cap is 128 MB**, counted as the estimated heap memory of each entry: a document's text, each block's plain text, spans and details, and the heading paths and containers that blocks share, counted once. When the entries add up to more, the least recently used go first. A value larger than the whole cap is used once and not kept.
+- **Search indexes share the cap.** A revision's index is one entry, about a fifth of the cap for a corpus of 3,500 documents (see "Speed"). It stays while the reader keeps searching, because each search uses it again; pages read since push it out only when they are used more recently. A dropped index is built again on the next search, in well under a second. The working tree's index is not in the cache, like every working-tree read; `/api/status` shows its size.
 - **Why 128 MB.** The speed spike measured about 5 MB of block lists for the whole private corpus, and 152 to 186 MB with the text and the rendered HTML. Parsed documents are larger than block lists, so the whole corpus does not fit. A day's reading does, and a dropped document costs one parse, a few milliseconds, when it is opened again.
 - **One load per key.** Two requests that need the same missing entry share one load: the second waits for the first. An error is not kept, so the next request tries again.
 - **Shared work.** A blob that many branches change, or that a page opened before, is parsed once. The home page compares the branches it has not counted yet together, on all cores.
@@ -415,6 +501,7 @@ Measured on the maintainer's server, which has 12 cores, on 2026-10-18, with the
 
 - **The home page's work**, cold: listing the branches 5 ms; the merge-bases and the changed files of 341 branches about 110 ms on 12 threads; comparing 1,763 distinct file changes about 185 ms. A merged branch is found by its merge-base alone, and a change that several branches share is compared once (2,114 changes, 1,763 distinct).
 - **`driftmark diff`** takes 225 to 248 ms for the same 30-day range at the same load, so the cold change list costs what the command costs.
+- **Search** builds a revision's index in about 0.43 seconds on 12 cores and answers a query in about 5 ms with its snippets; `docs/features/engine/search.md` has the measurements.
 - **At a load of 65**, earlier the same day, the cold home page took about 2 seconds and the cold 30-day list 1.2 to 1.7 seconds; warm pages stayed under 25 ms.
 
 **Memory.** Opening every changed document of the 30-day range, its changes page and its reading page (5,070 requests, all answered with 200, median 0.9 ms, slowest 35 ms), left the cache at 127.7 MB of its 128 MB: 104.8 MB in 1,488 documents and 22.9 MB in 2,136 pages, after dropping 2,285 documents and 2,934 pages. The process as a whole held more:
@@ -445,6 +532,6 @@ What stays above the cache is the working memory of the counts on many threads: 
 
 - **Images and other files.** The server serves Markdown documents only. A reading page shows a link to any other file as its text, and an image as its alt text.
 - **A size limit before parsing.** A file with very deep nesting is refused by the parser after it reads it; the `render` lane adds a check before the parser sees the file.
-- **Search** (M2, wave 2) and **notes** (M3).
+- **Notes** (M3).
 - **HTTPS.** The server speaks plain HTTP; across machines, use a private network such as Tailscale.
 - **Paths that are not UTF-8 in change lists.** A change list names files as text, so the link to such a file's changes may not lead back to it.

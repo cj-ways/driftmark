@@ -1,0 +1,55 @@
+q = "lantern "
+  1 of 9 documents
+  1. middle.md  2.303  document  "Cut in the middle"
+     block 1  Cut in the middle  #cut-in-the-middle
+     …and roads for a while, then it names the [lantern] in the middle of its sentences, and then it goes on about mountains, valleys, bridges and towns until it is much…
+q = "compass "
+  1 of 9 documents
+  1. start.md  2.303  document  "Cut at the end"
+     block 1  Cut at the end  #cut-at-the-end
+     A [compass] points the way at the very start of this paragraph, which then goes on about gardens, rivers and roads, mountains, valleys, bridges and towns, then fields…
+q = "harbor "
+  1 of 9 documents
+  1. end.md  2.303  document  "Cut at the start"
+     block 1  Cut at the start  #cut-at-the-start
+     …and roads, mountains, valleys, bridges and towns, then fields, forests and lakes, for a long while before it reaches the end of its text, where a [harbor] waits.
+q = "ledger "
+  1 of 9 documents
+  1. table.md  2.303  document  "Table"
+     block 2  Table  #table
+     [Ledger] · kept at the desk
+q = "kettle "
+  1 of 9 documents
+  1. code.md  2.878  document  "Code"
+     block 1  Code  #code
+     [kettle] on [kettle] off
+q = "teapot "
+  1 of 9 documents
+  1. quoted.md  2.303  document  "Quoted"
+     block 3  Quoted › Section  #section
+     A [teapot] in a quote.
+q = "walrus "
+  1 of 9 documents
+  1. repeated.md  2.303  document  "Repeated"
+     block 4  Repeated › Steps  #steps-1
+     A [walrus] waits here.
+q = "meadow "
+  1 of 9 documents
+  1. before.md  2.878  document  "Late title"
+     block 0  -  -
+     A quiet [meadow] before any heading, and a [meadow] again.
+q = "\"quiet meadow\""
+  1 of 9 documents
+  1. before.md  2.303  document  "Late title"
+     block 0  -  -
+     A [quiet meadow] before any heading, and a meadow again.
+q = "lighthouse "
+  1 of 9 documents
+  1. heading.md  9.786  document  "Lighthouse"
+     block 1  Lighthouse › Lighthouse keepers  #lighthouse-keepers
+     [Lighthouse] keepers
+q = "late title"
+  1 of 9 documents
+  1. before.md  18.421  document  "Late title"
+     block 1  Late title  #late-title
+     [Late] [title]

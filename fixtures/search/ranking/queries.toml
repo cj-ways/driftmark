@@ -1,0 +1,12 @@
+# The title beats a heading, a heading beats the body, however often.
+[[query]]
+q = "search "
+
+# `postings` is in 2 documents and `search` in 5, so the document with
+# `postings` in a heading ranks first.
+[[query]]
+q = "search postings "
+
+# Equal scores rank by path.
+[[query]]
+q = "tie breaker "

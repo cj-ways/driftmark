@@ -1,0 +1,74 @@
+q = "c"
+  4 of 4 documents
+  1. c.md  3.004  document  "Cash desk"
+     block 1  Cash desk  #cash-desk
+     [Cash] is [counted] daily.
+  2. a.md  2.946  document  "Caching"
+     block 1  Caching  #caching
+     [Caching] makes pages fast.
+  3. b.md  2.946  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+  4. d.md  2.946  document  "Carts"
+     block 1  Carts  #carts
+     [Carts] hold items.
+q = "ca"
+  4 of 4 documents
+  1. a.md  2.946  document  "Caching"
+     block 1  Caching  #caching
+     [Caching] makes pages fast.
+  2. b.md  2.946  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+  3. c.md  2.946  document  "Cash desk"
+     block 1  Cash desk  #cash-desk
+     [Cash] is counted daily.
+  4. d.md  2.946  document  "Carts"
+     block 1  Carts  #carts
+     [Carts] hold items.
+q = "cac"
+  2 of 4 documents
+  1. a.md  4.669  document  "Caching"
+     block 1  Caching  #caching
+     [Caching] makes pages fast.
+  2. b.md  4.669  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+q = "cach"
+  2 of 4 documents
+  1. a.md  4.669  document  "Caching"
+     block 1  Caching  #caching
+     [Caching] makes pages fast.
+  2. b.md  4.669  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+q = "cache"
+  1 of 4 documents
+  1. b.md  6.840  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+q = "cache "
+  1 of 4 documents
+  1. b.md  6.840  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+q = "cache r"
+  1 of 4 documents
+  1. b.md  13.278  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+q = "cache rules"
+  1 of 4 documents
+  1. b.md  13.278  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache] keeps a page.
+q = "\"cache ke"
+  1 of 4 documents
+  1. b.md  1.609  document  "Cache rules"
+     block 1  Cache rules  #cache-rules
+     The [cache keeps] a page.
+q = "cas"
+  1 of 4 documents
+  1. c.md  6.840  document  "Cash desk"
+     block 1  Cash desk  #cash-desk
+     [Cash] is counted daily.

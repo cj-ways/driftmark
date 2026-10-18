@@ -1,0 +1,8 @@
+0: words in many scripts
+1: english don't cache read only pages keep snake_case names v0.89 and 3.14 whole
+2: ქართული ტექსტი და ქართული სიტყვა
+3: greek οδοσ and οδοσ german strasse and strasse and don't with a curly apostrophe
+4: emoji are not words developer flag thumbs done
+5: 中 文 文 章 and カタカナ and ひ ら が な
+6: term meaning
+7: e.g for example

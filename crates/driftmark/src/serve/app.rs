@@ -32,6 +32,7 @@ use super::compare::Skipped;
 use super::guard::{self, Access, Verdict};
 use super::page::{self, Frame, Live, Tab, WorktreeLine};
 use super::repo::{DocumentAt, Located, Problem, Repo};
+use super::search::{self, Params, WorktreeIndex, WorktreeStatus};
 use super::watch::{Message, Watch};
 use crate::diagram::Drawer;
 
@@ -49,6 +50,8 @@ pub(crate) struct App {
     pub repo: Arc<Repo>,
     /// The working-tree watcher; `None` for a bare repository.
     pub watch: Option<Arc<Watch>>,
+    /// The working tree's search index; `None` for a bare repository.
+    pub search: Option<Arc<WorktreeIndex>>,
     /// Who may ask.
     pub access: Access,
     /// The page script, the style sheet and the other built-in files.
@@ -71,6 +74,7 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route("/api/doc/{*rest}", get(document_json))
         .route("/changes/{*rest}", get(changes_page))
         .route("/api/changes/{*rest}", get(changes_json))
+        .route("/api/search", get(search_json))
         .route("/events", get(events))
         .route("/static/{hash}/{name}", get(asset))
         .fallback(not_found)
@@ -435,6 +439,12 @@ struct StatusJson {
     threads: usize,
     cache: Stats,
     worktree: Option<WatchJson>,
+    search: SearchStatusJson,
+}
+
+#[derive(Serialize)]
+struct SearchStatusJson {
+    worktree: Option<WorktreeStatus>,
 }
 
 #[derive(Serialize)]
@@ -469,6 +479,9 @@ async fn status_json(State(app): Shared) -> Response {
         threads: app.repo.threads,
         cache: app.repo.cache.stats(),
         worktree,
+        search: SearchStatusJson {
+            worktree: app.search.as_ref().and_then(|index| index.status()),
+        },
     })
 }
 
@@ -976,6 +989,20 @@ async fn changes_json(State(app): Shared, uri: Uri) -> Response {
                 Err(problem) => refuse(&app, &problem, true),
             }
         }
+    }
+}
+
+// ---- search ----------------------------------------------------------------
+
+async fn search_json(State(app): Shared, uri: Uri) -> Response {
+    let params = match Params::read(uri.query()) {
+        Ok(params) => params,
+        Err(message) => return json_problem(StatusCode::BAD_REQUEST, &message),
+    };
+    let work = Arc::clone(&app);
+    match blocking(move || search::answer(&work.repo, work.search.as_deref(), &params)).await {
+        Ok(answer) => json(&answer),
+        Err(problem) => refuse(&app, &problem, true),
     }
 }
 

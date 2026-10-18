@@ -62,6 +62,10 @@ pub(crate) enum Key {
     Range(Option<ObjectId>, ObjectId),
     /// The counted comparison of a branch tip with the default branch's tip.
     Branch(ObjectId, ObjectId),
+    /// The search index of every document in a commit's tree. Two commits
+    /// with the same tree hold the same files and the same rules file, so
+    /// they share one index.
+    Search(ObjectId),
 }
 
 impl Key {
@@ -73,6 +77,7 @@ impl Key {
             Key::Reading(..) | Key::Changes(..) => Kind::Pages,
             Key::Range(..) => Kind::Ranges,
             Key::Branch(..) => Kind::Branches,
+            Key::Search(_) => Kind::Search,
         }
     }
 }
@@ -91,6 +96,8 @@ pub(crate) enum Kind {
     Ranges,
     /// Counted branches.
     Branches,
+    /// Search indexes of revisions.
+    Search,
 }
 
 /// A value and the bytes it holds. The load function of
@@ -465,6 +472,7 @@ mod tests {
             ),
             (Key::Range(None, id('4')), Kind::Ranges),
             (Key::Branch(id('4'), id('5')), Kind::Branches),
+            (Key::Search(id('6')), Kind::Search),
         ];
         for (key, _) in &keys {
             cache.get_or_load(key, || sized("v", 10)).unwrap();

@@ -1,0 +1,43 @@
+# A long block is cut around its match, with some lead before it.
+[[query]]
+q = "lantern "
+
+# A match near the start: no cut at the start.
+[[query]]
+q = "compass "
+
+# A match near the end: the snippet fills up from before it.
+[[query]]
+q = "harbor "
+
+# A table row: cells are joined by a dot.
+[[query]]
+q = "ledger "
+
+# Code: runs of white space are one space.
+[[query]]
+q = "kettle "
+
+# A block in a quote: the section is the heading outside the quote.
+[[query]]
+q = "teapot "
+
+# A repeated heading's anchor ends in -1.
+[[query]]
+q = "walrus "
+
+# Before any heading: no headings and no anchor. Each word is marked.
+[[query]]
+q = "meadow "
+
+# A phrase is marked as one piece.
+[[query]]
+q = '"quiet meadow"'
+
+# Only the title and a heading match: the heading is shown, not the title.
+[[query]]
+q = "lighthouse "
+
+# Only the title matches.
+[[query]]
+q = "late title"

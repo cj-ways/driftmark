@@ -1,0 +1,58 @@
+q = "cache "
+  4 of 5 documents
+  1. docs/decisions/0001-cache-pages.md  3.446  decision  "Cache pages"
+     block 1  Cache pages  #cache-pages
+     Keep each page in the [cache] for one hour.
+  2. docs/features/cache/pages.md  3.446  feature  "Page cache"
+     block 1  Page cache  #page-cache
+     The [cache] holds finished pages.
+  3. docs/drafts/cache-ideas.md  0.811  document  "Ideas"
+     block 1  Ideas  #ideas
+     A second [cache] for diagrams.
+  4. notes/cache.md  0.811  document  "Notes"
+     block 1  Notes  #notes
+     Clear the [cache] after a deploy.
+q = "cache "  path = "docs/decisions/"
+  1 of 5 documents
+  1. docs/decisions/0001-cache-pages.md  3.446  decision  "Cache pages"
+     block 1  Cache pages  #cache-pages
+     Keep each page in the [cache] for one hour.
+q = "cache "  path = "docs/d"
+  2 of 5 documents
+  1. docs/decisions/0001-cache-pages.md  3.446  decision  "Cache pages"
+     block 1  Cache pages  #cache-pages
+     Keep each page in the [cache] for one hour.
+  2. docs/drafts/cache-ideas.md  0.811  document  "Ideas"
+     block 1  Ideas  #ideas
+     A second [cache] for diagrams.
+q = "cache "  types = ["feature"]
+  1 of 5 documents
+  1. docs/features/cache/pages.md  3.446  feature  "Page cache"
+     block 1  Page cache  #page-cache
+     The [cache] holds finished pages.
+q = "cache "  types = ["decision", "document"]
+  3 of 5 documents
+  1. docs/decisions/0001-cache-pages.md  3.446  decision  "Cache pages"
+     block 1  Cache pages  #cache-pages
+     Keep each page in the [cache] for one hour.
+  2. docs/drafts/cache-ideas.md  0.811  document  "Ideas"
+     block 1  Ideas  #ideas
+     A second [cache] for diagrams.
+  3. notes/cache.md  0.811  document  "Notes"
+     block 1  Notes  #notes
+     Clear the [cache] after a deploy.
+q = "cache "  path = "docs/"  types = ["document"]
+  1 of 5 documents
+  1. docs/drafts/cache-ideas.md  0.811  document  "Ideas"
+     block 1  Ideas  #ideas
+     A second [cache] for diagrams.
+q = "cache "  path = "nowhere/"
+  0 of 5 documents
+q = "cache "  limit = 2
+  4 of 5 documents
+  1. docs/decisions/0001-cache-pages.md  3.446  decision  "Cache pages"
+     block 1  Cache pages  #cache-pages
+     Keep each page in the [cache] for one hour.
+  2. docs/features/cache/pages.md  3.446  feature  "Page cache"
+     block 1  Page cache  #page-cache
+     The [cache] holds finished pages.

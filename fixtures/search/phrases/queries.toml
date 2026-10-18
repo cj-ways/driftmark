@@ -1,0 +1,26 @@
+[[query]]
+q = '"one hour"'
+
+[[query]]
+q = "“one hour”"
+
+[[query]]
+q = "one-hour "
+
+[[query]]
+q = '"one hour later"'
+
+[[query]]
+q = '"hour one"'
+
+[[query]]
+q = "read-only "
+
+[[query]]
+q = '"read only mode"'
+
+[[query]]
+q = '"one ho'
+
+[[query]]
+q = '"one hour" page'

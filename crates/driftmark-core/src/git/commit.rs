@@ -44,6 +44,18 @@ impl CommitInfo {
     }
 }
 
+/// The root tree of a raw commit object, from the `tree` line git writes
+/// first. Returns `None` when the first line is not a `tree` line.
+///
+/// Two commits with the same tree hold the same files, so anything made from
+/// every file of a commit, such as a search index, can be kept by its tree
+/// and shared.
+#[must_use]
+pub fn tree_of(raw: &[u8]) -> Option<ObjectId> {
+    let first = raw.split(|&b| b == b'\n').next().unwrap_or_default();
+    ObjectId::from_hex(std::str::from_utf8(first.strip_prefix(b"tree ")?).ok()?)
+}
+
 /// The time in a `committer` line: `Name <email> 1760000000 +0200`. The name
 /// and email may hold almost anything, so the time is read after the last `>`.
 fn commit_time(person: &[u8]) -> Option<i64> {
@@ -126,6 +138,26 @@ mod tests {
         assert_eq!(CommitInfo::parse(not_utf8_parent), None);
         let not_utf8_time = b"committer A <a> \xff1 +0000\n";
         assert_eq!(CommitInfo::parse(not_utf8_time), None);
+    }
+
+    #[test]
+    fn the_tree_is_read_from_the_first_line() {
+        let raw = format!("{TREE}committer A <a> 3 +0000\n");
+        assert_eq!(
+            tree_of(raw.as_bytes()).unwrap().as_hex(),
+            "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        );
+        assert_eq!(
+            tree_of(b"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904"),
+            tree_of(raw.as_bytes())
+        );
+        assert_eq!(
+            tree_of(b"committer A <a> 3 +0000\ntree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n"),
+            None
+        );
+        assert_eq!(tree_of(b"tree \xff\n"), None);
+        assert_eq!(tree_of(b"tree nothex\n"), None);
+        assert_eq!(tree_of(b""), None);
     }
 
     #[test]

@@ -3,9 +3,10 @@
 //!
 //! The server lists the branches whose documents differ from the default
 //! branch, shows a document at any revision, a range's change list and one
-//! document's changes, each as a page and as JSON. It caches what it parsed
-//! by blob id, watches the working tree so open pages can reload, and lets
-//! no request through from another machine without a token.
+//! document's changes, each as a page and as JSON, and searches every
+//! document at a revision. It caches what it parsed by blob id, watches the
+//! working tree so open pages can reload, and lets no request through from
+//! another machine without a token.
 //!
 //! `docs/features/commands/serve.md` is the user's guide and the contract of
 //! the routes.
@@ -19,6 +20,7 @@ mod compare;
 mod guard;
 mod page;
 mod repo;
+mod search;
 mod watch;
 
 use std::ffi::OsString;
@@ -132,11 +134,20 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
     if let Some(watch) = &watch {
         watch.start();
     }
+    let search = watch.as_ref().map(|watch| {
+        let index = Arc::new(search::WorktreeIndex::new(
+            Arc::clone(&repo),
+            Arc::clone(watch),
+        ));
+        index.start(events.subscribe());
+        index
+    });
     let (stop, stopping) = tokio::sync::watch::channel(false);
     let mut stopped = stopping.clone();
     let app = Arc::new(App {
         repo,
         watch: watch.clone(),
+        search,
         access: guard::Access::new(bound, token.clone()),
         assets: assets::Assets::built_in(),
         drawer: Arc::new(crate::diagram::Drawer::new()),

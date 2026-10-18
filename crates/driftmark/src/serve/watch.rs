@@ -193,6 +193,14 @@ impl Watch {
         )
     }
 
+    /// The Markdown files git listed in the working tree at the last
+    /// listing, sorted, or `None` before the first listing ended. The
+    /// search index of the working tree reads these.
+    pub(crate) fn listed(&self) -> Option<Vec<RepoPath>> {
+        let known = self.known.lock().unwrap_or_else(PoisonError::into_inner);
+        known.listed.then(|| known.files.keys().cloned().collect())
+    }
+
     fn run(&self) {
         self.count();
         while !self.stop.load(Ordering::Acquire) {

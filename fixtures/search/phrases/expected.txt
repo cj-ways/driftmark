@@ -1,0 +1,72 @@
+q = "\"one hour\""
+  3 of 4 documents
+  1. a.md  0.847  document  "Opening hours"
+     block 1  Opening hours  #opening-hours
+     The shop keeps each page for [one hour]. Then it expires.
+  2. b.md  0.847  document  "Hours"
+     block 1  Hours  #hours
+     One page, [one hour] later, and one more.
+  3. d.md  0.847  document  "Read-only mode"
+     block 1  Read-only mode  #read-only-mode
+     Pages open in read-only mode after [one-hour] sessions.
+q = "“one hour”"
+  3 of 4 documents
+  1. a.md  0.847  document  "Opening hours"
+     block 1  Opening hours  #opening-hours
+     The shop keeps each page for [one hour]. Then it expires.
+  2. b.md  0.847  document  "Hours"
+     block 1  Hours  #hours
+     One page, [one hour] later, and one more.
+  3. d.md  0.847  document  "Read-only mode"
+     block 1  Read-only mode  #read-only-mode
+     Pages open in read-only mode after [one-hour] sessions.
+q = "one-hour "
+  3 of 4 documents
+  1. a.md  0.847  document  "Opening hours"
+     block 1  Opening hours  #opening-hours
+     The shop keeps each page for [one hour]. Then it expires.
+  2. b.md  0.847  document  "Hours"
+     block 1  Hours  #hours
+     One page, [one hour] later, and one more.
+  3. d.md  0.847  document  "Read-only mode"
+     block 1  Read-only mode  #read-only-mode
+     Pages open in read-only mode after [one-hour] sessions.
+q = "\"one hour later\""
+  1 of 4 documents
+  1. b.md  1.609  document  "Hours"
+     block 1  Hours  #hours
+     One page, [one hour later], and one more.
+q = "\"hour one\""
+  0 of 4 documents
+q = "read-only "
+  1 of 4 documents
+  1. d.md  6.840  document  "Read-only mode"
+     block 1  Read-only mode  #read-only-mode
+     Pages open in [read-only] mode after one-hour sessions.
+q = "\"read only mode\""
+  1 of 4 documents
+  1. d.md  6.840  document  "Read-only mode"
+     block 1  Read-only mode  #read-only-mode
+     Pages open in [read-only mode] after one-hour sessions.
+q = "\"one ho"
+  3 of 4 documents
+  1. a.md  0.847  document  "Opening hours"
+     block 1  Opening hours  #opening-hours
+     The shop keeps each page for [one hour]. Then it expires.
+  2. b.md  0.847  document  "Hours"
+     block 1  Hours  #hours
+     One page, [one hour] later, and one more.
+  3. d.md  0.847  document  "Read-only mode"
+     block 1  Read-only mode  #read-only-mode
+     Pages open in read-only mode after [one-hour] sessions.
+q = "\"one hour\" page"
+  3 of 4 documents
+  1. a.md  1.540  document  "Opening hours"
+     block 1  Opening hours  #opening-hours
+     The shop keeps each [page] for [one hour]. Then it expires.
+  2. b.md  1.540  document  "Hours"
+     block 1  Hours  #hours
+     One [page], [one hour] later, and one more.
+  3. d.md  1.540  document  "Read-only mode"
+     block 1  Read-only mode  #read-only-mode
+     [Pages] open in read-only mode after [one-hour] sessions.

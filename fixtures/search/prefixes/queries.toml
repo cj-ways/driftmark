@@ -1,0 +1,31 @@
+# A reader typing "cache rules" one letter at a time.
+
+[[query]]
+q = "c"
+
+[[query]]
+q = "ca"
+
+[[query]]
+q = "cac"
+
+[[query]]
+q = "cach"
+
+[[query]]
+q = "cache"
+
+[[query]]
+q = "cache "
+
+[[query]]
+q = "cache r"
+
+[[query]]
+q = "cache rules"
+
+[[query]]
+q = '"cache ke'
+
+[[query]]
+q = "cas"

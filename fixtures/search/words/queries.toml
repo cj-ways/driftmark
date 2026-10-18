@@ -1,0 +1,40 @@
+# Each query runs against every document in this folder.
+
+[[query]]
+q = "ᲥᲐᲠᲗᲣᲚᲘ "
+
+[[query]]
+q = "ქართულ"
+
+[[query]]
+q = "სიტყვა "
+
+[[query]]
+q = "strasse "
+
+[[query]]
+q = "don't "
+
+[[query]]
+q = "ΟΔΟΣ "
+
+[[query]]
+q = "👩‍💻 ✅"
+
+[[query]]
+q = "文章"
+
+[[query]]
+q = "カタカナ "
+
+[[query]]
+q = "snake "
+
+[[query]]
+q = "snake"
+
+[[query]]
+q = "v0.89 "
+
+[[query]]
+q = "e.g "

@@ -1,0 +1,33 @@
+q = "search "
+  5 of 7 documents
+  1. title.md  3.502  document  "Search"
+     block 0  Search  #search
+     [Search]
+  2. heading.md  1.751  document  "Pages"
+     block 1  Pages › Search box  #search-box
+     [Search] box
+  3. postings-in-body.md  1.751  document  "Index parts"
+     block 1  Index parts › Search terms  #search-terms
+     [Search] terms
+  4. body.md  1.167  document  "Notes"
+     block 1  Notes  #notes
+     [Search], [search] and [search] again: the body says it three times.
+  5. postings-in-heading.md  0.875  document  "Index layout"
+     block 2  Index layout › Postings  #postings
+     Where each [search] word stands.
+q = "search postings "
+  2 of 7 documents
+  1. postings-in-heading.md  3.884  document  "Index layout"
+     block 1  Index layout › Postings  #postings
+     [Postings]
+  2. postings-in-body.md  3.255  document  "Index parts"
+     block 2  Index parts › Search terms  #search-terms
+     Each word keeps its [postings].
+q = "tie breaker "
+  2 of 7 documents
+  1. tie-a.md  3.008  document  "First"
+     block 1  First  #first
+     [Tie] [breaker] words.
+  2. tie-b.md  3.008  document  "Second"
+     block 1  Second  #second
+     [Tie] [breaker] words.

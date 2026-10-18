@@ -22,7 +22,7 @@ mod range;
 use std::fmt;
 
 pub use branches::{BranchInbox, DefaultBranch, OpenBranch, inbox};
-pub use commit::CommitInfo;
+pub use commit::{CommitInfo, tree_of};
 pub use date::parse_date;
 pub use path::{BadRoot, RepoPath, Roots};
 pub use range::{
