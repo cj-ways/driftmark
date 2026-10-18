@@ -119,10 +119,12 @@ impl WorktreeSearch {
                 read: Read::Disk,
             })
             .collect();
-        let layer = program::build(&repo.git, &files, &rules.rules, repo.threads)?;
+        let layer = program::build(&repo.git, &files, &rules.rules, repo.threads);
+        drop(files);
+        crate::memory::give_back(&repo.git);
         let index = Arc::new(Built {
             fingerprint,
-            layer,
+            layer: layer?,
             rules,
         });
         *built = Some(Arc::clone(&index));

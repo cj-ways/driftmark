@@ -504,29 +504,36 @@ Measured on the maintainer's server, which has 12 cores, on 2026-10-18, with the
 - **Search** builds a revision's index in about 0.43 seconds on 12 cores and answers a query in about 5 ms with its snippets; `docs/features/engine/search.md` has the measurements.
 - **At a load of 65**, earlier the same day, the cold home page took about 2 seconds and the cold 30-day list 1.2 to 1.7 seconds; warm pages stayed under 25 ms.
 
-**Memory.** Opening every changed document of the 30-day range, its changes page and its reading page (5,070 requests, all answered with 200, median 0.9 ms, slowest 35 ms), left the cache at 127.7 MB of its 128 MB: 104.8 MB in 1,488 documents and 22.9 MB in 2,136 pages, after dropping 2,285 documents and 2,934 pages. The process as a whole held more:
+**Memory.** The cache's 128 MB counts the cache, not the program. Work on all cores leaves more behind, so the server gives memory back (decision 0011):
 
-| Moment | Process memory (RSS) | With `MALLOC_ARENA_MAX=2` |
+- **After each bulk job:** a range's count, the home page's branch count, the working tree's count, or a search index build.
+  - It drops its spare git readers. gix needs a reader per thread, and each keeps up to 20 MB of caches for reuse; a count on 12 threads leaves 12 of them.
+  - On Linux with glibc, it then calls `malloc_trim(0)`. glibc keeps memory a thread freed in that thread's own pool; the call hands every whole free page back to the system.
+- **Once no request ran for one second**, it does both again, for the memory page requests freed.
+- On macOS, Windows and other C libraries, only the readers are dropped; there is no `malloc_trim`.
+
+Measured on 2026-10-18 on the private corpus, as the memory spike did (`docs/working/version-1/spikes/memory.md`). The run opens the 30-day change list, then every changed document of it: its changes page and its reading page, 5,074 requests, all answered with 200. Then it runs one search at the same revision. Each figure is the process's resident memory (RSS) after a 2-second rest, the median of 3 runs, with the load average between 23 and 34. "Before" is the program without these steps.
+
+| Moment | Before | Now |
 |---|---|---|
-| After start | 37 MB | 35 MB |
-| After the 30-day list, cache nearly empty | 211 MB | 161 MB |
-| After every changed document | 387 to 455 MB | 308 MB |
-| After the home page as well | 579 MB | 410 MB |
+| After start | 33 MB | 32 MB |
+| After the 30-day list | 261 MB | 172 MB |
+| After the first reading page, which counts every branch | 399 MB | 260 MB |
+| After every changed document | 633 MB | 407 MB |
+| After one search | 705 MB | 414 MB |
+| Highest during the run | 705 MB | 542 MB |
 
-About 52 MB of it is pack files mapped from disk. The rest above the cache is memory the system allocator keeps after the counting threads free it: each of the 12 threads keeps its own pool, and memory one thread frees is not reused by another. With two pools instead of 96 (`MALLOC_ARENA_MAX=2`), the same run ends 147 MB lower. A smaller gix pack cache (1 MB instead of 16 MB per handle) changed nothing measurable.
+- The 3 runs of "Now" ended between 406 and 417 MB after every changed document, and between 404 and 414 MB after the search.
+- The cache was full, 128 MB, after every changed document.
+- The home page alone, on a fresh server, leaves 214 MB instead of 263 MB.
 
-Other allocators did not help, measured the same way later that day at a load of 27 to 63:
+What stays above the cache, from the spike's reading of glibc's own counters (`mallinfo2`) in a run with the same steps:
 
-| Allocator | After every changed document | After the home page as well |
-|---|---|---|
-| The system's (glibc) | 375 to 406 MB | 528 to 550 MB |
-| glibc with `MALLOC_ARENA_MAX=2` | 290 MB | 419 MB |
-| mimalloc 0.1.52 | 455 to 490 MB | 888 MB |
-| mimalloc, `MIMALLOC_PURGE_DELAY=0` | 446 MB | 679 MB |
-| jemalloc 0.7.0 | 366 to 376 MB | 465 to 478 MB |
-| glibc on 4 cores instead of 12 | 353 MB | 447 MB |
+- **Mapped files**, about 71 MB: the program and git's pack files, which the system can drop and read again.
+- **Memory still in use beyond the cache's count**, about 60 MB: the drawings, which have their own 32 MB cap (17 MB in the spike's run), and allocation overhead the cache's estimate leaves out.
+- **Freed memory glibc cannot hand back**, about 130 MB: pages where freed pieces sit beside live ones, such as cache entries made while a count ran.
 
-What stays above the cache is the working memory of the counts on many threads: during the 30-day list the process peaks at 230 to 270 MB with an empty cache, and no allocator gives most of it back. The program keeps the system's allocator.
+**What it costs.** At a load of 18 to 20, the cold 30-day list took 565 ms instead of 523 ms, and its JSON 284 ms instead of 258 ms (median of 7 fresh servers each). In the spike, a trim took 1 to 21 ms, and a page after a bulk job makes a new reader with empty caches. Warm pages are unchanged. The program keeps the system's allocator: on an older build, the server lane found that mimalloc held more than glibc and jemalloc nearly as much.
 
 ## Not covered yet
 

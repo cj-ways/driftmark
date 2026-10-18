@@ -28,8 +28,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde_json::{Map, Value};
+
 use crate::git::Git;
+use crate::memory::{IDLE_AFTER, Idle, give_back};
 use crate::serve::repo::Repo;
+use protocol::Connector;
 
 /// Exit code after the client ended the session, or after `install` did
 /// its work.
@@ -164,8 +168,15 @@ fn serve(start: &std::path::Path, base: Option<String>) -> Result<(), String> {
     })?;
     let workdir = git.workdir().map(std::path::Path::to_path_buf);
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let repo = Arc::new(Repo::new(git, CACHE_BYTES, threads, base));
+    // Memory goes back to the system once no call ran for a second
+    // (decision 0011).
+    let idle = {
+        let repo = Arc::clone(&repo);
+        Idle::start(IDLE_AFTER, move || give_back(&repo.git))
+    };
     let context = tools::Context {
-        repo: Arc::new(Repo::new(git, CACHE_BYTES, threads, base)),
+        repo,
         workdir,
         worktree_search: search::WorktreeSearch::default(),
     };
@@ -174,13 +185,35 @@ fn serve(start: &std::path::Path, base: Option<String>) -> Result<(), String> {
         .thread_name("driftmark-mcp")
         .build()
         .map_err(|error| format!("the connector could not start: {error}"))?;
-    let served = runtime.block_on(protocol::serve_stdio(Arc::new(tools::Driftmark::new(
-        context,
-    ))));
+    let served = runtime.block_on(protocol::serve_stdio(Arc::new(Watched {
+        tools: tools::Driftmark::new(context),
+        idle,
+    })));
     // A tool still running on a blocking thread is left behind; the process
     // ends right after.
     runtime.shutdown_timeout(Duration::from_millis(100));
     served
+}
+
+/// The tools, with each call marked as work for the [`Idle`] watcher.
+struct Watched {
+    tools: tools::Driftmark,
+    idle: Idle,
+}
+
+impl Connector for Watched {
+    fn instructions(&self) -> String {
+        self.tools.instructions()
+    }
+
+    fn tools(&self) -> Vec<protocol::ToolInfo> {
+        self.tools.tools()
+    }
+
+    fn call(&self, name: &str, arguments: Map<String, Value>) -> Option<protocol::Reply> {
+        let _busy = self.idle.begin();
+        self.tools.call(name, arguments)
+    }
 }
 
 #[cfg(test)]

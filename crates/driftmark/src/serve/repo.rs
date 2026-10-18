@@ -401,7 +401,9 @@ impl Repo {
     pub(crate) fn range_count(&self, range: &ResolvedRange) -> Result<Arc<RangeCount>, Problem> {
         let count = || {
             let changes = range.changes(&self.git, &Roots::all())?;
-            self.count(&range.head, changes)
+            let counted = self.count(&range.head, changes);
+            crate::memory::give_back(&self.git);
+            counted
         };
         match &range.head {
             Snapshot::Commit(head) => {
@@ -534,6 +536,11 @@ impl Repo {
         let steps = parallel(&branches, self.threads, |branch| {
             self.branch_step(default, branch)
         });
+        // Every reading page asks for the branches, and usually finds them
+        // all cached; only a count gives memory back.
+        let counted = steps
+            .iter()
+            .any(|step| !matches!(step, Ok(Step::Cached(_))));
         // A change that several branches share, the same file between the
         // same two blobs under the same rules, is compared once.
         let mut jobs: Vec<Job> = Vec::new();
@@ -542,7 +549,7 @@ impl Repo {
         let mut states = Vec::with_capacity(steps.len());
         for step in steps {
             match step? {
-                Step::Known(state) => states.push(Ok(state)),
+                Step::Cached(state) | Step::Known(state) => states.push(Ok(state)),
                 Step::Compare {
                     base,
                     notes,
@@ -596,6 +603,10 @@ impl Repo {
                 BranchState::Counted(count) => home.changed.push((branch, count)),
             }
         }
+        drop((jobs, outcomes));
+        if counted {
+            crate::memory::give_back(&self.git);
+        }
         Ok(home)
     }
 
@@ -605,7 +616,7 @@ impl Repo {
     fn branch_step(&self, default: &DefaultBranch, branch: &OpenBranch) -> Result<Step, Problem> {
         let key = Key::Branch(default.tip.clone(), branch.tip.clone());
         if let Some(state) = self.cache.get::<BranchState>(&key) {
-            return Ok(Step::Known((*state).clone()));
+            return Ok(Step::Cached((*state).clone()));
         }
         let (base, notes) = match merge_base(&self.git, &default.tip, &branch.tip) {
             Ok(found) => found,
@@ -711,6 +722,7 @@ impl Repo {
             .git
             .markdown_files(&Snapshot::Worktree, &Roots::all())?;
         let counted = self.count_auto(&files).map_err(|problem| problem.message);
+        crate::memory::give_back(&self.git);
         Ok(WorktreeCount { files, counted })
     }
 
@@ -729,7 +741,10 @@ impl Repo {
 
 /// What one branch needs before its files are compared.
 enum Step {
-    /// Its state is known: cached, or it shares no history.
+    /// Its state was in the cache.
+    Cached(BranchState),
+    /// Its state is known without comparing files: it shares no history, or
+    /// it is merged.
     Known(BranchState),
     /// Its changed files are to be compared.
     Compare {

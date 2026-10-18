@@ -69,6 +69,21 @@ impl Git {
         })
     }
 
+    /// How many spare gix readers wait for reuse; see
+    /// [`GixReader::spare`]. Zero when gix is not used.
+    #[must_use]
+    pub fn spare_readers(&self) -> usize {
+        self.gix.as_ref().map_or(0, GixReader::spare)
+    }
+
+    /// Drops the spare gix readers and their caches; see
+    /// [`GixReader::drop_spare`]. The `git` command keeps nothing to drop.
+    pub fn drop_spare_readers(&self) {
+        if let Some(gix) = &self.gix {
+            gix.drop_spare();
+        }
+    }
+
     /// Which reader answers now: `"gix"` or `"git command"`.
     #[must_use]
     pub fn reader(&self) -> &'static str {

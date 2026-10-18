@@ -152,7 +152,7 @@ Measured on 2026-10-18 on the private corpus at the tip of its working branch, 3
 | Building the index, 12 threads | 431 ms (median of 3; 410 to 420 ms at a load of 6) |
 | Building the index, 1 thread | 2.0 s: reading 0.14 s, parsing 0.99 s, indexing the words 0.84 s, joining 0.09 s |
 | Index size | 25.9 MB, about a fifth of the server's cache |
-| Process memory after the first build | 153 MB more than before it, most of it memory the system allocator keeps after the threads free it |
+| Process memory after the first build | 153 MB more than before it, most of it memory the system allocator keeps after the threads free it. This test calls the build directly; the server gives most of it back right after the build (`docs/features/commands/serve.md`, "Memory"), and its first search added 7 MB instead of 72 MB on 2026-10-18. |
 | 100 queries, the index alone | median 0.9 ms, slowest 8.4 ms |
 | 100 queries, with snippets from documents read and parsed again | median 5.1 ms, slowest 18.1 ms |
 

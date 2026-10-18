@@ -12,7 +12,9 @@ keywords = ["markdown", "docs", "diff", "review", "ai-agents"]
 categories = ["command-line-utilities", "text-processing"]
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny`, not `forbid`: one block may allow it, the `malloc_trim` declaration
+# in crates/driftmark/src/memory.rs (decision 0011, item 4). No other `unsafe`.
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]

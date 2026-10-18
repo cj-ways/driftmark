@@ -34,6 +34,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use crate::git::Git;
+use crate::memory::{IDLE_AFTER, Idle, give_back};
 use app::App;
 use args::Request;
 use repo::Repo;
@@ -136,6 +137,12 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
     if let Some(watch) = &watch {
         watch.start();
     }
+    // Memory goes back to the system once no request ran for a second
+    // (decision 0011).
+    let idle = {
+        let repo = Arc::clone(&repo);
+        Arc::new(Idle::start(IDLE_AFTER, move || give_back(&repo.git)))
+    };
     let search = watch.as_ref().map(|watch| {
         let index = Arc::new(search::WorktreeIndex::new(
             Arc::clone(&repo),
@@ -164,7 +171,17 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
         .write_all(greeting(&place, bound, token.as_deref(), args.token.is_some()).as_bytes());
     let _ = stdout.flush();
     let served = runtime.block_on(async move {
-        let server = axum::serve(listener, app::router(app)).with_graceful_shutdown(async move {
+        let router = app::router(app).layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let busy = idle.begin();
+                async move {
+                    let response = next.run(request).await;
+                    drop(busy);
+                    response
+                }
+            },
+        ));
+        let server = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
             let _ = stop.send(true);
         });

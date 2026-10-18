@@ -41,7 +41,7 @@ A Rust tool for a git folder of Markdown that AI agents keep editing. It shows w
 - **Agents:** an implementation agent works in its own git worktree and branch, from a brief the maintainer signed off. The coordinating session checks the result and merges it.
 - **Nothing private in git.** No document, name, path, address or email from the maintainer's workplace goes into a commit, not even in a test or an example. Making the repo public will expose every old commit. Material that must stay private goes in `private/`.
 - **Fresh code.** The design follows a private prototype, described in `docs/decisions/0003-rust.md`. No code is copied from it.
-- No `unsafe`. A new dependency needs a reason; `deny.toml` checks licences and sources, and a new licence is added there only with that reason.
+- No `unsafe`, with one exception (decision 0011, item 4): the `malloc_trim` declaration in `crates/driftmark/src/memory.rs`, which gives memory back to the system on Linux with glibc. The workspace lint `unsafe_code` is `deny`, not `forbid`, so that one block can carry `#[allow(unsafe_code)]`; no other code may. A new dependency needs a reason; `deny.toml` checks licences and sources, and a new licence is added there only with that reason.
 - The licence files live at the root and, as copies, in each crate folder (crates.io packages each crate alone). Keep the copies equal.
 - **Plain, simple words** in all docs and notes: one idea per sentence, everyday words, the answer first.
 - **Docs layout.** A decision record has YAML frontmatter with `status` and `date`, a `#` title, a `>` short version, then `##` sections.

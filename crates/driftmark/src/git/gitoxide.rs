@@ -35,6 +35,8 @@ static NEVER_INTERRUPT: AtomicBool = AtomicBool::new(false);
 ///
 /// A gix repo handle is not shared between threads, so this keeps a few
 /// spare handles and lends one to each call. Many threads can read at once.
+/// A spare handle keeps its caches, up to 20 MB, so after work on many
+/// threads the caller drops the spare ones with [`GixReader::drop_spare`].
 pub struct GixReader {
     repo: gix::ThreadSafeRepository,
     spare: Mutex<Vec<gix::Repository>>,
@@ -59,6 +61,28 @@ impl GixReader {
     #[must_use]
     pub fn workdir(&self) -> Option<&Path> {
         self.repo.work_dir()
+    }
+
+    /// How many handles wait for reuse: about one for each thread that read
+    /// while others did, since the last [`GixReader::drop_spare`].
+    #[must_use]
+    pub fn spare(&self) -> usize {
+        self.spare
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
+    /// Drops the handles that wait for reuse, with their caches. A handle
+    /// lent out now is kept; the next read makes a new one. Work on every
+    /// core leaves one handle per thread, holding up to 20 MB each, which a
+    /// long-running server would keep for nothing (decision 0011).
+    pub fn drop_spare(&self) {
+        let dropped =
+            std::mem::take(&mut *self.spare.lock().unwrap_or_else(PoisonError::into_inner));
+        // The caches are freed here, after the lock is let go, so a read on
+        // another thread does not wait for them.
+        drop(dropped);
     }
 
     /// Runs `f` with a repo handle of this thread's own.

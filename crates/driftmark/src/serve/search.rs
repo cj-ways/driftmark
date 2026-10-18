@@ -224,6 +224,7 @@ impl WorktreeIndex {
             return Ok(layers);
         }
         let layers = Arc::new(self.build_all()?);
+        crate::memory::give_back(&self.repo.git);
         self.set(Some(Arc::clone(&layers)));
         Ok(layers)
     }
@@ -255,6 +256,7 @@ impl WorktreeIndex {
         } else {
             self.build_changes(&current, changed)
         };
+        crate::memory::give_back(&self.repo.git);
         // On a failure the next search builds again and reports why.
         self.set(rebuilt.ok().map(Arc::new));
     }
@@ -465,7 +467,10 @@ pub(crate) fn commit_layer(
                 read: Read::Blob(file.id),
             })
             .collect();
-        let layer = program::build(&repo.git, &files, &rules.rules, repo.threads)?;
+        let layer = program::build(&repo.git, &files, &rules.rules, repo.threads);
+        drop(files);
+        crate::memory::give_back(&repo.git);
+        let layer = layer?;
         let bytes = layer.bytes();
         Ok::<_, Problem>(Sized {
             value: layer,

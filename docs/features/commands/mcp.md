@@ -22,6 +22,8 @@ driftmark mcp install [--write]
 
 An agent starts the connector itself; a person runs only `driftmark mcp install`. The connector reads requests on standard input and writes answers on standard output, one JSON-RPC message per line. It writes nothing else there. When the agent closes standard input, the connector stops with exit code 0.
 
+Between calls the connector keeps parsed documents and counted ranges in a cache of 32 MB. It gives memory back as `driftmark serve` does (`docs/features/commands/serve.md`, "Memory"; decision 0011). It happens after each range count and each search index build, and once no call ran for one second. The connector drops its spare git readers, and on Linux with glibc it hands freed memory back to the system.
+
 | Exit code | When |
 |---|---|
 | 0 | The agent ended the session, or `install` did its work. |
