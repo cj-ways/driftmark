@@ -98,7 +98,10 @@ mermaid.js wraps long relationship labels to about 200 pixels. merman keeps them
 
 - The largest private block (2,592 lines, 164 tables, 97 relationships) exceeds merman's default layout budget (14.2 million work units against a ceiling of 14.1 million). The "trusted" profile's ceiling of 15.0 million is also too low.
 - With no limits and the built-in guess, merman draws it in 86 ms (6.1 MB of SVG).
-- With no limits and real fonts, merman stops with an internal error: "ER entity measured size mismatch". A made-up diagram of the same size reproduces it (`spikes/mermaid/make_big_er.py`, seeds 0 to 2 fail, 3 to 5 pass). Diagrams of 150 small tables pass, so it is not a plain table-count limit. This is a merman bug to report.
+- With no limits and real fonts, merman stops with an error that reads "ER entity measured size mismatch". The real cause is the real-font measurement budget: one render may make at most 4,096 text measurements (`NativeFontLimits::max_measurements`), and the resource profiles, even the unbounded one, do not change it.
+  - When the budget runs out, merman sometimes reports the honest "resource limit `native_font_measurements` exceeded" error, and usually the misleading size-mismatch one. That misleading message is the bug to report.
+  - A made-up diagram of 340 tables with 2 columns each (17,360 characters) is enough; 339 tables render. Raising `max_measurements` to 8,192 makes it render. `spikes/mermaid/make_big_er.py` reproduces it too (smallest: 539 tables, 2 columns, seed 0).
+  - driftmark should raise `max_measurements` for local files, or send such blocks to the browser fallback.
 - mermaid.js refuses this block by default too: it is above the 50,000-character limit. With the limit raised, mermaid.js draws it in 3.2 seconds.
 
 ### 4. Smaller defects, all outside the private corpus
@@ -205,19 +208,22 @@ Without real-font measurement, the server default is wrong for this corpus: 193 
 ## For the M2 brief
 
 - Load the fonts once, then call `for_operation()` per render.
-- Raise merman's layout budget for trusted local files, or send over-budget blocks to the browser fallback.
+- Raise merman's layout budget and its font measurement budget (`max_measurements`) for trusted local files, or send over-budget blocks to the browser fallback.
 - Give every SVG a unique `diagram_id`; one page holds many diagrams.
 - Do not set `theme: 'default'` unless the older look is wanted; Mermaid 12's defaults differ per diagram type.
 - When the page follows light and dark mode, render both themes or render on demand.
 - Load mermaid.js only on pages that have a fallback block.
 - Report upstream: unwrapped ER relationship labels, the size-mismatch error on large ER diagrams, the dropped bold word in use-case labels, the missing root font in tree-view, the packet dark theme, the lifetime measurement budget, and font loading from bytes.
 
+## Reported upstream
+
+The large ER failure was reported as [merman issue 207](https://github.com/Latias94/merman/issues/207) on 2026-10-18, with a made-up 340-table diagram.
+
 ## Not finished
 
 - **Most types got 1 or 2 graded pictures.** Only the 4 private types and the 8 named types got 3 or more. The automatic counts cover every block.
 - **Fonts other than Arial's widths were not tested.** Liberation Sans matches Arial, which Macs, Windows and iPhones have. An Android phone, or a font driftmark ships as a web font, was not tried.
 - **merman's other SVG modes were not tried:** `htmlLabels: false` (labels as SVG text) and the "resvg-safe" pipeline. Either might avoid clipped HTML labels without real fonts.
-- **The size-mismatch bug was not narrowed down further** than "164 tables and 97 relationships fail, 150 small tables pass".
 - **No issue was filed upstream.** That happens outside this repo and needs the maintainer's OK.
 - **What fills the 23 MB was not broken down** (for example with `cargo bloat`).
 - **The safety of merman's SVG output was not reviewed.** Labels can carry HTML. merman's guide says the host must clean the SVG before putting it in a page. M2 must decide how.
@@ -233,6 +239,6 @@ The spike's code is in `spikes/mermaid/`. It is its own Cargo package, outside t
 4. In `js/`, `npm ci`, then `node render-mermaidjs.mjs ...` renders the reference and `node to-png.mjs ...` makes PNGs and counts clipped labels.
 5. `python3 -I compare.py score <out-dir>` scores; `side` builds side-by-side pictures.
 6. `size-probe/` measures binary size per feature set and is the crate cargo-deny checks.
-7. `python3 -I make_big_er.py <dir>` writes the made-up large ER diagrams.
+7. `python3 -I make_big_er.py <dir>` writes the made-up large ER diagrams; `make_big_er.py <dir> <tables> <max-columns> <relationships> <seed>` writes one of a chosen size.
 
 Raw outputs, including everything from the private corpus, stay in `private/spikes/mermaid/`, which git ignores.
