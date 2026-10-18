@@ -289,20 +289,40 @@ impl GitRead for CommandReader {
     }
 
     fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError> {
-        let mut command = self.git();
-        command.args(["ls-tree", "-z", "--full-tree", commit.as_hex(), "--"]);
-        command.arg(path_arg(path)?);
-        let listing = run_ok(&mut command)?;
-        // "<mode> <type> <id>\t<path>": the entry itself, even when it is a
-        // folder; nothing when no entry has that path.
-        for record in records(&listing) {
-            let (meta, found) = split_tab(record)?;
+        // One `ls-tree` per folder on the way, matching names as bytes. The
+        // path never goes on the command line: Windows cannot pass a name
+        // that is not UTF-8 as an argument, and git allows such names.
+        let mut tree = commit.as_hex().to_owned();
+        let mut parts = path.as_bytes().split(|&b| b == b'/').peekable();
+        while let Some(part) = parts.next() {
+            let mut command = self.git();
+            command.args(["ls-tree", "-z", "--full-tree", &tree]);
+            let listing = run_ok(&mut command)?;
+            // "<mode> <type> <id>\t<name>", one entry of this folder each.
+            let mut entry = None;
+            for record in records(&listing) {
+                let (meta, name) = split_tab(record)?;
+                if name == part {
+                    entry = Some((meta, record));
+                    break;
+                }
+            }
+            let Some((meta, record)) = entry else {
+                return Ok(None);
+            };
             let fields: Vec<&[u8]> = meta.split(|&b| b == b' ').collect();
-            let [mode, _kind, id] = fields.as_slice() else {
+            let [mode, kind, id] = fields.as_slice() else {
                 return Err(odd_output("ls-tree", record));
             };
-            if found == path.as_bytes() && is_regular_file(mode) {
-                return parse_id(&String::from_utf8_lossy(id)).map(Some);
+            let id = String::from_utf8_lossy(id);
+            if parts.peek().is_some() {
+                // A file, a link or a submodule on the way means no such path.
+                if *kind != b"tree" {
+                    return Ok(None);
+                }
+                tree = id.into_owned();
+            } else if is_regular_file(mode) {
+                return parse_id(&id).map(Some);
             }
         }
         Ok(None)
