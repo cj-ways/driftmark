@@ -16,6 +16,18 @@ path = "src/main.rs"
 
 [dependencies]
 driftmark-core = { path = "../driftmark-core", version = "0.0.0" }
+# Reads git without starting processes (decision 0008, item 1). Pinned: each
+# 0.x release may break the API. Default features are off because they pull in
+# a pack cache under MPL-2.0; `pack-cache-lru-dynamic` caps the cache by bytes
+# instead. `dirwalk` finds untracked files for the working-tree side.
+gix = { version = "=0.89.0", default-features = false, features = [
+  "sha1",
+  "parallel",
+  "pack-cache-lru-dynamic",
+  "revision",
+  "index",
+  "dirwalk",
+] }
 
 [lints]
 workspace = true
