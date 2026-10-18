@@ -5,8 +5,11 @@
 // It makes a small git repo with a made-up document, starts
 // `driftmark serve` on 127.0.0.1 with a free port, and in headless Chromium:
 //
-//   1. selects a sentence on the reading page, presses "Add a note", fills
-//      in the form and saves;
+//   0. without the token, selects a sentence, fills in a note and saves:
+//      the form says how to get the token instead of failing; after the
+//      printed link is opened in another tab, the same save goes through,
+//      and the note's history says it came from the page;
+//   1. finds the new note in place;
 //   2. reloads, and finds the note in place: its card under the sentence's
 //      block, and a highlight that covers exactly the selected words;
 //   3. edits the document on disk (a new paragraph above), reloads, and
@@ -16,10 +19,17 @@
 //   5. on the change page of a branch: selects words in a card, notes them,
 //      marks the card seen, reloads, and finds both kept;
 //   6. an agent in a linked worktree answers that note through
-//      `driftmark mcp`, the reader decides it on the page, the agent commits
-//      the change and records the commit; the card then says "Changed
-//      because of note n2", its link leads to the note, and the note lists
-//      the change.
+//      `driftmark mcp`, recorded as the connector's; the reader decides it
+//      on the page; the agent commits the change and records the commit;
+//      the card then says "Changed because of note n2", its link leads to
+//      the note, and the note lists the change;
+//   7. a page whose marker the server no longer knows still saves as the
+//      page: it gets a fresh marker and sends again;
+//   8. a reply sent with the token from a script, not the page, shows on
+//      the note's card as a warning that has no button to dismiss it.
+//
+// axe-core checks the "get the token" message and a card with a warning,
+// in light and dark, at desktop and phone width: 0 problems each.
 //
 // Screenshots of each step go to <out-dir> when given. CHROMIUM names the
 // browser binary; the default is the cached headless shell that Playwright
@@ -30,6 +40,7 @@ import readline from 'node:readline';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 const [program, outDir] = process.argv.slice(2);
 if (!program) {
@@ -80,16 +91,22 @@ fs.writeFileSync(file, DOC.replace('Run the full test suite', 'Run the full test
 git('commit', '-q', '-am', 'feature');
 git('checkout', '-q', 'main');
 
-const server = spawn(program, ['serve', '--repo', repo, '--addr', '127.0.0.1:0'], { stdio: ['ignore', 'pipe', 'inherit'] });
-const base = await new Promise((resolve, reject) => {
+const environment = { ...process.env };
+delete environment.DRIFTMARK_TOKEN;
+const server = spawn(program, ['serve', '--repo', repo, '--addr', '127.0.0.1:0'], { stdio: ['ignore', 'pipe', 'inherit'], env: environment });
+const [base, token] = await new Promise((resolve, reject) => {
   let seen = '';
   server.stdout.on('data', (chunk) => {
     seen += chunk;
-    const found = /open (http:\/\/127\.0\.0\.1:\d+)\//.exec(seen);
-    if (found) resolve(found[1]);
+    const found = /open (http:\/\/127\.0\.0\.1:\d+)\/\?token=([0-9a-f]+)/.exec(seen);
+    if (found) resolve([found[1], found[2]]);
   });
   server.on('exit', () => reject(new Error(`the server stopped: ${seen}`)));
 });
+const cookie = `driftmark-${new URL(base).port}=${token}`;
+
+// axe-core, read from the test's own packages, for WCAG 2.1 A and AA.
+const axeSource = fs.readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -98,10 +115,14 @@ const check = (name, ok, detail = '') => {
 };
 
 const browser = await chromium.launch({ executablePath: exe });
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
-page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+// The browser logs the refusals this test asks for (401 without the token,
+// 412 for an old marker) as failed loads; those are expected.
+const expected = /^Failed to load resource: the server responded with a status of (401|412)\b/;
+page.on('console', (message) => { if (message.type() === 'error' && !expected.test(message.text())) errors.push(message.text()); });
 const shot = async (name) => {
   if (outDir) {
     fs.mkdirSync(outDir, { recursive: true });
@@ -132,13 +153,13 @@ const select = async (scope, text) => {
   await page.locator('.dm-float').waitFor({ state: 'visible' });
 };
 
-const saveNote = async (body, stance) => {
+const saveNote = async (body, stance, { closes = true } = {}) => {
   await page.locator('.dm-float').click();
   await page.locator('dialog.dm-dialog').waitFor({ state: 'visible' });
   await page.locator(`dialog input[name=stance][value=${stance}]`).check();
   await page.locator('dialog textarea').fill(body);
   await page.locator('dialog button[type=submit]').click();
-  await page.locator('dialog.dm-dialog').waitFor({ state: 'hidden' });
+  if (closes) await page.locator('dialog.dm-dialog').waitFor({ state: 'hidden' });
 };
 
 // The note cards and the highlighted text on the page.
@@ -158,17 +179,63 @@ const shown = () => page.evaluate(() => {
   return { cards, highlighted, orphans };
 });
 
+// Runs axe on the page as it is now, in light and dark, at desktop and
+// phone width, and checks each finds nothing.
+const accessible = async (what) => {
+  for (const theme of ['light', 'dark']) {
+    for (const [width, height] of [[1280, 900], [390, 844]]) {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.setViewportSize({ width, height });
+      const found = await page.evaluate(async (source) => {
+        if (!window.axe) (0, eval)(source);
+        const result = await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } });
+        return {
+          problems: result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`),
+          passed: result.passes.length,
+        };
+      }, axeSource);
+      // `passed` proves axe ran its rules on the page.
+      check(`axe finds no problem: ${what}, ${theme}, ${width} px`, found.problems.length === 0 && found.passed > 10,
+        `${found.passed} rules passed; ${found.problems.join(' | ')}`);
+      await shot(`axe-${what.replace(/\W+/g, '-')}-${theme}-${width}`);
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+};
+
+// A note as the server holds it, read with the page's own cookie.
+const noteJson = (id) => page.evaluate(async (id) => (await (await fetch(`/api/notes/${id}`)).json()).note, id);
+const sources = (note) => note.history.map((event) => `${event.action} ${event.role} ${event.source}`);
+
 const reading = `${base}/doc/worktree/-/docs/release.md`;
 try {
-  // 1. A note made by selecting text.
+  // 0. Without the token, the form says how to get it; with it, the same
+  //    save goes through and counts as the page.
   await page.goto(reading);
   await page.waitForFunction(() => window.driftmarkNotes);
   await select('.doc-body', SENTENCE);
-  await saveNote('Two days is too short for the mobile team.', 'disagree');
+  await saveNote('Two days is too short for the mobile team.', 'disagree', { closes: false });
+  await page.locator('dialog .dm-token').waitFor();
+  const told = await page.locator('dialog .dm-token').textContent();
+  check('without the token the form says how to get it', told.includes('?token=') && told.includes('does not have the reader\'s token'), told);
+  check('the note is kept in the form', (await page.locator('dialog textarea').inputValue()).startsWith('Two days'));
+  await shot('0-token-needed');
+  await accessible('the get-the-token message');
+  const other = await context.newPage();
+  await other.goto(`${base}/?token=${token}`);
+  await other.close();
+  await page.locator('dialog button[type=submit]').click();
+  await page.locator('dialog.dm-dialog').waitFor({ state: 'hidden' });
+
+  // 1. The note is in place, from the page.
   await page.locator('.dm-note').first().waitFor();
   await shot('1-made');
   let now = await shown();
   check('the new note shows in place', now.cards.length === 1 && now.cards[0].state === 'exact', JSON.stringify(now.cards));
+  const first = await noteJson(1);
+  check('a note saved on the page is recorded as the page', sources(first).join() === 'made reader page' && !first.history[0].warning, JSON.stringify(first.history));
+  check('a note from the page shows no warning', (await page.locator('.dm-note .dm-warn').count()) === 0);
 
   // 2. After a reload it is still there, highlighted exactly.
   await page.reload();
@@ -250,12 +317,17 @@ try {
     const id = open.notes[0].id;
     await tool('note_reply', { note: id, stance: 'agree', body: 'Once is enough; the second run finds nothing new.' });
     await tool('note_propose_decision', { note: id, outcome: 'modify', summary: 'Run the full test suite once on the frozen branch.' });
+    const answered = await noteJson(id);
+    check('the agent\'s actions are recorded as the connector\'s', sources(answered).slice(-2).join() === 'reply agent mcp,propose agent mcp'
+      && answered.history.slice(-2).every((event) => event.user_agent === 'claude-code 1' && !event.warning), JSON.stringify(answered.history));
     // The reader decides on the page; the proposal fills the form in.
     await page.reload();
     await page.locator(`#Note${id}`).waitFor();
     await page.locator(`#Note${id} button`, { hasText: 'Decide' }).click();
     await page.locator(`#Note${id} form.dm-inline button[type=submit]`).click();
     await page.waitForFunction((id) => (document.querySelector(`#Note${id}`) || {}).dataset?.status === 'decided', id);
+    const decided = await noteJson(id);
+    check('the decision on the page is recorded as the page', sources(decided).at(-1) === 'decide reader page' && !decided.history.at(-1).warning, JSON.stringify(decided.history));
     fs.writeFileSync(path.join(agentDir, 'docs/release.md'), DOC.replace('Run the full test suite', 'Run the full test suite once'));
     gitIn(agentDir, 'commit', '-q', '-am', 'apply the note');
     const commit = gitIn(agentDir, 'rev-parse', 'HEAD');
@@ -276,6 +348,40 @@ try {
   } finally {
     agent.kill();
   }
+
+  // 7. A page whose marker is out of date gets a fresh one and still
+  //    counts as the page.
+  await page.goto(reading);
+  await page.locator('#Note1').waitFor();
+  await page.evaluate(() => { document.querySelector('meta[name="driftmark-page"]').content = 'a-marker-the-server-never-gave'; });
+  await page.locator('#Note1 button', { hasText: 'Reply' }).click();
+  await page.locator('#Note1 form.dm-inline textarea').fill('The mobile team agreed to three days.');
+  await page.locator('#Note1 form.dm-inline button[type=submit]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#Note1 .dm-thread li').length === 1);
+  const renewed = await noteJson(1);
+  check('a page with an old marker gets a fresh one and counts as the page', sources(renewed).at(-1) === 'reply reader page', JSON.stringify(renewed.history));
+
+  // 8. The same reader's reply from a script with the token: accepted,
+  //    recorded as the API, and shown on the card as a warning.
+  const scripted = await fetch(`${base}/api/notes/1/reply`, {
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json', 'User-Agent': 'curl/8.5.0' },
+    body: JSON.stringify({ body: 'Sent from a script.' }),
+  });
+  check('a write from a script with the token is accepted', scripted.status === 200, String(scripted.status));
+  const fromScript = (await scripted.json()).note;
+  check('a write from a script is recorded as the API', sources(fromScript).at(-1) === 'reply reader api', JSON.stringify(fromScript.history));
+  await page.reload();
+  await page.locator('#Note1 .dm-warn').waitFor();
+  const warn = await page.evaluate(() => {
+    const box = document.querySelector('#Note1 .dm-warn');
+    return { text: box.textContent, buttons: box.querySelectorAll('button').length, hidden: box.closest('details') !== null };
+  });
+  check('the card warns that the reply came through the API', warn.text.includes('Replied through the API, not on the page') && warn.text.includes('curl/8.5.0'), warn.text);
+  check('the warning cannot be dismissed or folded away', warn.buttons === 0 && !warn.hidden, JSON.stringify(warn));
+  await page.locator('#Note1 .dm-history summary').click();
+  await shot('8-warning');
+  await accessible('a note with a warning');
   check('no script errors', errors.length === 0, errors.join(' | '));
 } catch (error) {
   check('the run finished', false, error.message);

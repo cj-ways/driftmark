@@ -66,8 +66,17 @@ struct Server {
 
 impl Server {
     fn start(repo: &Path, options: &[&str]) -> Server {
+        Server::start_with(repo, options, None)
+    }
+
+    /// Starts the server with `DRIFTMARK_TOKEN` set to `variable`, or unset.
+    fn start_with(repo: &Path, options: &[&str], variable: Option<&str>) -> Server {
         let mut command = Command::new(PROGRAM);
         command.arg("serve").arg("--repo").arg(repo);
+        match variable {
+            Some(value) => command.env("DRIFTMARK_TOKEN", value),
+            None => command.env_remove("DRIFTMARK_TOKEN"),
+        };
         if !options.contains(&"--addr") {
             command.args(["--addr", "127.0.0.1:0"]);
         }
@@ -111,6 +120,15 @@ impl Server {
 
     fn host(&self) -> String {
         format!("localhost:{}", self.addr.port())
+    }
+
+    /// The token cookie, as a browser sends it after the printed link.
+    fn cookie(&self) -> String {
+        format!(
+            "driftmark-{}={}",
+            self.addr.port(),
+            self.token.as_deref().expect("a token")
+        )
     }
 
     /// A GET request with the local host name.
@@ -294,8 +312,15 @@ fn assert_safe(reply: &Reply, what: &str) {
 fn pages_and_json_answer_on_every_route() {
     let repo = branch_repo();
     let server = Server::start(&repo.dir, &[]);
-    assert_eq!(server.token, None, "this machine only needs no token");
+    let token = server.token.as_deref().expect("the link carries the token");
+    assert_eq!(token.len(), 32, "a random token: {token}");
     assert!(server.lines[0].starts_with("driftmark serve: reading "));
+    assert!(
+        server.lines.iter().any(|line| line
+            == "driftmark serve: pages open without the token on this machine; saving notes and seen marks needs it, once per browser\n"),
+        "{:?}",
+        server.lines
+    );
 
     // The home page: the one branch with document changes.
     let home = server.get("/");
@@ -723,26 +748,36 @@ fn every_answer_carries_the_safety_headers() {
         .to_owned();
     assert_safe(&server.get(&address), "the script");
 
-    // Requests with a body: JSON from this server's own pages only.
+    // Requests with a body: with the token, and JSON from this server's
+    // own pages only.
     let json = ("Content-Type", "application/json");
+    let cookie = server.cookie();
+    let with = ("Cookie", cookie.as_str());
+    let tokenless = server.send("POST", "/api/home", &[json]);
+    assert_eq!(tokenless.status, 401);
+    assert_safe(&tokenless, "a post without the token");
     let foreign = server.send(
         "POST",
         "/api/home",
-        &[json, ("Origin", "http://evil.example")],
+        &[json, with, ("Origin", "http://evil.example")],
     );
     assert_eq!(foreign.status, 403);
     assert_safe(&foreign, "a foreign post");
     let site = server.send(
         "POST",
         "/api/home",
-        &[json, ("Sec-Fetch-Site", "cross-site")],
+        &[json, with, ("Sec-Fetch-Site", "cross-site")],
     );
     assert_eq!(site.status, 403);
-    let form = server.send("POST", "/api/home", &[("Content-Type", "text/plain")]);
+    let form = server.send("POST", "/api/home", &[with, ("Content-Type", "text/plain")]);
     assert_eq!(form.status, 415);
     let host = server.host();
     let origin = format!("http://{host}");
-    let own = server.send("POST", "/api/home", &[json, ("Origin", origin.as_str())]);
+    let own = server.send(
+        "POST",
+        "/api/home",
+        &[json, with, ("Origin", origin.as_str())],
+    );
     assert_eq!(
         own.status, 405,
         "allowed through to a route that takes no body yet"
@@ -825,6 +860,140 @@ fn the_token_is_asked_once_and_kept_in_a_cookie() {
         401,
         "a given token holds on this machine too"
     );
+    assert!(
+        asked
+            .lines
+            .iter()
+            .any(|line| line.ends_with("because it came from --token\n")),
+        "{:?}",
+        asked.lines
+    );
+}
+
+#[test]
+fn a_write_on_this_machine_needs_the_token_and_says_how_to_get_it() {
+    let repo = branch_repo();
+    let server = Server::start(&repo.dir, &[]);
+    let json = ("Content-Type", "application/json");
+    let port = server.addr.port();
+    for (method, path) in [
+        ("POST", "/api/notes"),
+        ("PATCH", "/api/notes/1"),
+        ("POST", "/api/notes/1/decide"),
+        ("POST", "/api/notes/1/reply"),
+        ("POST", "/api/notes/1/withdraw"),
+        ("POST", "/api/notes/1/applied"),
+        ("POST", "/api/reviews/1/prompt"),
+        ("POST", "/api/reviews/1/file"),
+        ("POST", "/api/seen"),
+    ] {
+        let refused = server.send(method, path, &[json]);
+        assert_eq!(refused.status, 401, "{method} {path}");
+        assert_eq!(refused.header("content-type"), Some("application/json"));
+        let answer: Value = serde_json::from_slice(&refused.body).expect("JSON");
+        let error = answer["error"].as_str().unwrap();
+        assert!(
+            error.starts_with("Saving notes and seen marks needs the reader's token.")
+                && error.contains("ends in ?token=")
+                && error.ends_with(&format!("in the cookie driftmark-{port}.")),
+            "{method} {path}: {error}"
+        );
+        let stale = format!("driftmark-{port}=0123456789abcdef0123456789abcdef");
+        let refused = server.send(method, path, &[json, ("Cookie", &stale)]);
+        assert_eq!(refused.status, 401, "{method} {path}");
+        assert!(refused.text().contains("not this server's token"));
+    }
+    // Reads stay open, and the printed link sets the cookie here too.
+    assert_eq!(server.get("/api/home").status, 200);
+    let token = server.token.clone().unwrap();
+    let link = server.get(&format!("/?token={token}"));
+    assert_eq!(link.status, 303);
+    assert!(
+        link.header("set-cookie")
+            .unwrap()
+            .starts_with(&server.cookie())
+    );
+}
+
+#[test]
+fn the_token_comes_from_one_source_in_order() {
+    let repo = branch_repo();
+    let folder = support::TempDir::new("serve-token-file");
+    let file = folder.path().join("token");
+    std::fs::write(&file, "from-the-file-0123456\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let path = file.to_str().unwrap();
+    let from_file = Server::start_with(
+        &repo.dir,
+        &["--token-file", path],
+        Some("from-the-variable-0123"),
+    );
+    assert_eq!(from_file.token.as_deref(), Some("from-the-file-0123456"));
+    assert!(
+        from_file
+            .lines
+            .iter()
+            .any(|line| line.ends_with("because it came from --token-file\n"))
+    );
+    let from_variable = Server::start_with(&repo.dir, &[], Some("from-the-variable-0123"));
+    assert_eq!(
+        from_variable.token.as_deref(),
+        Some("from-the-variable-0123")
+    );
+    let from_option = Server::start_with(
+        &repo.dir,
+        &["--token", "from-the-option-01234", "--token-file", path],
+        Some("from-the-variable-0123"),
+    );
+    assert_eq!(from_option.token.as_deref(), Some("from-the-option-01234"));
+    let bad = Command::new(PROGRAM)
+        .args(["serve", "--repo", repo.dir.to_str().unwrap()])
+        .env("DRIFTMARK_TOKEN", "short")
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&bad.stderr)
+            .starts_with("driftmark serve: the token in DRIFTMARK_TOKEN needs at least 16"),
+        "{}",
+        String::from_utf8_lossy(&bad.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_token_file_others_can_read_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = branch_repo();
+    let folder = support::TempDir::new("serve-loose-token");
+    let file = folder.path().join("token");
+    std::fs::write(&file, "loose-token-0123456789").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let refused = Command::new(PROGRAM)
+        .args(["serve", "--repo", repo.dir.to_str().unwrap()])
+        .args([
+            "--addr",
+            "127.0.0.1:0",
+            "--token-file",
+            file.to_str().unwrap(),
+        ])
+        .env_remove("DRIFTMARK_TOKEN")
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert_eq!(
+        said,
+        format!(
+            "driftmark serve: other users can read or change `{0}` (its mode is 644); make it private with `chmod 600 {0}`\n",
+            file.display()
+        )
+    );
+    assert!(refused.stdout.is_empty(), "nothing started");
 }
 
 #[test]

@@ -13,13 +13,14 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use driftmark_core::diff::{ChangeList, DocumentChanges, Summary, SummaryList};
 use driftmark_core::git::{ObjectId, RepoPath, ResolvedRange, Snapshot};
+use driftmark_core::notes::Source;
 use driftmark_core::render::{LinkKind, LinkResolver, Resolved, Section, Setup};
 use serde::Serialize;
 use tokio::sync::{broadcast, watch};
@@ -30,6 +31,7 @@ use super::assets::Assets;
 use super::cache::{Key, Sized, Stats};
 use super::compare::Skipped;
 use super::guard::{self, Access, Verdict};
+use super::marker::{self, Markers};
 use super::notes;
 use super::page::{self, Frame, Live, Tab, WorktreeLine};
 use super::placing::NotesFile;
@@ -37,6 +39,7 @@ use super::repo::{DocumentAt, Located, Problem, Repo};
 use super::search::{self, Params, WorktreeIndex, WorktreeStatus};
 use super::watch::{Message, Watch};
 use crate::diagram::Drawer;
+use crate::notes::Via;
 
 /// The version of the server's own JSON: the home page, a document and the
 /// status. The change lists keep the change list's `schema_version`.
@@ -56,6 +59,9 @@ pub(crate) struct App {
     pub search: Option<Arc<WorktreeIndex>>,
     /// Who may ask.
     pub access: Access,
+    /// The markers handed out with pages, which tell a write from the page
+    /// apart from other writes.
+    pub markers: Markers,
     /// The page script, the style sheet and the other built-in files.
     pub assets: Assets,
     /// Who draws diagrams on reading pages.
@@ -89,6 +95,7 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route("/static/{hash}/{name}", get(asset))
         .fallback(not_found)
         .layer(CompressionLayer::new())
+        .layer(middleware::from_fn_with_state(Arc::clone(&app), caller))
         .layer(middleware::from_fn(body_guard))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&app),
@@ -121,7 +128,14 @@ async fn access_guard(State(app): Shared, request: Request, next: Next) -> Respo
             ],
         )
             .into_response(),
-        Verdict::NeedToken { wrong } => html(
+        Verdict::NeedToken { wrong, write: true } => json_problem(
+            StatusCode::UNAUTHORIZED,
+            &guard::token_to_write(wrong, app.access.cookie_name()),
+        ),
+        Verdict::NeedToken {
+            wrong,
+            write: false,
+        } => html(
             StatusCode::UNAUTHORIZED,
             page::bare("Token needed", &page::token_needed(wrong)),
         ),
@@ -143,6 +157,36 @@ async fn body_guard(request: Request, next: Next) -> Response {
         Ok(()) => next.run(request).await,
         Err((status, message)) => json_problem(status, &message),
     }
+}
+
+/// Records where a write came from (decision 0012), for the route to keep
+/// with the action. A write that asks to count as the page, and does not,
+/// is refused with `412`, so the page can load a fresh marker and try again
+/// rather than be recorded as the API.
+async fn caller(State(app): Shared, mut request: Request, next: Next) -> Response {
+    if matches!(*request.method(), Method::GET | Method::HEAD) {
+        return next.run(request).await;
+    }
+    let headers = request.headers();
+    let source = app.markers.source(headers);
+    if source != Source::Page && headers.contains_key(marker::ONLY_HEADER) {
+        return json_problem(
+            StatusCode::PRECONDITION_FAILED,
+            "this page's marker is out of date: the page was opened too long ago, or before the server started again; load the page again, then try again",
+        );
+    }
+    let agent = headers
+        .get(header::USER_AGENT)
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
+    let via = Via::new(source, agent.as_deref());
+    request.extensions_mut().insert(via);
+    next.run(request).await
+}
+
+/// A whole page around `content`, with a new marker for its writes.
+fn full_page(app: &App, frame: &Frame<'_>, content: &str) -> String {
+    let marker = app.markers.issue(super::random_token);
+    page::page(&app.assets, frame, content, marker.as_deref())
 }
 
 /// Runs git work on a blocking thread.
@@ -219,8 +263,8 @@ fn problem_page(app: &App, problem: &Problem) -> Response {
     };
     html(
         status_of(problem),
-        page::page(
-            &app.assets,
+        full_page(
+            app,
             &Frame::plain(title, app.watch.is_some()),
             &page::problem(problem.missing, &problem.message),
         ),
@@ -293,7 +337,7 @@ async fn home_page(State(app): Shared) -> Response {
                 worktree: app.watch.is_some(),
                 revision: None,
             };
-            html(StatusCode::OK, page::page(&app.assets, &frame, &body))
+            html(StatusCode::OK, full_page(&app, &frame, &body))
         }
         Err(problem) => problem_page(&app, &problem),
     }
@@ -710,7 +754,7 @@ async fn document_page(State(app): Shared, uri: Uri) -> Response {
                 worktree: app.watch.is_some(),
                 revision: Some(revision.label()),
             };
-            html(StatusCode::OK, page::page(&app.assets, &frame, &content))
+            html(StatusCode::OK, full_page(&app, &frame, &content))
         }
         Err(problem) => problem_page(&app, &problem),
     }
@@ -983,7 +1027,7 @@ async fn changes_page(State(app): Shared, uri: Uri) -> Response {
         worktree: app.watch.is_some(),
         revision: None,
     };
-    html(StatusCode::OK, page::page(&app.assets, &frame, &content))
+    html(StatusCode::OK, full_page(&app, &frame, &content))
 }
 
 /// The reader's seen marks for the changes a page shows, and how many notes

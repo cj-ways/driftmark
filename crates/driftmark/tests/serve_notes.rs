@@ -1,7 +1,8 @@
 //! The notes routes of `driftmark serve`, run as the real program on a free
 //! port against small repos built for each test: making, listing, placing,
 //! changing and handing over notes, the seen marks, the same-origin rule,
-//! and the notes file's place in the clone's shared git folder.
+//! the source of every action (the page, or the API), and the notes file's
+//! place in the clone's shared git folder.
 
 mod support;
 
@@ -39,7 +40,14 @@ fn repo() -> TestRepo {
 struct Server {
     child: Child,
     addr: SocketAddr,
+    /// The token the start message printed.
+    token: String,
+    /// The marker of a page this server sent, as the page script keeps it.
+    marker: String,
 }
+
+/// The browser `driftmark serve`'s own page runs in, as its headers name it.
+const BROWSER: &str = "Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/141.0";
 
 impl Server {
     fn start(repo: &Path, options: &[&str]) -> Server {
@@ -49,12 +57,13 @@ impl Server {
             .arg(repo)
             .args(["--addr", "127.0.0.1:0"])
             .args(options)
+            .env_remove("DRIFTMARK_TOKEN")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .expect("start driftmark serve");
         let mut reader = BufReader::new(child.stdout.take().expect("standard output"));
-        let mut port = None;
+        let mut open = None;
         loop {
             let mut line = String::new();
             assert!(
@@ -62,7 +71,7 @@ impl Server {
                 "stopped early"
             );
             if let Some(rest) = line.strip_prefix("driftmark serve: open http://127.0.0.1:") {
-                port = Some(rest.trim_end().trim_end_matches('/').to_owned());
+                open = Some(rest.trim_end().to_owned());
             }
             if line.contains("press Ctrl-C") {
                 break;
@@ -71,32 +80,68 @@ impl Server {
         std::thread::spawn(move || {
             let _ = std::io::copy(&mut reader, &mut std::io::sink());
         });
-        Server {
+        let open = open.expect("an address");
+        let (port, token) = open.split_once("/?token=").expect("the token link");
+        let mut server = Server {
             child,
-            addr: format!("127.0.0.1:{}", port.expect("a port"))
-                .parse()
-                .expect("an address"),
-        }
+            addr: format!("127.0.0.1:{port}").parse().expect("an address"),
+            token: token.to_owned(),
+            marker: String::new(),
+        };
+        server.marker = marker_of(&server.page("/"));
+        server
     }
 
     fn host(&self) -> String {
         format!("localhost:{}", self.addr.port())
     }
 
-    /// A request, as this server's own page would send it.
+    fn cookie(&self) -> String {
+        format!("driftmark-{}={}", self.addr.port(), self.token)
+    }
+
+    /// A request, as this server's own page sends it: the token cookie, the
+    /// page's origin and its marker.
     fn send(&self, method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
+        let origin = format!("http://{}", self.host());
+        let mut headers = vec![("Cookie", self.cookie())];
+        if body.is_some() {
+            headers.push(("Origin", origin));
+            headers.push(("Sec-Fetch-Site", "same-origin".to_owned()));
+            headers.push(("Driftmark-Page", self.marker.clone()));
+            headers.push(("User-Agent", BROWSER.to_owned()));
+        }
+        self.raw(method, path, body, &headers)
+    }
+
+    /// A request with any headers beside the host, and a JSON body.
+    fn raw(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        extra: &[(&str, String)],
+    ) -> (u16, Value) {
         let host = self.host();
-        let origin = format!("http://{host}");
         let text = body.map(Value::to_string).unwrap_or_default();
         let mut headers = vec![("Host", host.as_str())];
         if body.is_some() {
             headers.push(("Content-Type", "application/json"));
-            headers.push(("Origin", origin.as_str()));
-            headers.push(("Sec-Fetch-Site", "same-origin"));
         }
+        headers.extend(extra.iter().map(|(name, value)| (*name, value.as_str())));
         let (status, raw) = request(self.addr, method, path, &headers, text.as_bytes());
         let value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
         (status, value)
+    }
+
+    /// A request as a tool such as `curl` sends it with the token: the
+    /// cookie, and nothing a browser adds.
+    fn api(&self, method: &str, path: &str, body: &Value) -> (u16, Value) {
+        let headers = [
+            ("Cookie", self.cookie()),
+            ("User-Agent", "curl/8.5.0".to_owned()),
+        ];
+        self.raw(method, path, Some(body), &headers)
     }
 
     fn get(&self, path: &str) -> Value {
@@ -203,6 +248,38 @@ fn note_on(server: &Server, revision: &str, quote: &str, body: &str) -> Value {
 
 fn notes_file(repo: &TestRepo) -> PathBuf {
     repo.dir.join(".git").join("driftmark").join("notes.db")
+}
+
+/// The marker in a page's `<meta name="driftmark-page">`.
+fn marker_of(page: &str) -> String {
+    page.split("<meta name=\"driftmark-page\" content=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("a page marker")
+        .to_owned()
+}
+
+/// Each entry of a note's history as `action role source`, with its
+/// warning when it has one.
+fn history(note: &Value) -> Vec<String> {
+    note["history"]
+        .as_array()
+        .expect("a history")
+        .iter()
+        .map(|event| {
+            let mut line = format!(
+                "{} {} {}",
+                event["action"].as_str().expect("an action"),
+                event["role"].as_str().expect("a role"),
+                event["source"].as_str().expect("a source")
+            );
+            if let Some(warning) = event["warning"].as_str() {
+                line.push_str(": ");
+                line.push_str(warning);
+            }
+            line
+        })
+        .collect()
 }
 
 #[test]
@@ -614,12 +691,14 @@ fn strangers_unknown_names_and_bad_actions_are_refused() {
     // A page from elsewhere, or a body that is not JSON, never reaches the
     // routes.
     let host = server.host();
+    let cookie = server.cookie();
     let (status, _) = request(
         server.addr,
         "POST",
         "/api/notes",
         &[
             ("Host", &host),
+            ("Cookie", &cookie),
             ("Content-Type", "application/json"),
             ("Origin", "http://evil.example"),
         ],
@@ -630,10 +709,23 @@ fn strangers_unknown_names_and_bad_actions_are_refused() {
         server.addr,
         "POST",
         "/api/notes",
-        &[("Host", &host)],
+        &[("Host", &host), ("Cookie", &cookie)],
         body.as_bytes(),
     );
     assert_eq!(status, 415);
+    let (status, answer) = request(
+        server.addr,
+        "POST",
+        "/api/notes",
+        &[("Host", &host), ("Content-Type", "application/json")],
+        body.as_bytes(),
+    );
+    assert_eq!(
+        status,
+        401,
+        "no token: {}",
+        String::from_utf8_lossy(&answer)
+    );
     // Unknown notes, reviews and actions.
     for (method, path, body, status) in [
         ("GET", "/api/notes/7", None, 404),
@@ -712,6 +804,132 @@ fn position_tables_and_scripts_are_served() {
     }
     let (status, _) = server.send("GET", "/api/positions/main/-/docs/none.md", None);
     assert_eq!(status, 404);
+}
+
+#[test]
+fn every_action_records_whether_it_came_from_the_page() {
+    let repo = repo();
+    let server = Server::start(&repo.dir, &["--reader", "Ana"]);
+    // From the page: no warning.
+    let made = note_on(&server, "main", "Keep each page for one hour", "Too long.");
+    assert_eq!(history(&made), ["made reader page"]);
+    assert_eq!(made["history"][0]["user_agent"], BROWSER);
+    assert_eq!(made["history"][0]["by"], "Ana");
+    let id = made["id"].as_u64().unwrap();
+    // The same reader's write from a tool with the token is accepted, and
+    // shows as the API with a warning.
+    let (status, decided) = server.api(
+        "POST",
+        &format!("/api/notes/{id}/decide"),
+        &json!({"outcome": "keep", "summary": "Keep the hour."}),
+    );
+    assert_eq!(status, 200, "{decided}");
+    assert_eq!(
+        history(&decided["note"]),
+        [
+            "made reader page",
+            "decide reader api: Decided through the API, not on the page"
+        ]
+    );
+    assert_eq!(decided["note"]["history"][1]["user_agent"], "curl/8.5.0");
+    // Every list shows the warning too.
+    let listed = server.get("/api/notes?path=docs/cache.md&rev=main");
+    assert_eq!(
+        listed["notes"][0]["history"][1]["warning"],
+        "Decided through the API, not on the page"
+    );
+    let (status, made) = server.api(
+        "POST",
+        "/api/notes",
+        &json!({
+            "path": "docs/cache.md", "revision": "main", "start": 0, "end": 7,
+            "stance": "agree", "ask": "keep", "body": "From a script.",
+        }),
+    );
+    assert_eq!(status, 201, "{made}");
+    assert_eq!(
+        history(&made["note"]),
+        ["made reader api: Made through the API, not on the page"]
+    );
+}
+
+#[test]
+fn an_unknown_or_stale_marker_counts_as_the_api() {
+    let repo = repo();
+    let server = Server::start(&repo.dir, &[]);
+    let id = note_on(&server, "main", "64 MB", "Measure it.")["id"]
+        .as_u64()
+        .unwrap();
+    let browser = |marker: &str| {
+        vec![
+            ("Cookie", server.cookie()),
+            ("Origin", format!("http://{}", server.host())),
+            ("Sec-Fetch-Site", "same-origin".to_owned()),
+            ("Driftmark-Page", marker.to_owned()),
+        ]
+    };
+    let reply = json!({"body": "Still?"});
+    let path = format!("/api/notes/{id}/reply");
+    let (status, answer) = server.raw("POST", &path, Some(&reply), &browser("nope"));
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        history(&answer["note"])[1],
+        "reply reader api: Replied through the API, not on the page"
+    );
+    // Without `Sec-Fetch-Site: same-origin`, a known marker is not enough.
+    let mut no_site = browser(&server.marker);
+    no_site.retain(|(name, _)| *name != "Sec-Fetch-Site");
+    let (_, answer) = server.raw("POST", &path, Some(&reply), &no_site);
+    assert!(history(&answer["note"])[2].starts_with("reply reader api"));
+    // A page asks to be refused rather than counted as the API.
+    let mut only = browser("nope");
+    only.push(("Driftmark-Page-Only", "yes".to_owned()));
+    let (status, answer) = server.raw("POST", &path, Some(&reply), &only);
+    assert_eq!(status, 412, "{answer}");
+    assert!(
+        answer["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("this page's marker is out of date"),
+        "{answer}"
+    );
+    let mut fresh = browser(&server.marker);
+    fresh.push(("Driftmark-Page-Only", "yes".to_owned()));
+    let (status, answer) = server.raw("POST", &path, Some(&reply), &fresh);
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(history(&answer["note"])[3], "reply reader page");
+    // A marker goes stale once the server has handed out 1,024 newer ones.
+    let old = server.marker.clone();
+    let host = server.host();
+    for _ in 0..1024 {
+        let (status, _) = request(server.addr, "HEAD", "/", &[("Host", &host)], b"");
+        assert_eq!(status, 200);
+    }
+    let (status, answer) = server.raw("POST", &path, Some(&reply), &browser(&old));
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        history(&answer["note"])[4],
+        "reply reader api: Replied through the API, not on the page"
+    );
+    let notes = server.get(&format!("/api/notes/{id}"));
+    assert_eq!(notes["note"]["history"].as_array().unwrap().len(), 5);
+}
+
+#[test]
+fn a_seen_mark_records_where_it_came_from() {
+    let repo = repo();
+    let server = Server::start(&repo.dir, &["--reader", "Ana"]);
+    let key = "0123456789abcdef";
+    server.post("/api/seen", &json!({"key": key, "seen": true}));
+    let store = driftmark::notes::Store::open(&notes_file(&repo)).expect("the notes file");
+    let mark = store.seen_mark("Ana", key).unwrap().expect("a mark");
+    assert_eq!(mark.via.source.name(), "page");
+    assert_eq!(mark.via.user_agent.as_deref(), Some(BROWSER));
+    let (status, _) = server.api("POST", "/api/seen", &json!({"key": key, "seen": true}));
+    assert_eq!(status, 200);
+    let mark = store.seen_mark("Ana", key).unwrap().expect("a mark");
+    assert_eq!(mark.via.source.name(), "api");
+    assert_eq!(mark.via.user_agent.as_deref(), Some("curl/8.5.0"));
 }
 
 /// Prints one answer of every notes route on the made-up repo, for the

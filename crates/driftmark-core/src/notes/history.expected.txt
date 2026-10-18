@@ -1,0 +1,64 @@
+made Reader page: -
+made Reader mcp: Made through the MCP connector, not on the page
+made Reader api: Made through the API, not on the page
+made Reader unknown: Made before driftmark recorded where actions come from, so it may not have come from the page
+made Agent page: -
+made Agent mcp: -
+made Agent api: -
+made Agent unknown: -
+edit Reader page: -
+edit Reader mcp: Edited through the MCP connector, not on the page
+edit Reader api: Edited through the API, not on the page
+edit Reader unknown: Edited before driftmark recorded where actions come from, so it may not have come from the page
+edit Agent page: -
+edit Agent mcp: -
+edit Agent api: -
+edit Agent unknown: -
+send Reader page: -
+send Reader mcp: Sent to an agent through the MCP connector, not on the page
+send Reader api: Sent to an agent through the API, not on the page
+send Reader unknown: Sent to an agent before driftmark recorded where actions come from, so it may not have come from the page
+send Agent page: -
+send Agent mcp: -
+send Agent api: -
+send Agent unknown: -
+reply Reader page: -
+reply Reader mcp: Replied through the MCP connector, not on the page
+reply Reader api: Replied through the API, not on the page
+reply Reader unknown: Replied before driftmark recorded where actions come from, so it may not have come from the page
+reply Agent page: -
+reply Agent mcp: -
+reply Agent api: -
+reply Agent unknown: -
+propose Reader page: -
+propose Reader mcp: Proposed through the MCP connector, not on the page
+propose Reader api: Proposed through the API, not on the page
+propose Reader unknown: Proposed before driftmark recorded where actions come from, so it may not have come from the page
+propose Agent page: -
+propose Agent mcp: -
+propose Agent api: -
+propose Agent unknown: -
+decide Reader page: -
+decide Reader mcp: Decided through the MCP connector, not on the page
+decide Reader api: Decided through the API, not on the page
+decide Reader unknown: Decided before driftmark recorded where actions come from, so it may not have come from the page
+decide Agent page: -
+decide Agent mcp: -
+decide Agent api: -
+decide Agent unknown: -
+applied Reader page: -
+applied Reader mcp: Marked applied through the MCP connector, not on the page
+applied Reader api: Marked applied through the API, not on the page
+applied Reader unknown: Marked applied before driftmark recorded where actions come from, so it may not have come from the page
+applied Agent page: -
+applied Agent mcp: -
+applied Agent api: -
+applied Agent unknown: -
+withdraw Reader page: -
+withdraw Reader mcp: Withdrawn through the MCP connector, not on the page
+withdraw Reader api: Withdrawn through the API, not on the page
+withdraw Reader unknown: Withdrawn before driftmark recorded where actions come from, so it may not have come from the page
+withdraw Agent page: -
+withdraw Agent mcp: -
+withdraw Agent api: -
+withdraw Agent unknown: -

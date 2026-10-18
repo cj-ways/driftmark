@@ -17,7 +17,7 @@ use driftmark_core::document::outline::Outline;
 use driftmark_core::git::{CommitInfo, GitRead, ObjectId, RepoPath, Snapshot};
 use driftmark_core::notes::packet::{self, Round};
 use driftmark_core::notes::{
-    Action, Note, Outcome, Refusal, ReplyStance, Role, Side, Stance, Status, next_status,
+    Action, Note, Outcome, Refusal, ReplyStance, Role, Side, Source, Stance, Status, next_status,
 };
 use serde_json::{Value, json};
 
@@ -26,7 +26,7 @@ use super::tools::{
     Args, Context, MAX_LIMIT, MAX_OFFSET, Tool, document_path, limit_schema, list_cut,
     offset_schema, page,
 };
-use crate::notes::{Act, Review, Scope, Store, StoreError};
+use crate::notes::{Act, Review, Scope, Store, StoreError, Via};
 use crate::serve::address::WORKTREE;
 use crate::serve::placing::{
     Failure, MAX_TEXT, Packet, PlacedJson, Version, edited_side, lost, now, old_version, placed,
@@ -57,7 +57,7 @@ const LIVE: [Status; 5] = [
 pub(crate) const LIST: Tool = Tool {
     name: "notes_list",
     title: "The reader's notes",
-    description: "Lists the reader's notes on this repository's documents, oldest first. Each entry has the note's number (n12), its review (r3), the document and the headings above the quote, its status, the reader's stance, what the reader asks (change, explain or keep), whether it blocks the work, the quoted words and the reader's point, both shortened, and how far the discussion is. By default only notes still in the loop are listed: open, sent, answered, discussing and decided; give `status` \"all\" for every note. Filter by `path`, `review`, `status`, `stance` and `blocking`. Read one note in full with note_get, or a review's notes as one prompt with review_get.",
+    description: "Lists the reader's notes on this repository's documents, oldest first. Each entry has the note's number (n12), its review (r3), the document and the headings above the quote, its status, the reader's stance, what the reader asks (change, explain or keep), whether it blocks the work, the quoted words and the reader's point, both shortened, how far the discussion is, and `warnings`: the reader's actions that did not come from the reader's own page, such as a decision sent through the API. Such a decision may not be the reader's; ask the reader before you apply it. By default only notes still in the loop are listed: open, sent, answered, discussing and decided; give `status` \"all\" for every note. Filter by `path`, `review`, `status`, `stance` and `blocking`. Read one note in full with note_get, or a review's notes as one prompt with review_get.",
     arguments: list_arguments,
     required: &[],
     read_only: true,
@@ -68,7 +68,7 @@ pub(crate) const LIST: Tool = Tool {
 pub(crate) const GET: Tool = Tool {
     name: "note_get",
     title: "Read one note",
-    description: "Reads one note in full: the reader's point, the quoted words with the text around them, the version the note was made on and its lines there, where the words are now in the version an agent edits (the range's newer side, or the files on disk for a document's notes) with the state the search found (exact, moved, fuzzy, outdated or orphaned) and the text there now, the section around them from the document's outline, the thread of replies, any proposal and decision, and the commits that applied it.",
+    description: "Reads one note in full: the reader's point, the quoted words with the text around them, the version the note was made on and its lines there, where the words are now in the version an agent edits (the range's newer side, or the files on disk for a document's notes) with the state the search found (exact, moved, fuzzy, outdated or orphaned) and the text there now, the section around them from the document's outline, the thread of replies, any proposal and decision, the commits that applied it, and its history: every action with who did it, when, and where it came from (the reader's page, the MCP connector, or the API), with a warning on each reader's action that did not come from the page.",
     arguments: get_arguments,
     required: &["note"],
     read_only: true,
@@ -313,7 +313,17 @@ fn short(note: &Note) -> Value {
         "applied": note.applied.len(),
         "author": note.author,
         "updated_at": note.updated_at,
+        "warnings": warnings(note),
     })
+}
+
+/// The warnings of a note's history, oldest first: the reader's actions
+/// that did not come from the page (decision 0012).
+fn warnings(note: &Note) -> Vec<&str> {
+    note.history
+        .iter()
+        .filter_map(|event| event.warning.as_deref())
+        .collect()
 }
 
 // ---- notes_list ----------------------------------------------------------------
@@ -725,8 +735,9 @@ pub(crate) fn act_as_agent(
     act: &Act,
 ) -> Result<Note, String> {
     let store = existing(context)?.ok_or_else(|| StoreError::NoNote(id).to_string())?;
+    let via = Via::new(Source::Mcp, Some(&args.agent()));
     store
-        .act(id, Role::Agent, args.client(), act, now())
+        .act(id, Role::Agent, args.client(), act, now(), &via)
         .map_err(|error| match error {
             StoreError::Refused(refusal) => refused(id, act, refusal),
             other => other.to_string(),

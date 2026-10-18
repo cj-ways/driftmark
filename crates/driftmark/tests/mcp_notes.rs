@@ -30,9 +30,16 @@ const GUIDE: &str = "# Guide\n\n> Short version: how to run the cache.\n\n## Ins
 
 // ---- the reader: driftmark serve -------------------------------------------
 
+/// The browser the reader's page runs in, as its headers name it.
+const BROWSER: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0";
+
 struct Server {
     child: Child,
     addr: SocketAddr,
+    /// The token the start message printed.
+    token: String,
+    /// The marker of a page this server sent, as the page script keeps it.
+    marker: String,
 }
 
 impl Server {
@@ -42,17 +49,18 @@ impl Server {
             .arg("--repo")
             .arg(repo)
             .args(["--addr", "127.0.0.1:0", "--reader", "Ana"])
+            .env_remove("DRIFTMARK_TOKEN")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .expect("start driftmark serve");
         let mut reader = BufReader::new(child.stdout.take().expect("standard output"));
-        let mut port = None;
+        let mut open = None;
         loop {
             let mut line = String::new();
             assert!(reader.read_line(&mut line).expect("read") > 0, "stopped");
             if let Some(rest) = line.strip_prefix("driftmark serve: open http://127.0.0.1:") {
-                port = Some(rest.trim_end().trim_end_matches('/').to_owned());
+                open = Some(rest.trim_end().to_owned());
             }
             if line.contains("press Ctrl-C") {
                 break;
@@ -61,27 +69,40 @@ impl Server {
         std::thread::spawn(move || {
             let _ = std::io::copy(&mut reader, &mut std::io::sink());
         });
-        Server {
+        let open = open.expect("an address");
+        let (port, token) = open.split_once("/?token=").expect("the token link");
+        let mut server = Server {
             child,
-            addr: format!("127.0.0.1:{}", port.expect("a port"))
-                .parse()
-                .expect("an address"),
-        }
+            addr: format!("127.0.0.1:{port}").parse().expect("an address"),
+            token: token.to_owned(),
+            marker: String::new(),
+        };
+        let home = server.page("/");
+        home.split("<meta name=\"driftmark-page\" content=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect("a page marker")
+            .clone_into(&mut server.marker);
+        server
     }
 
-    /// A request as the server's own page sends it; the status and the body.
+    /// A request as the server's own page sends it, with the token cookie
+    /// and the page's marker; the status and the body.
     fn send(&self, method: &str, path: &str, body: Option<&Value>) -> (u16, Vec<u8>) {
         let host = format!("localhost:{}", self.addr.port());
         let origin = format!("http://{host}");
         let text = body.map(Value::to_string).unwrap_or_default();
         let mut head = format!(
-            "{method} {path} HTTP/1.1\r\nConnection: close\r\nHost: {host}\r\nContent-Length: {}\r\n",
-            text.len()
+            "{method} {path} HTTP/1.1\r\nConnection: close\r\nHost: {host}\r\nContent-Length: {}\r\nCookie: driftmark-{}={}\r\n",
+            text.len(),
+            self.addr.port(),
+            self.token
         );
         if body.is_some() {
             let _ = write!(
                 head,
-                "Content-Type: application/json\r\nOrigin: {origin}\r\nSec-Fetch-Site: same-origin\r\n"
+                "Content-Type: application/json\r\nOrigin: {origin}\r\nSec-Fetch-Site: same-origin\r\nDriftmark-Page: {}\r\nUser-Agent: {BROWSER}\r\n",
+                self.marker
             );
         }
         head.push_str("\r\n");
@@ -480,6 +501,44 @@ fn agent_answers(agent: &mut Client) {
         "note_reply",
         json!({"note": "n2", "stance": "question", "body": "The pages grew; should the reason go in the document?"}),
     );
+    // Each agent action is recorded as the connector's, with the client's
+    // name and version, and carries no warning.
+    let read = agent.json("note_get", json!({"note": "n1"}));
+    let history: Vec<(String, String, String, String, bool)> = read["note"]["history"]
+        .as_array()
+        .expect("a history")
+        .iter()
+        .map(|event| {
+            (
+                event["action"].as_str().unwrap_or_default().to_owned(),
+                event["role"].as_str().unwrap_or_default().to_owned(),
+                event["source"].as_str().unwrap_or_default().to_owned(),
+                event["user_agent"].as_str().unwrap_or_default().to_owned(),
+                event.get("warning").is_some(),
+            )
+        })
+        .collect();
+    let row = |action: &str, role: &str, source: &str, agent: &str| {
+        (
+            action.to_owned(),
+            role.to_owned(),
+            source.to_owned(),
+            agent.to_owned(),
+            false,
+        )
+    };
+    assert_eq!(
+        history,
+        [
+            row("made", "reader", "page", BROWSER),
+            row("send", "reader", "page", BROWSER),
+            row("reply", "agent", "mcp", "claude-code 1"),
+            row("propose", "agent", "mcp", "claude-code 1"),
+        ]
+    );
+    assert_eq!(read["note"]["history"][2]["by"], "claude-code");
+    let listed = agent.json("notes_list", json!({}));
+    assert_eq!(listed["notes"][0]["warnings"], json!([]));
 }
 
 /// Step 3: the reader reads the answers on the page and decides.

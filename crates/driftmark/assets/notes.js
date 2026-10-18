@@ -14,7 +14,12 @@
 // - lets the reader reply, decide, edit and withdraw;
 // - on a change page, marks each card a note's applied commits made,
 //   "Changed because of note n12", and lists those changes on the note's
-//   card.
+//   card;
+// - sends every write with this page's marker, so the server records it as
+//   coming from the reader's page (decision 0012), and shows on each card
+//   the warnings of the reader's actions that came from anywhere else;
+// - shows how to get the reader's token, where a save failed for want of
+//   it.
 //
 // Every text from the server goes into the page through textContent, never
 // as HTML. The routes are in docs/features/commands/serve.md ("Notes").
@@ -48,6 +53,16 @@
     orphaned: "Its text is gone",
   };
   const FINAL = new Set(["applied", "closed", "withdrawn"]);
+  const DONE = {
+    made: "Made", edit: "Edited", send: "Sent to an agent", reply: "Replied",
+    propose: "Proposed", decide: "Decided", applied: "Marked applied", withdraw: "Withdrawn",
+  };
+  const SOURCE = {
+    page: "on the page",
+    mcp: "through the MCP connector",
+    api: "through the API",
+    unknown: "before driftmark recorded where actions come from",
+  };
   const word = (list, value) => (list.find(([v]) => v === value) || [value, value])[1];
 
   // ---- small helpers ------------------------------------------------------------
@@ -67,18 +82,80 @@
     return node;
   };
 
-  const call = async (method, url, body) => {
+  // The marker the server put into this page. Every write sends it back,
+  // so the server records the write as the reader's page, not the API.
+  const MARKER = 'meta[name="driftmark-page"]';
+  const marker = () => {
+    const meta = document.querySelector(MARKER);
+    return meta ? meta.content : "";
+  };
+
+  // Loads this page again, out of sight, for a fresh marker: the server
+  // forgets a marker after an hour, and when it starts again.
+  const freshMarker = async () => {
+    const answer = await fetch(location.href, { cache: "no-store", credentials: "same-origin" });
+    if (!answer.ok) return;
+    const fresh = new DOMParser().parseFromString(await answer.text(), "text/html").querySelector(MARKER);
+    const mine = document.querySelector(MARKER);
+    if (fresh && mine) mine.content = fresh.content;
+  };
+
+  // A write the server refused for want of the token. Its message says how
+  // to get the token, and the page shows it where the save failed.
+  class TokenNeeded extends Error {}
+
+  // One request. A write asks to be refused rather than recorded as the
+  // API when the page's marker is out of date; it then gets a fresh marker
+  // and is sent once more.
+  const call = async (method, url, body, again = false) => {
     const options = { method, credentials: "same-origin", headers: {} };
     if (body !== undefined) {
       options.headers["Content-Type"] = "application/json";
       options.body = JSON.stringify(body);
     }
+    if (method !== "GET") {
+      options.headers["Driftmark-Page"] = marker();
+      if (!again) options.headers["Driftmark-Page-Only"] = "yes";
+    }
     const answer = await fetch(url, options);
+    if (answer.status === 412 && !again) {
+      await freshMarker().catch(() => {});
+      return call(method, url, body, true);
+    }
     const data = await answer.json().catch(() => ({}));
+    if (answer.status === 401) {
+      throw new TokenNeeded(data.error || "Saving notes needs the reader's token.");
+    }
     if (!answer.ok) {
       throw new Error(data.error || `the server answered ${answer.status}`);
     }
     return data;
+  };
+
+  // How to get the token, in place of a failed save.
+  const tokenBox = (message) =>
+    el("div", { class: "dm-token", role: "alert" },
+      el("p", { class: "dm-token-head", text: "This browser does not have the reader's token yet" }),
+      el("p", { text: message }));
+
+  // Shows why an action failed: inside `where` when given, otherwise in the
+  // page's status line. A missing token gets the box that says how to get it.
+  const failed = (where, error, prefix) => {
+    if (!where) {
+      say(error instanceof TokenNeeded ? error.message : `${prefix}${error.message}`);
+      return;
+    }
+    cleared(where);
+    const shown = error instanceof TokenNeeded
+      ? tokenBox(error.message)
+      : el("p", { class: "dm-problem dm-failed", role: "alert", text: `${prefix}${error.message}` });
+    where.append(shown);
+    shown.scrollIntoView({ block: "nearest" });
+  };
+
+  // Removes what `failed` showed inside `where`.
+  const cleared = (where) => {
+    for (const old of where.querySelectorAll(":scope > .dm-token, :scope > .dm-failed")) old.remove();
   };
 
   // A message the page reads out: under the review list when there is one,
@@ -167,6 +244,7 @@
     text.value = start.body || "";
     const blocking = el("input", { type: "checkbox", id: "NoteBlocking", checked: Boolean(start.blocking) });
     const problem = el("p", { class: "dm-problem", role: "alert", hidden: true });
+    const trouble = el("div", { class: "dm-trouble" });
     const form = el("form", { class: "dm-form", method: "dialog" },
       el("h2", { id: "NoteTitle", text: title }),
       quote ? el("blockquote", { class: "dm-quote", text: quote }) : null,
@@ -175,6 +253,7 @@
       el("p", { class: "dm-check" }, blocking, el("label", { for: "NoteBlocking", text: " Blocking: hold the work until this is settled" })),
       el("p", {}, el("label", { for: "NoteText", text: "Your point" }), text),
       problem,
+      trouble,
       el("p", { class: "dm-buttons" },
         el("button", { type: "submit", class: "dm-primary", text: "Save the note" }),
         el("button", { type: "button", text: "Cancel", onclick: () => dialog.close() })));
@@ -193,13 +272,19 @@
         text.focus();
         return;
       }
+      problem.hidden = true;
+      cleared(trouble);
       try {
         await send(fields);
         dialog.close();
         await refresh();
       } catch (error) {
-        problem.hidden = false;
-        problem.textContent = error.message;
+        if (error instanceof TokenNeeded) {
+          failed(trouble, error, "");
+        } else {
+          problem.hidden = false;
+          problem.textContent = error.message;
+        }
       }
     });
     document.body.append(dialog);
@@ -356,11 +441,12 @@
             const now = seenButton.getAttribute("aria-pressed") !== "true";
             try {
               await call("POST", "/api/seen", { key, seen: now });
+              cleared(card);
               seenButton.setAttribute("aria-pressed", now ? "true" : "false");
               card.classList.toggle("is-seen", now);
               countSeen();
             } catch (error) {
-              say(`The seen mark was not saved: ${error.message}`);
+              failed(card, error, "The seen mark was not saved: ");
             }
           };
         }
@@ -408,14 +494,43 @@
     return parts.join(" · ");
   };
 
-  const act = async (note, action, payload, method = "POST") => {
+  // Does `action` to a note; `where` shows why it failed.
+  const act = async (note, action, payload, where) => {
     try {
-      const url = action === "edit" ? `/api/notes/${note.id}` : `/api/notes/${note.id}/${action}`;
-      await call(method, url, payload);
+      await call("POST", `/api/notes/${note.id}/${action}`, payload);
       await refresh();
     } catch (error) {
-      say(`That did not work: ${error.message}`);
+      failed(where, error, "That did not work: ");
     }
+  };
+
+  const when = (at) => new Date(at * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+  // The warnings of a note's history: the reader's actions that did not
+  // come from the reader's page, such as a decision sent with curl. They
+  // are always shown and cannot be dismissed (decision 0012).
+  const warnings = (note) => {
+    const loud = (note.history || []).filter((event) => event.warning);
+    if (!loud.length) return null;
+    return el("ul", { class: "dm-warn", "aria-label": "Warnings" },
+      ...loud.map((event) => el("li", {},
+        el("span", { class: "dm-warn-sign", "aria-hidden": "true", text: "⚠ " }),
+        el("strong", { text: event.warning }),
+        ` · ${when(event.at)}${event.user_agent ? ` · ${event.user_agent}` : ""}`)));
+  };
+
+  // Every action on a note: what, when, by whom and from where.
+  const history = (note) => {
+    const events = note.history || [];
+    if (!events.length) return null;
+    return el("details", { class: "dm-history" },
+      el("summary", { text: `History (${events.length})` }),
+      el("ol", {}, ...events.map((event) => {
+        const who = event.role === "agent" ? `Agent (${event.by})` : event.by;
+        return el("li", { "data-source": event.source },
+          event.warning ? el("span", { class: "dm-warn-sign", "aria-hidden": "true", text: "⚠ " }) : null,
+          `${when(event.at)} · ${DONE[event.action] || event.action} by ${who}, ${SOURCE[event.source] || event.source}`);
+      })));
   };
 
   // The forms under a note: reply and decide.
@@ -428,7 +543,7 @@
         el("p", { class: "dm-buttons" }, el("button", { type: "submit", class: "dm-primary", text: "Send the answer" })));
       box.addEventListener("submit", (event) => {
         event.preventDefault();
-        if (text.value.trim()) act(note, "reply", { body: text.value.trim() });
+        if (text.value.trim()) act(note, "reply", { body: text.value.trim() }, box);
       });
     } else {
       if (note.proposal) text.value = note.proposal.summary || "";
@@ -438,7 +553,7 @@
         el("p", { class: "dm-buttons" }, el("button", { type: "submit", class: "dm-primary", text: "Decide" })));
       box.addEventListener("submit", (event) => {
         event.preventDefault();
-        act(note, "decide", { outcome: box.elements.outcome.value, summary: text.value.trim() });
+        act(note, "decide", { outcome: box.elements.outcome.value, summary: text.value.trim() }, box);
       });
     }
     return box;
@@ -450,6 +565,8 @@
     const state = placement ? placement.state : "orphaned";
     const box = el("aside", { class: "dm-note", id: `Note${note.id}`, "data-gen": true, "data-state": state, "data-status": note.status, "aria-label": `Note n${note.id}` });
     box.append(el("p", { class: "dm-note-head", text: label(note) }));
+    const warned = warnings(note);
+    if (warned) box.append(warned);
     const where = STATE[state];
     if (where) box.append(el("p", { class: "dm-note-state", text: where }));
     if (note.target.side === "old") box.append(el("p", { class: "dm-note-state", text: "On text the newer version removed or changed" }));
@@ -486,6 +603,8 @@
           return el("li", {}, el("a", { href: `#${target.id}`, text: where ? `${kindText}, in ${where}` : kindText }));
         })));
     }
+    const past = history(note);
+    if (past) box.append(past);
     if (!FINAL.has(note.status)) {
       const acts = el("p", { class: "dm-buttons" });
       const open = (what) => {
@@ -507,7 +626,7 @@
       acts.append(el("button", {
         type: "button", text: "Withdraw",
         onclick: () => {
-          if (window.confirm(`Withdraw note n${note.id}? It stays in the notes file, marked withdrawn.`)) act(note, "withdraw", {});
+          if (window.confirm(`Withdraw note n${note.id}? It stays in the notes file, marked withdrawn.`)) act(note, "withdraw", {}, box);
         },
       }));
       box.append(acts);
@@ -594,7 +713,7 @@
   };
 
   const clearShown = () => {
-    for (const old of main.querySelectorAll(".dm-note, .dm-unchanged, .dm-pin, .dm-because")) old.remove();
+    for (const old of main.querySelectorAll(".dm-note, .dm-unchanged, .dm-pin, .dm-because, li.change > .dm-token, li.change > .dm-failed")) old.remove();
     for (const marked of main.querySelectorAll("li.change.is-caused")) marked.classList.remove("is-caused");
     if (window.CSS && CSS.highlights) {
       CSS.highlights.delete("dm-notes");
@@ -664,7 +783,7 @@
       }
       await refresh();
     } catch (error) {
-      say(`That did not work: ${error.message}`);
+      failed(null, error, "That did not work: ");
     }
   };
 

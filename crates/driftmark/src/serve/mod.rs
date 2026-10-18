@@ -6,7 +6,9 @@
 //! document's changes, each as a page and as JSON, and searches every
 //! document at a revision. It caches what it parsed by blob id, watches the
 //! working tree so open pages can reload, and lets no request through from
-//! another machine without a token.
+//! another machine without a token. Every request that writes notes or seen
+//! marks needs the token on every address, and each records whether it came
+//! from the reader's page (decision 0012).
 //!
 //! `docs/features/commands/serve.md` is the user's guide and the contract of
 //! the routes.
@@ -20,11 +22,13 @@ mod assets;
 mod cache;
 pub(crate) mod compare;
 mod guard;
+mod marker;
 mod notes;
 mod page;
 pub(crate) mod placing;
 pub(crate) mod repo;
 pub(crate) mod search;
+mod token;
 mod watch;
 
 use std::ffi::OsString;
@@ -56,7 +60,8 @@ const STOP_WAIT: Duration = Duration::from_secs(2);
 /// How `driftmark serve` is called.
 const USAGE: &str = "\
 usage: driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>]
-                       [--base <branch>] [--reader <name>] [--review-dir <path>]
+                       [--token-file <path>] [--base <branch>] [--reader <name>]
+                       [--review-dir <path>]
 
 Serves the repository's Markdown documents and their changes as pages. Each
 page reads git when it is opened, so branches show their latest commits.
@@ -65,9 +70,10 @@ Options:
   --repo <path>      a folder inside the repository (default: here)
   --addr <ip:port>   where to listen (default: 127.0.0.1:4170); port 0
                      picks a free port
-  --token <value>    the token a browser must present, 16 characters or
-                     more; an address other than 127.0.0.1 or ::1 always
-                     needs one, and gets a random one when none is given
+  --token <value>    the reader's token, 16 characters or more
+  --token-file <path>
+                     read the token from this file instead, once at start;
+                     on Unix only its owner may read it (chmod 600)
   --base <branch>    the branch the home page and `auto` compare with
                      (default: the rules file's [compare] default-branch,
                      else the first of origin/main, main, origin/master,
@@ -77,6 +83,12 @@ Options:
   --review-dir <path>
                      where review files go (default: the reviews folder
                      next to the notes file, in the git folder)
+
+The token comes from --token, else --token-file, else the DRIFTMARK_TOKEN
+environment variable, else a random one made at start. Saving notes and seen
+marks always needs it; reading pages on 127.0.0.1 or ::1 needs it only when
+it was given. A browser presents it once, through the address printed at
+start, and keeps it in a cookie.
 
 Notes are kept in driftmark/notes.db in the clone's shared git folder, so
 every worktree sees them and git never commits them.
@@ -143,11 +155,7 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
     let workdir = git.workdir().map(std::path::Path::to_path_buf);
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let repo = Arc::new(Repo::new(git, cache::CAP_BYTES, threads, args.base.clone()));
-    let token = match &args.token {
-        Some(token) => Some(token.clone()),
-        None if args.addr.ip().is_loopback() => None,
-        None => Some(random_token()?),
-    };
+    let token = token_of(args)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("driftmark-serve")
@@ -191,7 +199,12 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
         repo,
         watch: watch.clone(),
         search,
-        access: guard::Access::new(bound, token.clone()),
+        access: guard::Access::new(
+            bound,
+            token.value.clone(),
+            token.from != token::TokenSource::Made,
+        ),
+        markers: marker::Markers::new(marker::LIFE, marker::MOST),
         assets: assets::Assets::built_in(),
         drawer: Arc::new(crate::diagram::Drawer::new()),
         notes,
@@ -202,8 +215,7 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
         || args.repo.display().to_string(),
         |dir| dir.display().to_string(),
     );
-    let _ = stdout
-        .write_all(greeting(&place, bound, token.as_deref(), args.token.is_some()).as_bytes());
+    let _ = stdout.write_all(greeting(&place, bound, &token).as_bytes());
     let _ = stdout.flush();
     let served = runtime.block_on(async move {
         let router = app::router(app).layer(axum::middleware::from_fn(
@@ -240,33 +252,54 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
     served.map_err(|error| format!("the server stopped: {error}"))
 }
 
-/// What the server prints when it starts: where it reads, and the address
-/// to open, with the token when one is needed.
-fn greeting(place: &str, bound: std::net::SocketAddr, token: Option<&str>, asked: bool) -> String {
+/// The server's token, from the first source given (`token.rs`).
+fn token_of(args: &args::Args) -> Result<token::Token, String> {
+    token::choose(
+        args.token.as_deref(),
+        args.token_file.as_deref(),
+        std::env::var_os(token::VARIABLE),
+        random_token,
+    )
+}
+
+/// What the server prints when it starts: where it reads, the address to
+/// open with the token, and what needs the token.
+fn greeting(place: &str, bound: std::net::SocketAddr, token: &token::Token) -> String {
     let mut out = format!("driftmark serve: reading {place}\n");
-    match token {
-        None => {
-            let _ = writeln!(out, "driftmark serve: open http://{bound}/");
-        }
-        Some(token) => {
-            let _ = writeln!(out, "driftmark serve: open http://{bound}/?token={token}");
-            if bound.ip().is_unspecified() {
-                let _ = writeln!(
-                    out,
-                    "driftmark serve: write this machine's name or address in place of {}",
-                    bound.ip()
-                );
-            }
-            let why = if asked {
-                "--token was given"
-            } else {
-                "the address reaches beyond this machine"
-            };
-            let _ = writeln!(
-                out,
-                "driftmark serve: every request needs the token, because {why}"
-            );
-        }
+    let _ = writeln!(
+        out,
+        "driftmark serve: open http://{bound}/?token={}",
+        token.value
+    );
+    if bound.ip().is_unspecified() {
+        let _ = writeln!(
+            out,
+            "driftmark serve: write this machine's name or address in place of {}",
+            bound.ip()
+        );
+    }
+    let made = token.from == token::TokenSource::Made;
+    if !bound.ip().is_loopback() {
+        out.push_str(
+            "driftmark serve: every request needs the token, because the address reaches beyond this machine\n",
+        );
+    } else if made {
+        out.push_str(
+            "driftmark serve: pages open without the token on this machine; saving notes and seen marks needs it, once per browser\n",
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "driftmark serve: every request needs the token, because it came from {}",
+            token.from.words()
+        );
+    }
+    if made {
+        let _ = writeln!(
+            out,
+            "driftmark serve: the token is new at every start; keep one with --token-file or {}",
+            token::VARIABLE
+        );
     }
     out.push_str("driftmark serve: press Ctrl-C to stop\n");
     out
@@ -297,22 +330,49 @@ mod tests {
 
     #[test]
     fn the_greeting_names_the_address_and_the_token() {
-        let local = greeting("/r", "127.0.0.1:4170".parse().unwrap(), None, false);
+        let made = |value: &str| token::Token {
+            value: value.to_owned(),
+            from: token::TokenSource::Made,
+        };
+        let local = greeting("/r", "127.0.0.1:4170".parse().unwrap(), &made("t0k"));
         assert_eq!(
             local,
-            "driftmark serve: reading /r\ndriftmark serve: open http://127.0.0.1:4170/\ndriftmark serve: press Ctrl-C to stop\n"
+            "driftmark serve: reading /r\n\
+             driftmark serve: open http://127.0.0.1:4170/?token=t0k\n\
+             driftmark serve: pages open without the token on this machine; saving notes and seen marks needs it, once per browser\n\
+             driftmark serve: the token is new at every start; keep one with --token-file or DRIFTMARK_TOKEN\n\
+             driftmark serve: press Ctrl-C to stop\n"
         );
-        let open = greeting("/r", "0.0.0.0:80".parse().unwrap(), Some("t0k"), false);
+        let open = greeting("/r", "0.0.0.0:80".parse().unwrap(), &made("t0k"));
         assert!(
             open.contains("open http://0.0.0.0:80/?token=t0k\n"),
             "{open}"
         );
         assert!(open.contains("in place of 0.0.0.0\n"), "{open}");
         assert!(open.contains("because the address reaches beyond this machine"));
-        let asked = greeting("/r", "[::1]:9".parse().unwrap(), Some("t"), true);
-        assert!(asked.contains("open http://[::1]:9/?token=t\n"), "{asked}");
-        assert!(asked.contains("because --token was given"));
-        assert!(!asked.contains("in place of"));
+        assert!(open.contains("the token is new at every start"));
+        for (from, words) in [
+            (token::TokenSource::Option, "--token"),
+            (token::TokenSource::File, "--token-file"),
+            (token::TokenSource::Environment, "DRIFTMARK_TOKEN"),
+        ] {
+            let given = token::Token {
+                value: "t".to_owned(),
+                from,
+            };
+            let asked = greeting("/r", "[::1]:9".parse().unwrap(), &given);
+            assert!(asked.contains("open http://[::1]:9/?token=t\n"), "{asked}");
+            assert!(
+                asked.contains(&format!(
+                    "every request needs the token, because it came from {words}\n"
+                )),
+                "{asked}"
+            );
+            assert!(!asked.contains("in place of"));
+            assert!(!asked.contains("new at every start"));
+            let far = greeting("/r", "100.64.0.1:9".parse().unwrap(), &given);
+            assert!(far.contains("because the address reaches beyond this machine"));
+        }
     }
 
     #[test]

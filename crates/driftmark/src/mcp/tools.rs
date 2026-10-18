@@ -14,7 +14,7 @@ use driftmark_core::git::RepoPath;
 use serde_json::{Map, Value, json};
 
 use super::fit::{self, DEFAULT_CHARS, MAX_CHARS, MIN_CHARS};
-use super::protocol::{Connector, Reply, ToolInfo, UNNAMED_CLIENT};
+use super::protocol::{Client, Connector, Reply, ToolInfo, UNNAMED_CLIENT};
 use super::search::WorktreeSearch;
 use crate::serve::address;
 use crate::serve::placing::NotesFile;
@@ -133,14 +133,14 @@ impl Driftmark {
         Driftmark { context }
     }
 
-    /// Runs one tool for the client named `client`: reads its arguments,
+    /// Runs one tool for `client`: reads its arguments,
     /// answers, and checks the answer's size. `None` when no tool has this
     /// name.
     pub(crate) fn answer(
         &self,
         name: &str,
         arguments: Map<String, Value>,
-        client: &str,
+        client: &Client,
     ) -> Option<Reply> {
         let tool = TOOLS.iter().find(|tool| tool.name == name)?;
         let reply = Args::read(tool, arguments)
@@ -171,7 +171,7 @@ impl Connector for Driftmark {
         TOOLS.iter().map(Tool::info).collect()
     }
 
-    fn call(&self, name: &str, arguments: Map<String, Value>, client: &str) -> Option<Reply> {
+    fn call(&self, name: &str, arguments: Map<String, Value>, client: &Client) -> Option<Reply> {
         self.answer(name, arguments, client)
     }
 
@@ -201,7 +201,7 @@ pub(crate) fn missing(name: &str) -> String {
 pub(crate) struct Args {
     map: Map<String, Value>,
     /// The client that called, as its handshake names itself.
-    client: String,
+    client: Client,
 }
 
 impl Args {
@@ -229,13 +229,13 @@ impl Args {
         }
         Ok(Args {
             map,
-            client: UNNAMED_CLIENT.to_owned(),
+            client: Client::new(UNNAMED_CLIENT, ""),
         })
     }
 
-    /// These arguments, called by the client named `client`.
+    /// These arguments, called by `client`.
     #[must_use]
-    pub(crate) fn called_by(mut self, client: &str) -> Args {
+    pub(crate) fn called_by(mut self, client: &Client) -> Args {
         client.clone_into(&mut self.client);
         self
     }
@@ -243,7 +243,13 @@ impl Args {
     /// The client that called, such as `claude-code`: the name an agent's
     /// replies and records carry.
     pub(crate) fn client(&self) -> &str {
-        &self.client
+        &self.client.name
+    }
+
+    /// What the client calls itself in full, with its version, for the
+    /// history of the notes it acts on.
+    pub(crate) fn agent(&self) -> String {
+        self.client.agent()
     }
 
     /// Arguments read as they were given, for tests.
@@ -255,7 +261,7 @@ impl Args {
         };
         Args {
             map,
-            client: UNNAMED_CLIENT.to_owned(),
+            client: Client::new(UNNAMED_CLIENT, ""),
         }
     }
 

@@ -52,6 +52,7 @@ impl Server {
             .arg(repo)
             .args(["--addr", "127.0.0.1:0"])
             .stdout(Stdio::piped())
+            .env_remove("DRIFTMARK_TOKEN")
             .stderr(Stdio::null())
             .spawn()
             .expect("start driftmark serve");
@@ -64,7 +65,9 @@ impl Server {
                 "stopped early"
             );
             if let Some(rest) = line.strip_prefix("driftmark serve: open http://127.0.0.1:") {
-                port = Some(rest.trim_end().trim_end_matches('/').to_owned());
+                // The address ends in `/?token=`; a search only reads, so it
+                // needs no token on this machine.
+                port = rest.split('/').next().map(str::to_owned);
             }
             if line.contains("press Ctrl-C to stop") {
                 break;

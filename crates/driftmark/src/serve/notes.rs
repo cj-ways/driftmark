@@ -4,14 +4,16 @@
 //! Every route reads or writes the notes file through
 //! [`NotesFile`](super::placing::NotesFile), which opens it on first use. A page that only reads never makes the file: until
 //! the first note or seen mark, there is nothing to read. Every request with
-//! a body has already passed the same-origin JSON rule of `guard.rs`.
-//! `docs/features/commands/serve.md` ("Notes") is the contract.
+//! a body has already passed the token rule and the same-origin JSON rule of
+//! `guard.rs`, and carries where it came from (`marker.rs`), which the notes
+//! file keeps with the action. `docs/features/commands/serve.md` ("Notes")
+//! is the contract.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use driftmark_core::document::Document;
@@ -32,7 +34,7 @@ use super::placing::{
     placed, range, revision, version_at, version_on,
 };
 use super::repo::Repo;
-use crate::notes::{Act, NewNote, NoteEdit, Review, Scope, Store, StoreError};
+use crate::notes::{Act, NewNote, NoteEdit, Review, Scope, Store, StoreError, Via};
 
 /// The version of the notes routes' JSON.
 pub(crate) const SCHEMA_VERSION: u32 = 1;
@@ -415,9 +417,13 @@ struct OneJson {
 }
 
 /// `POST /api/notes`: a new note on a reading page or a change page.
-pub(crate) async fn create(State(app): State<Arc<App>>, bytes: Bytes) -> Response {
+pub(crate) async fn create(
+    State(app): State<Arc<App>>,
+    Extension(via): Extension<Via>,
+    bytes: Bytes,
+) -> Response {
     let work = Arc::clone(&app);
-    match blocking(move || make(&work, &bytes)).await {
+    match blocking(move || make(&work, &bytes, &via)).await {
         Ok(note) => json(
             StatusCode::CREATED,
             &OneJson {
@@ -429,7 +435,7 @@ pub(crate) async fn create(State(app): State<Arc<App>>, bytes: Bytes) -> Respons
     }
 }
 
-fn make(app: &App, bytes: &[u8]) -> Result<NoteJson, Failure> {
+fn make(app: &App, bytes: &[u8], via: &Via) -> Result<NoteJson, Failure> {
     let asked: Create = body(bytes)?;
     checked_text("body", &asked.body)?;
     let path = document_path(&asked.path)?;
@@ -468,6 +474,7 @@ fn make(app: &App, bytes: &[u8]) -> Result<NoteJson, Failure> {
             author: app.notes.reader.clone(),
         },
         page::now(),
+        via,
     )?;
     let mut found = placed(
         &app.repo,
@@ -630,23 +637,25 @@ struct Empty {}
 /// ask or blocking flag.
 pub(crate) async fn edit(
     State(app): State<Arc<App>>,
+    Extension(via): Extension<Via>,
     Path(id): Path<String>,
     bytes: Bytes,
 ) -> Response {
-    act_on(app, id, "edit".to_owned(), bytes).await
+    act_on(app, via, id, "edit".to_owned(), bytes).await
 }
 
 /// `POST /api/notes/<number>/<action>`: the reader withdraws, replies,
 /// decides or records the commits that applied the note.
 pub(crate) async fn action(
     State(app): State<Arc<App>>,
+    Extension(via): Extension<Via>,
     Path((id, action)): Path<(String, String)>,
     bytes: Bytes,
 ) -> Response {
-    act_on(app, id, action, bytes).await
+    act_on(app, via, id, action, bytes).await
 }
 
-async fn act_on(app: Arc<App>, id: String, action: String, bytes: Bytes) -> Response {
+async fn act_on(app: Arc<App>, via: Via, id: String, action: String, bytes: Bytes) -> Response {
     let work = Arc::clone(&app);
     let done = blocking(move || {
         let id = number(&id)?;
@@ -711,7 +720,14 @@ async fn act_on(app: Arc<App>, id: String, action: String, bytes: Bytes) -> Resp
             }
         };
         let store = work.notes.existing()?.ok_or(StoreError::NoNote(id))?;
-        Ok(store.act(id, Role::Reader, &work.notes.reader, &act, page::now())?)
+        Ok(store.act(
+            id,
+            Role::Reader,
+            &work.notes.reader,
+            &act,
+            page::now(),
+            &via,
+        )?)
     })
     .await;
     match done {
@@ -743,7 +759,11 @@ struct SeenJson {
 }
 
 /// `POST /api/seen`: the reader marks a change seen, or not seen.
-pub(crate) async fn seen(State(app): State<Arc<App>>, bytes: Bytes) -> Response {
+pub(crate) async fn seen(
+    State(app): State<Arc<App>>,
+    Extension(via): Extension<Via>,
+    bytes: Bytes,
+) -> Response {
     let work = Arc::clone(&app);
     let done = blocking(move || {
         let asked: SeenBody = body(&bytes)?;
@@ -751,7 +771,13 @@ pub(crate) async fn seen(State(app): State<Arc<App>>, bytes: Bytes) -> Response 
             return Err(Failure::bad("a change's `key` is 16 hex digits"));
         }
         let store = work.notes.store()?;
-        store.set_seen(&work.notes.reader, &asked.key, asked.seen, page::now())?;
+        store.set_seen(
+            &work.notes.reader,
+            &asked.key,
+            asked.seen,
+            page::now(),
+            &via,
+        )?;
         Ok(asked)
     })
     .await;
@@ -796,17 +822,24 @@ struct HandOffJson {
 /// a prompt to paste, or as a review file written next to the notes file.
 pub(crate) async fn hand_off(
     State(app): State<Arc<App>>,
+    Extension(via): Extension<Via>,
     Path((id, kind)): Path<(String, String)>,
     bytes: Bytes,
 ) -> Response {
     let work = Arc::clone(&app);
-    match blocking(move || hand_over(&work, &id, &kind, &bytes)).await {
+    match blocking(move || hand_over(&work, &id, &kind, &bytes, &via)).await {
         Ok(answer) => json(StatusCode::OK, &answer),
         Err(failure) => failure.answer(),
     }
 }
 
-fn hand_over(app: &App, id: &str, kind: &str, bytes: &[u8]) -> Result<HandOffJson, Failure> {
+fn hand_over(
+    app: &App,
+    id: &str,
+    kind: &str,
+    bytes: &[u8],
+    via: &Via,
+) -> Result<HandOffJson, Failure> {
     let id: u64 = id.trim_start_matches('r').parse().map_err(|_| Failure {
         status: StatusCode::NOT_FOUND,
         message: format!("`{id}` is not a review number"),
@@ -847,6 +880,7 @@ fn hand_over(app: &App, id: &str, kind: &str, bytes: &[u8]) -> Result<HandOffJso
                     &app.notes.reader,
                     &Act::Send,
                     page::now(),
+                    via,
                 )?;
                 sent.push(note.id);
             }

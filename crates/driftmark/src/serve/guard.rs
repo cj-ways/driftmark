@@ -1,16 +1,22 @@
 //! Who may ask the server, and what every answer carries.
 //!
-//! - **Bound to this machine only** (`127.0.0.1` or `::1`, no `--token`): a
-//!   request must name a local host, such as `localhost:4170`. A web page
-//!   elsewhere that points its own name at `127.0.0.1` (DNS rebinding) is
-//!   refused, because its requests carry its own name.
-//! - **Bound to any other address, or with `--token`**: every request needs
-//!   the token. A browser presents it once as `?token=`; the server answers
-//!   with an `HttpOnly`, `SameSite=Strict` cookie and sends the browser to the
-//!   same address without the token, so it does not stay in the history or
-//!   in a shared link.
-//! - **Requests with a body** (notes, from M3 on) must be JSON and must come
-//!   from the server's own pages.
+//! The server always has a token (`token.rs`). A browser presents it once as
+//! `?token=`; the server answers with an `HttpOnly`, `SameSite=Strict`
+//! cookie and sends the browser to the same address without the token, so
+//! it does not stay in the history or in a shared link.
+//!
+//! - **Every write** (any method but `GET` and `HEAD`) needs the token
+//!   cookie, on every address (decision 0012). Without it the answer is
+//!   `401`, with a sentence that says how to get it.
+//! - **Reads on this machine** (`127.0.0.1` or `::1`, with a token made at
+//!   start) need no token, but must name a local host, such as
+//!   `localhost:4170`. A web page elsewhere that points its own name at
+//!   `127.0.0.1` (DNS rebinding) is refused, because its requests carry its
+//!   own name.
+//! - **Reads on any other address, or with a token that was given**, need
+//!   the token too.
+//! - **Requests with a body** must be JSON and must not come from another
+//!   site's page.
 //! - **Every answer** carries a content security policy that allows only the
 //!   program's own scripts and styles, and no CORS header.
 
@@ -30,9 +36,12 @@ pub(crate) const CSP: &str = "default-src 'none'; script-src 'self'; style-src '
 /// What the server asks of every request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Access {
-    /// The token every request needs, or `None` when the server is bound to
-    /// this machine only and was given no token.
-    token: Option<String>,
+    /// The token every write needs.
+    token: String,
+    /// Whether reads need the token too: on an address beyond this machine,
+    /// or when the token was given rather than made at start. Otherwise
+    /// reads need a local `Host` instead.
+    guard_reads: bool,
     /// The cookie's name. It holds the port, because a browser sends a
     /// host's cookies to every port, and two servers must not share one.
     cookie: String,
@@ -55,6 +64,8 @@ pub(crate) enum Verdict {
     NeedToken {
         /// Whether a token was given and was wrong.
         wrong: bool,
+        /// Whether the request writes, so its answer is JSON for a script.
+        write: bool,
     },
     /// It names a host other than this machine, on a server bound to this
     /// machine only.
@@ -62,39 +73,43 @@ pub(crate) enum Verdict {
 }
 
 impl Access {
-    /// The rules for a server bound to `addr`, with `token` when it needs one.
-    pub(crate) fn new(addr: SocketAddr, token: Option<String>) -> Access {
+    /// The rules for a server bound to `addr` with `token`. `given` says
+    /// whether the token was given, rather than made at start.
+    pub(crate) fn new(addr: SocketAddr, token: String, given: bool) -> Access {
         Access {
             token,
+            guard_reads: given || !addr.ip().is_loopback(),
             cookie: format!("driftmark-{}", addr.port()),
         }
     }
 
+    /// The cookie's name, such as `driftmark-4170`.
+    pub(crate) fn cookie_name(&self) -> &str {
+        &self.cookie
+    }
+
     /// Decides what to do with a request.
     pub(crate) fn check(&self, method: &Method, uri: &Uri, headers: &HeaderMap) -> Verdict {
-        let Some(token) = &self.token else {
-            return if headers
+        let write = !matches!(*method, Method::GET | Method::HEAD);
+        if !self.guard_reads
+            && !headers
                 .get(header::HOST)
                 .and_then(|host| host.to_str().ok())
                 .is_some_and(is_local_host)
-            {
-                Verdict::Pass
-            } else {
-                Verdict::OtherHost
-            };
-        };
+        {
+            return Verdict::OtherHost;
+        }
         if let Some(given) = query_token(uri) {
-            let readable = matches!(*method, Method::GET | Method::HEAD);
-            if readable && same(given.as_bytes(), token.as_bytes()) {
+            if !write && same(given.as_bytes(), self.token.as_bytes()) {
                 return Verdict::Remember {
                     location: without_token(uri),
                     cookie: format!(
-                        "{}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={COOKIE_SECONDS}",
-                        self.cookie
+                        "{}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={COOKIE_SECONDS}",
+                        self.cookie, self.token
                     ),
                 };
             }
-            return Verdict::NeedToken { wrong: true };
+            return Verdict::NeedToken { wrong: true, write };
         }
         let cookies = headers
             .get_all(header::COOKIE)
@@ -105,14 +120,32 @@ impl Access {
         let mut wrong = false;
         for (name, value) in cookies {
             if name == self.cookie {
-                if same(value.as_bytes(), token.as_bytes()) {
+                if same(value.as_bytes(), self.token.as_bytes()) {
                     return Verdict::Pass;
                 }
                 wrong = true;
             }
         }
-        Verdict::NeedToken { wrong }
+        if write || self.guard_reads {
+            Verdict::NeedToken { wrong, write }
+        } else {
+            Verdict::Pass
+        }
     }
+}
+
+/// Why a write without the token was refused, and how to get it: the body
+/// of its `401`, which the page shows in place of the failed save.
+/// `cookie` is the cookie's name, for a program without a browser.
+pub(crate) fn token_to_write(wrong: bool, cookie: &str) -> String {
+    let first = if wrong {
+        "The token this browser holds is not this server's token: the server was started again with a new one."
+    } else {
+        "Saving notes and seen marks needs the reader's token."
+    };
+    format!(
+        "{first} Open the address that driftmark serve printed when it started, the one that ends in ?token=, in this browser, then try again. A new tab keeps this page as it is. A program without a browser sends the token in the cookie {cookie}."
+    )
 }
 
 /// Whether a `Host` header names this machine: `localhost`, a name under
@@ -159,8 +192,10 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Whether a request with a body may be handled. The server's own pages
-/// send JSON from their own origin; anything else is refused before it
-/// reaches a route. Requests without a body pass.
+/// send JSON from their own origin; a page on another site is refused before
+/// it reaches a route. Requests without a body pass. A request without an
+/// `Origin`, such as one from a command-line tool, passes here; it needed
+/// the token cookie already, and it counts as the API.
 ///
 /// # Errors
 ///
@@ -257,7 +292,7 @@ mod tests {
 
     #[test]
     fn a_local_server_answers_only_to_local_host_names() {
-        let access = Access::new("127.0.0.1:4170".parse().unwrap(), None);
+        let access = Access::new("127.0.0.1:4170".parse().unwrap(), TOKEN.into(), false);
         for host in [
             "localhost:4170",
             "LOCALHOST",
@@ -287,11 +322,104 @@ mod tests {
             );
         }
         assert_eq!(check(&access, &Method::GET, "/", &[]), Verdict::OtherHost);
+        let cookie = format!("driftmark-4170={TOKEN}");
+        assert_eq!(
+            check(
+                &access,
+                &Method::POST,
+                "/api/notes",
+                &[("host", "evil.example"), ("cookie", &cookie)]
+            ),
+            Verdict::OtherHost,
+            "the host is checked before the cookie"
+        );
+    }
+
+    #[test]
+    fn a_local_server_reads_freely_and_writes_with_the_cookie_only() {
+        let access = Access::new("127.0.0.1:4170".parse().unwrap(), TOKEN.into(), false);
+        let host = ("host", "localhost:4170");
+        let good = format!("driftmark-4170={TOKEN}");
+        assert_eq!(check(&access, &Method::GET, "/", &[host]), Verdict::Pass);
+        assert_eq!(
+            check(
+                &access,
+                &Method::HEAD,
+                "/",
+                &[host, ("cookie", "driftmark-4170=old")]
+            ),
+            Verdict::Pass,
+            "an old cookie does not stop a read"
+        );
+        for method in [Method::POST, Method::PATCH, Method::PUT, Method::DELETE] {
+            assert_eq!(
+                check(&access, &method, "/api/notes", &[host]),
+                Verdict::NeedToken {
+                    wrong: false,
+                    write: true
+                },
+                "{method}"
+            );
+            assert_eq!(
+                check(
+                    &access,
+                    &method,
+                    "/api/notes",
+                    &[host, ("cookie", "driftmark-4170=old")]
+                ),
+                Verdict::NeedToken {
+                    wrong: true,
+                    write: true
+                },
+                "{method}"
+            );
+            assert_eq!(
+                check(&access, &method, "/api/notes", &[host, ("cookie", &good)]),
+                Verdict::Pass,
+                "{method}"
+            );
+        }
+        assert_eq!(
+            check(
+                &access,
+                &Method::POST,
+                &format!("/api/seen?token={TOKEN}"),
+                &[host]
+            ),
+            Verdict::NeedToken {
+                wrong: true,
+                write: true
+            },
+            "a write cannot bring the token in its address"
+        );
+        assert_eq!(
+            check(&access, &Method::GET, &format!("/?token={TOKEN}"), &[host]),
+            Verdict::Remember {
+                location: "/".into(),
+                cookie: format!(
+                    "driftmark-4170={TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000"
+                ),
+            },
+            "the printed link sets the cookie here too"
+        );
+        assert_eq!(access.cookie_name(), "driftmark-4170");
+    }
+
+    #[test]
+    fn a_given_token_holds_for_reads_on_this_machine_too() {
+        let access = Access::new("127.0.0.1:4170".parse().unwrap(), TOKEN.into(), true);
+        assert_eq!(
+            check(&access, &Method::GET, "/", &[("host", "evil.example")]),
+            Verdict::NeedToken {
+                wrong: false,
+                write: false
+            }
+        );
     }
 
     #[test]
     fn the_token_in_the_address_becomes_a_cookie() {
-        let access = Access::new("0.0.0.0:4170".parse().unwrap(), Some(TOKEN.into()));
+        let access = Access::new("0.0.0.0:4170".parse().unwrap(), TOKEN.into(), false);
         let host = ("host", "100.64.0.1:4170");
         assert_eq!(
             check(
@@ -316,17 +444,25 @@ mod tests {
                 ),
             }
         );
-        let wrong = Verdict::NeedToken { wrong: true };
-        assert_eq!(check(&access, &Method::GET, "/?token=nope", &[host]), wrong);
+        assert_eq!(
+            check(&access, &Method::GET, "/?token=nope", &[host]),
+            Verdict::NeedToken {
+                wrong: true,
+                write: false
+            }
+        );
         assert_eq!(
             check(&access, &Method::POST, &format!("/?token={TOKEN}"), &[host]),
-            wrong
+            Verdict::NeedToken {
+                wrong: true,
+                write: true
+            }
         );
     }
 
     #[test]
     fn the_cookie_lets_requests_through() {
-        let access = Access::new("[::]:9000".parse().unwrap(), Some(TOKEN.into()));
+        let access = Access::new("[::]:9000".parse().unwrap(), TOKEN.into(), false);
         let good = format!("a=b; driftmark-9000={TOKEN}");
         assert_eq!(
             check(&access, &Method::GET, "/", &[("cookie", &good)]),
@@ -344,7 +480,10 @@ mod tests {
                 "/",
                 &[("cookie", "driftmark-9000=old")]
             ),
-            Verdict::NeedToken { wrong: true }
+            Verdict::NeedToken {
+                wrong: true,
+                write: false
+            }
         );
         assert_eq!(
             check(
@@ -353,13 +492,32 @@ mod tests {
                 "/",
                 &[("cookie", &format!("driftmark-4170={TOKEN}"))]
             ),
-            Verdict::NeedToken { wrong: false },
+            Verdict::NeedToken {
+                wrong: false,
+                write: false
+            },
             "another port's cookie"
         );
         assert_eq!(
             check(&access, &Method::GET, "/", &[]),
-            Verdict::NeedToken { wrong: false }
+            Verdict::NeedToken {
+                wrong: false,
+                write: false
+            }
         );
+    }
+
+    #[test]
+    fn a_refused_write_says_how_to_get_the_token() {
+        let missing = token_to_write(false, "driftmark-4170");
+        assert!(missing.starts_with("Saving notes and seen marks needs the reader's token."));
+        assert!(missing.contains("ends in ?token="), "{missing}");
+        assert!(
+            missing.ends_with("in the cookie driftmark-4170."),
+            "{missing}"
+        );
+        let old = token_to_write(true, "driftmark-9");
+        assert!(old.starts_with("The token this browser holds is not this server's token"));
     }
 
     #[test]

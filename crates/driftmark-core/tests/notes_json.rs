@@ -2,8 +2,8 @@
 //! MCP connector share. `docs/features/engine/notes-model.md` writes it out.
 
 use driftmark_core::notes::{
-    Anchor, AnchorState, Applied, Ask, Decision, Note, Outcome, Quote, Reply, ReplyStance, Role,
-    Side, Stance, Status, Target,
+    Anchor, AnchorState, Applied, Ask, Decision, Event, EventAction, Note, Outcome, Quote, Reply,
+    ReplyStance, Role, Side, Source, Stance, Status, Target,
 };
 
 #[test]
@@ -73,6 +73,24 @@ fn a_note_reads_and_writes_its_json_names() {
         author: "reader".into(),
         created_at: 1,
         updated_at: 7,
+        history: vec![
+            Event::new(
+                EventAction::Made,
+                Role::Reader,
+                "reader".into(),
+                1,
+                Source::Page,
+                Some("Firefox".into()),
+            ),
+            Event::new(
+                EventAction::Reply,
+                Role::Agent,
+                "claude".into(),
+                5,
+                Source::Mcp,
+                Some("claude 1.0".into()),
+            ),
+        ],
     };
     let json = serde_json::to_value(&note).unwrap();
     assert_eq!(json["target"]["side"], "new");
@@ -83,8 +101,16 @@ fn a_note_reads_and_writes_its_json_names() {
     assert_eq!(json["thread"][0]["role"], "agent");
     assert_eq!(json["thread"][0]["stance"], "counter");
     assert_eq!(json["proposal"]["outcome"], "modify");
-    let back: Note = serde_json::from_value(json).unwrap();
+    assert_eq!(json["history"][0]["action"], "made");
+    assert_eq!(json["history"][1]["source"], "mcp");
+    assert_eq!(json["history"][1]["user_agent"], "claude 1.0");
+    let back: Note = serde_json::from_value(json.clone()).unwrap();
     assert_eq!(back, note);
+    // A note written before notes had a history reads with an empty one.
+    let mut old = json;
+    old.as_object_mut().unwrap().remove("history");
+    let back: Note = serde_json::from_value(old).unwrap();
+    assert_eq!(back.history, Vec::<Event>::new());
     let quiet = Reply {
         stance: None,
         ..note.thread[0].clone()
@@ -99,4 +125,43 @@ fn a_note_reads_and_writes_its_json_names() {
         assert_eq!(serde_json::to_value(side).unwrap(), name);
     }
     assert_eq!(serde_json::to_value(Role::Reader).unwrap(), "reader");
+}
+
+#[test]
+fn a_history_entry_reads_and_writes_its_json_names() {
+    for source in Source::ALL {
+        assert_eq!(serde_json::to_value(source).unwrap(), source.name());
+    }
+    for action in EventAction::ALL {
+        assert_eq!(serde_json::to_value(action).unwrap(), action.name());
+    }
+    let quiet = Event::new(
+        EventAction::Decide,
+        Role::Reader,
+        "Ana".into(),
+        5,
+        Source::Page,
+        Some("Firefox".into()),
+    );
+    let json = serde_json::to_value(&quiet).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "action": "decide", "role": "reader", "by": "Ana", "at": 5,
+            "source": "page", "user_agent": "Firefox",
+        })
+    );
+    let loud = Event::new(
+        EventAction::Decide,
+        Role::Reader,
+        "Ana".into(),
+        5,
+        Source::Api,
+        None,
+    );
+    let json = serde_json::to_value(&loud).unwrap();
+    assert_eq!(json["warning"], "Decided through the API, not on the page");
+    assert!(json.get("user_agent").is_none());
+    let back: Event = serde_json::from_value(json).unwrap();
+    assert_eq!(back, loud);
 }

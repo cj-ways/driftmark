@@ -5,13 +5,13 @@ date: 2026-10-18
 
 # The serve command
 
-> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, and one document's changes, each also as JSON. `/api/search` searches every document at a revision. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default; any other address needs a token, which a browser presents once and then keeps in a cookie. The reader's notes and "Seen" marks go to one SQLite file in the clone's shared git folder, through the notes routes.
+> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, and one document's changes, each also as JSON. `/api/search` searches every document at a revision. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default. It always has a token, which a browser presents once and then keeps in a cookie: every request that writes notes or "Seen" marks needs it, on every address, and on any address beyond this machine every request does. The reader's notes and "Seen" marks go to one SQLite file in the clone's shared git folder, through the notes routes. Each action records whether it came from the reader's own page, the MCP connector, or another program with the token (decision 0012).
 
 ## Running it
 
 ```text
-driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>] [--base <branch>]
-                [--reader <name>] [--review-dir <path>]
+driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>] [--token-file <path>]
+                [--base <branch>] [--reader <name>] [--review-dir <path>]
 ```
 
 | Option | Meaning |
@@ -19,21 +19,45 @@ driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>] [--base <br
 | `--repo <path>` | A folder inside the repository. The default is the current folder. A bare repository works too; it has no working tree. |
 | `--addr <ip:port>` | Where to listen. The default is `127.0.0.1:4170`, this machine only. Port `0` picks a free port. |
 | `--base <branch>` | The default branch: the one the home page and `auto` compare with. It wins over the rules file's `[compare] default-branch`. |
-| `--token <value>` | The token every request must bring. It needs at least 16 characters, and only letters, digits, `-`, `_`, `.` and `~`, so it fits in an address and a cookie as it is. |
+| `--token <value>` | The reader's token (see "The token"). It needs at least 16 characters, and only letters, digits, `-`, `_`, `.` and `~`, so it fits in an address and a cookie as it is. |
+| `--token-file <path>` | Read the token from this file instead, once, when the server starts. White space around it is dropped. On Unix the file must be private: a file its group or other users can read or change is refused. |
 | `--reader <name>` | The reader's name on notes, replies and "Seen" marks: 1 to 64 visible characters. The default is `reader`. |
 | `--review-dir <path>` | Where review files go. The default is the `reviews` folder next to the notes file (see "Notes"). |
 | `--help` | Print the usage text. |
 
-When it starts, the server prints where it reads and the address to open:
+### The token
+
+The server always has a token. It comes from exactly one source, the first of these that is given:
+
+1. `--token <value>`;
+2. `--token-file <path>`;
+3. the `DRIFTMARK_TOKEN` environment variable (an empty value counts as unset);
+4. otherwise a random one, made at start: 128 bits from the system, written as 32 hex digits.
+
+The file and the variable keep the token out of the process list, where every user of the machine can read a command line. A random token is new at every start, so the browser's cookie stops working when the server starts again; a token from the file or the variable keeps it working.
+
+What needs the token:
+
+| The server listens on | Writes (notes, replies, decisions, withdrawals, commits, seen marks, review hand-offs) | Reading pages |
+|---|---|---|
+| `127.0.0.1` or `::1`, with a random token | Need it | Open, for a local `Host` only |
+| `127.0.0.1` or `::1`, with a token that was given | Need it | Need it |
+| Any other address | Need it | Need it |
+
+### Starting
+
+When it starts, the server prints where it reads and the address to open. The address carries the token:
 
 ```text
 $ driftmark serve
 driftmark serve: reading /home/ana/notes
-driftmark serve: open http://127.0.0.1:4170/
+driftmark serve: open http://127.0.0.1:4170/?token=3f9c0d2a7b6e41c58a0f2d9e6b1c7a44
+driftmark serve: pages open without the token on this machine; saving notes and seen marks needs it, once per browser
+driftmark serve: the token is new at every start; keep one with --token-file or DRIFTMARK_TOKEN
 driftmark serve: press Ctrl-C to stop
 ```
 
-On another address, the line to open carries the token:
+On another address, every request needs the token:
 
 ```text
 $ driftmark serve --addr 0.0.0.0:4170
@@ -41,6 +65,17 @@ driftmark serve: reading /home/ana/notes
 driftmark serve: open http://0.0.0.0:4170/?token=3f9c0d2a7b6e41c58a0f2d9e6b1c7a44
 driftmark serve: write this machine's name or address in place of 0.0.0.0
 driftmark serve: every request needs the token, because the address reaches beyond this machine
+driftmark serve: the token is new at every start; keep one with --token-file or DRIFTMARK_TOKEN
+driftmark serve: press Ctrl-C to stop
+```
+
+With a token that was given, on this machine, the third line names its source, and the fourth is left out:
+
+```text
+$ DRIFTMARK_TOKEN=reader-token-for-ana driftmark serve
+driftmark serve: reading /home/ana/notes
+driftmark serve: open http://127.0.0.1:4170/?token=reader-token-for-ana
+driftmark serve: every request needs the token, because it came from DRIFTMARK_TOKEN
 driftmark serve: press Ctrl-C to stop
 ```
 
@@ -49,7 +84,7 @@ Ctrl-C stops it. Open event streams end, work already started gets up to 2 secon
 | Exit code | When |
 |---|---|
 | 0 | It stopped on Ctrl-C. |
-| 1 | It could not start: the folder is not inside a git repository, or the address cannot be listened on, for example because another program uses the port. The reason goes to standard error. |
+| 1 | It could not start: the folder is not inside a git repository; the token file cannot be read, is not private, or holds no valid token; `DRIFTMARK_TOKEN` holds no valid token; or the address cannot be listened on, for example because another program uses the port. The reason goes to standard error. |
 | 2 | The command line is wrong. The reason and the usage text go to standard error. |
 
 ## Addresses
@@ -104,7 +139,7 @@ The separator is `/-/` because branch names hold `/`, as in `feature/login`. The
 | `POST /api/reviews/<r>/prompt`, `POST /api/reviews/<r>/file` | One round of a review as a prompt, or as a review file. |
 | `POST /api/seen` | A change marked seen, or not seen. |
 
-Every `GET` route also answers `HEAD`. A route that exists answers another method with `405`, and any other address answers `404`.
+Every route that is not `GET` or `HEAD` writes, and needs the token cookie (see "Who may ask"). Every `GET` route also answers `HEAD`. A route that exists answers another method with `405`, and any other address answers `404`.
 
 The pages follow the review-first design of decision 0010. `docs/features/pages.md` says what a reader sees on each; this document covers the routes, the JSON and how the server makes them.
 
@@ -392,11 +427,12 @@ The reader's notes and "Seen" marks (decision 0004; `docs/features/notes.md` say
 - **Where.** `driftmark/notes.db` in the git common directory, the folder `git rev-parse --git-common-dir` names: `.git` at the top of a clone, and the same folder for every linked worktree of it. Git never commits it. Deleting the clone deletes it.
 - **When.** The server opens it on the first note or seen mark, and makes it and its folder then. A page that only reads never makes it: until then the notes routes answer with no notes.
 - **Two programs at once.** It is SQLite in WAL mode, so `driftmark serve` and `driftmark mcp` use it together; a writer waits up to five seconds for the other. A change to a note reads its status and writes the new one in one transaction that holds the write lock from its start, so a reader's decision and an agent's proposal sent at the same moment never overwrite each other.
-- **Versions.** Its schema has a version, in SQLite's `user_version`, now 1. A newer driftmark adds a migration; an older one refuses a file it does not know, rather than change it, and the routes answer `503`.
+- **Versions.** Its schema has a version, in SQLite's `user_version`, now 2. A newer driftmark adds a migration; an older one refuses a file it does not know, rather than change it, and the routes answer `503`. Version 2 adds where each action came from (decision 0012): an `actions` table with one row per action on a note, and a source and a `User-Agent` on each seen mark. A version 1 file is brought up to version 2 when it is first opened: the actions it can show get the source `unknown` (see "Where an action came from"). Every `driftmark mcp` that uses the file must be as new, because an older one refuses version 2.
 - **Review files** go to the `reviews` folder next to it, or to `--review-dir`.
 
 ### What pages carry
 
+- Every page carries `<meta name="driftmark-page" content="…">`: a new random marker for this page load (see "Where an action came from").
 - A reading page's `<main>` carries `data-notes` (the number of notes on the document), `data-path` and `data-rev`. A change page's `<main>` carries `data-notes` (the notes on the range's documents), `data-range` and, on a document's own page, `data-path`. Without the attribute, the notes file cannot be read and the page has no notes.
 - Each document section of a change page, `<section class="docchg">`, carries `data-keys`: the key of each change, in the order of its change list, separated by spaces (`driftmark_core::notes::change_key`), and `data-seen`: the keys the reader marked seen.
 - `page.js` loads `notes.js` on such a page; `notes.js` loads `anchor.js` and the position tables when they are needed.
@@ -463,7 +499,7 @@ The answer, for a made-up repository whose `main` holds `docs/cache.md` and whos
 | `reviews` | Every review the listed notes belong to. |
 | `path`, `revision`, `commit` | For a document: what was asked, and the commit it resolved to, or `worktree`. |
 | `range` | For a range: the range as written. |
-| `notes` | The notes, by number, each with its `placement`. |
+| `notes` | The notes, by number, each with its `placement`. Each note carries its `history` (`docs/features/engine/notes-model.md`). |
 
 On a range's list, each note also has `caused`: the changes of the range that its applied commits made in its document, for the change page's "Changed because of note n12" (`docs/features/notes.md`). Each entry has the document's `path`, the change's `key` (its entry in its section's `data-keys`), its index in the document's change list (`change`) and the full `commit` that made it. A commit counts when the range's newer side holds it and its older side does not; for a range that ends in the working tree, `HEAD` holds it. The list is empty for a note without such commits, and the field is left out of a document's list and a review's.
 
@@ -534,7 +570,7 @@ The note joins the review of its page: the document's, or the range's. A note on
 | `POST /api/notes/<n>/applied` | `{"commits": ["<id>", …]}` | The commits that applied a decided note, 7 to 64 hex digits each. |
 | `POST /api/notes/<n>/withdraw` | `{}` | The reader takes the note back. |
 
-`<n>` is the note's number, as `12` or `n12`. Each answers `{"schema_version": 1, "note": {…}}`. The loop's rules are the core's (`notes::next_status`): a change they refuse answers `409` with the reason, such as `the note is applied, so it cannot change`. An unknown note or action answers `404`. The server acts as the reader; an agent acts through the MCP connector (`docs/features/commands/mcp.md`), whose `review_get` gives the same prompt as `POST /api/reviews/<r>/prompt`.
+`<n>` is the note's number, as `12` or `n12`. Each answers `{"schema_version": 1, "note": {…}}`. The loop's rules are the core's (`notes::next_status`): a change they refuse answers `409` with the reason, such as `the note is applied, so it cannot change`. An unknown note or action answers `404`. The server acts as the reader; an agent acts through the MCP connector (`docs/features/commands/mcp.md`), whose `review_get` gives the same prompt as `POST /api/reviews/<r>/prompt`. Every action is added to the note's `history` with where its request came from, and a refused one adds nothing.
 
 ### Handing a review over
 
@@ -555,17 +591,34 @@ The note joins the review of its page: the document's, or the range's. A note on
 
 ### Seen marks
 
-`POST /api/seen` with `{"key": "<16 hex digits>", "seen": true}` marks a change seen for the reader; `false` takes the mark back. The key is the change's entry in `data-keys`. The answer repeats the key and the mark. The change page shows the marks in `data-seen`.
+`POST /api/seen` with `{"key": "<16 hex digits>", "seen": true}` marks a change seen for the reader; `false` takes the mark back. The key is the change's entry in `data-keys`. The answer repeats the key and the mark. The change page shows the marks in `data-seen`. The notes file keeps each mark with the reader's name, where its request came from, and its `User-Agent`; taking a mark back removes it.
+
+### Where an action came from
+
+Decision 0012: only the reader decides, and an agent with a shell on the same machine could send the reader's requests itself. So every write records its source:
+
+| Source | When |
+|---|---|
+| `page` | The request has all three: the token cookie; `Sec-Fetch-Site: same-origin`, which a browser sets and a page on another site cannot; and in `Driftmark-Page`, a marker this server put into a page less than an hour ago, among the last 1,024 it handed out. |
+| `mcp` | The MCP connector, `driftmark mcp`. Its "user agent" is the client's name and version from the MCP handshake, such as `claude-code 2.1.0`. |
+| `api` | Any other write with the token, such as `curl` with the cookie, or a request with an unknown or old marker. |
+| `unknown` | An action recorded before driftmark kept sources: what a version 1 notes file held. |
+
+- **The marker.** Every HTML page gets a new random marker, 128 bits as 32 hex digits, in `<meta name="driftmark-page">`. The server keeps it in memory for one hour, and keeps the last 1,024: a server that starts again forgets them all. The page script sends it back in the `Driftmark-Page` header with every write. It is no secret from a program that loads a page with the token. It makes acting as the page a deliberate act, and such a request still counts as `api` unless it also sends the browser's `Sec-Fetch-Site`.
+- **An old marker.** The page script also sends `Driftmark-Page-Only: yes`. A write with that header that would not count as `page` is refused with `412` instead of being recorded as `api`. The script then loads its own page again, out of sight, for a fresh marker, and sends the write once more without that header. So a page left open for hours, or open while the server started again, still saves as `page`.
+- **The `User-Agent`** is kept with control characters removed, cut to 160 characters.
+- **What the reader sees.** A reader's action whose source is not `page` carries a warning in the note's history, such as `Decided through the API, not on the page` (`docs/features/notes.md`).
 
 ## Errors
 
 | Status | When | Example message |
 |---|---|---|
 | 400 | A search's parameters are wrong: a query with more than 32 words, a `limit` outside 1 to 100, or a parameter that is not valid text. | `` `limit` must be a number from 1 to 100 `` |
+| 401 | A write without the token cookie, or with an old one; it answers JSON, whose `error` the page shows in place of the failed save. A read that needs the token gets an HTML page that says the same. | `Saving notes and seen marks needs the reader's token. Open the address that driftmark serve printed when it started, the one that ends in ?token=, in this browser, then try again. A new tab keeps this page as it is. A program without a browser sends the token in the cookie driftmark-4170.` |
 | 404 | The address names nothing: an unknown revision, text that is not a range, a date in neither form, two points without a common history, a path that is not a Markdown file in the repository, a document missing at that revision, a document that did not change in the range, a named default branch that does not exist, or a working tree in a bare repository. | `` `nope` does not name a commit `` |
 | 500 | Reading git failed, or the rules file is broken. The message names the cause. | ``git could not be read: object 3f2a… is not in the repo`` |
 
-A page route answers with an HTML page that says so; an `/api/` route answers with JSON: `{"error": "<the message>"}`. The notes routes add `409` (the loop refuses the change), `415` and `403` (the body rule in "Who may ask"), `422` (a document that cannot be read) and `503` (the notes file); "Notes" lists them.
+A page route answers with an HTML page that says so; an `/api/` route answers with JSON: `{"error": "<the message>"}`. The notes routes add `409` (the loop refuses the change), `412` (a write from a page whose marker is out of date, which asked to be refused; see "Where an action came from"), `415` and `403` (the body rule in "Who may ask"), `422` (a document that cannot be read) and `503` (the notes file); "Notes" lists them.
 
 ## Live reload
 
@@ -639,27 +692,31 @@ The rules version is part of a document's key because the rules file's masthead 
 
 ## Who may ask
 
-**Bound to this machine only** (an address in `127.0.0.0/8` or `::1`, and no `--token`): a request must name this machine in its `Host` header: `localhost`, a name under `.localhost`, an address in `127.0.0.0/8`, or `[::1]`, with any port. Any other host gets `403`. This stops a web page elsewhere that points its own name at `127.0.0.1` (DNS rebinding): its requests carry its own name. The port is not checked, so a tunnel from another local port still works.
-
-**Bound to any other address, or started with `--token`**: every request needs the token, the static files and the event stream included. Without `--token`, a random one is made: 128 bits from the system, written as 32 hex digits.
+The server always has a token (see "The token"). A browser presents it once:
 
 1. The reader opens the address the server printed, which ends in `?token=<token>`.
 2. The server checks the token. When it matches, it answers `303 See Other`, sends the browser to the same address without the `token` part (other query parts stay), and sets the cookie `driftmark-<port>=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`.
 3. The browser then sends the cookie with every request, for 30 days. The token is no longer in the address, so it does not stay in the history or in a link the reader shares.
-4. A request without the token or the cookie, or with a wrong one, gets `401` and a page that says to open the printed address. The token is accepted in the address only for `GET` and `HEAD`.
+4. The token is accepted in the address only for `GET` and `HEAD`. A wrong one there gets `401`.
 
 - The cookie's name holds the port, because a browser sends a host's cookies to every port, and two servers must not share one.
 - `HttpOnly` keeps the cookie from scripts. `SameSite=Strict` keeps another site from sending requests with it.
 - Tokens are compared in time that does not depend on where they differ.
 - A tool without a cookie jar uses one: `curl -c jar -b jar -L 'http://host:4170/api/home?token=…'`.
 
-**Requests with a body** (notes, from M3 on) must be JSON and come from the server's own pages. Before any route sees it, a `POST`, `PUT`, `PATCH` or `DELETE`:
+**Every write** (any method but `GET` and `HEAD`) needs the token cookie, on every address. Without it, or with a cookie from an earlier token, the answer is `401` with JSON whose `error` says how to get the token. The reader's page shows that sentence where the save failed, and keeps what was typed: opening the printed address in a new tab of the same browser sets the cookie, and pressing save again works.
+
+**Reads on this machine** (an address in `127.0.0.0/8` or `::1`, with a random token): no token is needed, but a request must name this machine in its `Host` header: `localhost`, a name under `.localhost`, an address in `127.0.0.0/8`, or `[::1]`, with any port. Any other host gets `403`, writes included. This stops a web page elsewhere that points its own name at `127.0.0.1` (DNS rebinding): its requests carry its own name. The port is not checked, so a tunnel from another local port still works.
+
+**Reads on any other address, or with a token that was given**: every request needs the token, the static files and the event stream included. A request without the token or the cookie, or with a wrong one, gets `401` and a page that says to open the printed address.
+
+**Requests with a body** must be JSON and must not come from another site's page. Before any route sees it, a `POST`, `PUT`, `PATCH` or `DELETE` that has the token cookie:
 
 - without `Content-Type: application/json` gets `415`;
 - with an `Origin` other than `http://<the Host it asked for>` gets `403`, and so does `Origin: null`;
 - with `Sec-Fetch-Site` other than `same-origin` or `none` gets `403`.
 
-A request without `Origin`, such as one from a command-line tool, passes; it still needs the token where one is required. The notes routes are the routes that take a body.
+A request without `Origin`, such as one from a command-line tool, passes, and counts as `api` (see "Where an action came from"). The notes routes are the routes that take a body.
 
 ## Safety
 

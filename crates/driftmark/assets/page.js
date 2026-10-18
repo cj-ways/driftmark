@@ -397,6 +397,12 @@
       const adopted = document.importNode(next, true);
       now.replaceWith(adopted);
       document.title = fresh.title;
+      // The fresh page's marker, which the notes script sends with writes.
+      const marker = fresh.querySelector('meta[name="driftmark-page"]');
+      const mine = document.querySelector('meta[name="driftmark-page"]');
+      if (marker && mine) {
+        mine.content = marker.content;
+      }
       prepare(adopted);
       window.scrollTo(0, y);
     } catch (_) {

@@ -50,15 +50,46 @@ pub(crate) trait Connector: Send + Sync + 'static {
     fn instructions(&self) -> String;
     /// The tools, in the order a client lists them.
     fn tools(&self) -> Vec<ToolInfo>;
-    /// Runs one tool for the client named `client`, as its handshake names
+    /// Runs one tool for `client`, as its handshake names
     /// itself, such as `claude-code`. `None` when no tool has this name.
-    fn call(&self, name: &str, arguments: Map<String, Value>, client: &str) -> Option<Reply>;
+    fn call(&self, name: &str, arguments: Map<String, Value>, client: &Client) -> Option<Reply>;
     /// Why no tool has this name, as the sentence of the protocol error.
     fn missing(&self, name: &str) -> String;
 }
 
 /// The name a client goes by when its handshake names none.
 pub(crate) const UNNAMED_CLIENT: &str = "agent";
+
+/// The client that called a tool, as its handshake names itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Client {
+    /// Its name, such as `claude-code`: the name an agent's replies and
+    /// records carry.
+    pub name: String,
+    /// Its version, as it gives it; empty when it gives none.
+    pub version: String,
+}
+
+impl Client {
+    /// A client that named itself `name`, at `version`.
+    pub(crate) fn new(name: &str, version: &str) -> Client {
+        Client {
+            name: name.to_owned(),
+            version: version.to_owned(),
+        }
+    }
+
+    /// What it calls itself in full, such as `claude-code 2.1.0`, for the
+    /// history of the notes it acts on: the MCP connector's `User-Agent`.
+    pub(crate) fn agent(&self) -> String {
+        let version = self.version.trim();
+        if version.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{} {version}", self.name)
+        }
+    }
+}
 
 /// Serves `connector` over standard input and output until the client
 /// closes standard input.
@@ -119,9 +150,11 @@ impl<C: Connector> ServerHandler for Server<C> {
                     .peer_info()
                     .map(|info| info.client_info.clone())
             })
-            .map(|info| info.name)
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| UNNAMED_CLIENT.to_owned());
+            .filter(|info| !info.name.trim().is_empty())
+            .map_or_else(
+                || Client::new(UNNAMED_CLIENT, ""),
+                |info| Client::new(&info.name, &info.version),
+            );
         let asked = name.clone();
         let reply = tokio::task::spawn_blocking(move || connector.call(&asked, arguments, &client))
             .await

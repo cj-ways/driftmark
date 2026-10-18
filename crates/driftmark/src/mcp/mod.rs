@@ -243,7 +243,7 @@ impl Connector for Watched {
         &self,
         name: &str,
         arguments: Map<String, Value>,
-        client: &str,
+        client: &protocol::Client,
     ) -> Option<protocol::Reply> {
         let _busy = self.idle.begin();
         self.tools.call(name, arguments, client)

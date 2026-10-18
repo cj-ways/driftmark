@@ -523,6 +523,18 @@ dialog.dm-dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 .dm-because { margin: 0.35rem 0 0.5rem; padding: 0.3rem 0.6rem; border-left: 4px solid var(--note-line); background: var(--note-bg); font-size: 0.9375rem; font-weight: 600; color: var(--text); }
 .dm-because::before { content: "↳ "; }
 li.change.is-caused { border-left-color: var(--note-line); }
+.dm-warn { list-style: none; margin: 0 0 0.6rem; padding: 0.4rem 0.6rem; border-left: 4px solid var(--warn-line); border-radius: 6px; background: var(--warn-bg); color: var(--text); }
+.dm-warn li { margin: 0.15rem 0; }
+.dm-warn-sign { color: var(--warn-line); font-weight: 700; }
+.dm-history { margin: 0.4rem 0 0.5rem; font-size: 0.875rem; color: var(--text-soft); }
+.dm-history summary { cursor: pointer; font-weight: 600; }
+.dm-history ol { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+.dm-history li { margin: 0.1rem 0; }
+.dm-token { margin: 0.6rem 0 0; padding: 0.55rem 0.75rem; border: 1px solid var(--warn-line); border-left-width: 4px; border-radius: 8px; background: var(--warn-bg); color: var(--text); overflow-wrap: anywhere; }
+.doc-body .dm-token p, .dm-token p { margin: 0 0 0.35rem; }
+.dm-token p:last-child { margin-bottom: 0; }
+.dm-token-head { font-weight: 700; }
+
 .dm-inline { margin-top: 0.6rem; }
 .dm-inline label { font-weight: 600; }
 

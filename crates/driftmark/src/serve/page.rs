@@ -104,7 +104,16 @@ pub(crate) fn escape(text: &str) -> String {
 /// sheet: it sets the reader's chosen theme before the first paint, and
 /// waits for the page to load before it does anything else. The browser
 /// fetches it beside the style sheet, which blocks the first paint anyway.
-pub(crate) fn page(assets: &Assets, frame: &Frame<'_>, content: &str) -> String {
+///
+/// `marker` is this page load's own marker, which the notes script sends
+/// back with every write so the server can tell the reader's page from
+/// other programs (decision 0012, `marker.rs`).
+pub(crate) fn page(
+    assets: &Assets,
+    frame: &Frame<'_>,
+    content: &str,
+    marker: Option<&str>,
+) -> String {
     let live = match frame.live {
         Live::No => "",
         Live::Worktree => " data-live=\"worktree\"",
@@ -120,6 +129,12 @@ pub(crate) fn page(assets: &Assets, frame: &Frame<'_>, content: &str) -> String 
             ""
         }
     };
+    let marker = marker.map_or_else(String::new, |marker| {
+        format!(
+            "<meta name=\"driftmark-page\" content=\"{}\">\n",
+            escape(marker)
+        )
+    });
     let checkout = if frame.worktree {
         format!(
             "<a href=\"/changes/auto\"{}>This checkout</a>",
@@ -132,7 +147,7 @@ pub(crate) fn page(assets: &Assets, frame: &Frame<'_>, content: &str) -> String 
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <meta name=\"color-scheme\" content=\"light dark\">\n\
-         <title>{title} · driftmark</title>\n\
+         {marker}<title>{title} · driftmark</title>\n\
          <link rel=\"stylesheet\" href=\"{css}\">\n\
          <script src=\"{js}\"></script>\n</head>\n<body{live}{revision}>\n\
          <a class=\"skip\" href=\"#Main\">Skip to the content</a>\n\

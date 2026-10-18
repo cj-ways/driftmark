@@ -2,9 +2,10 @@
   "name": "driftmark-browser-tests",
   "private": true,
   "type": "module",
-  "description": "Runs the notes anchoring cases in headless Chromium against driftmark's reading pages",
+  "description": "Runs the notes anchoring cases and the notes loop in headless Chromium against driftmark's pages, with axe-core for accessibility",
   "license": "MIT OR Apache-2.0",
   "dependencies": {
+    "axe-core": "4.14.0",
     "playwright": "1.64.1"
   }
 }

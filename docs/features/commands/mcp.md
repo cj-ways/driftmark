@@ -620,6 +620,7 @@ The answer, with `schema_version` 1, holds the `statuses` it listed, the number 
 | `proposal`, `decision` | The outcome an agent proposed and the one the reader decided, or `null`. |
 | `applied` | How many commits applied it. |
 | `author`, `updated_at` | Who wrote it, and when it last changed, in seconds since 1970 UTC. |
+| `warnings` | The warnings of its history, oldest first: the reader's actions that did not come from the reader's own page, such as "Decided through the API, not on the page" (decision 0012). Usually empty. A decided note with a warning may not hold the reader's decision; ask the reader before applying it. |
 
 A repository without a notes file answers with no notes, and the call makes no file.
 
@@ -654,7 +655,8 @@ It answers:
       "decision": null,
       "applied": 0,
       "author": "Ana",
-      "updated_at": 1792357491
+      "updated_at": 1792357491,
+      "warnings": []
     },
     {
       "id": 2,
@@ -673,7 +675,8 @@ It answers:
       "decision": null,
       "applied": 0,
       "author": "Ana",
-      "updated_at": 1792357491
+      "updated_at": 1792357491,
+      "warnings": []
     },
     {
       "id": 3,
@@ -692,7 +695,8 @@ It answers:
       "decision": "change",
       "applied": 0,
       "author": "Ana",
-      "updated_at": 1792357491
+      "updated_at": 1792357491,
+      "warnings": []
     }
   ],
   "reviews": [
@@ -715,7 +719,7 @@ The answer, with `schema_version` 1:
 
 | Field | Meaning |
 |---|---|
-| `note` | The whole note, in the JSON of the notes model: its target with the quote and its context, the reader's point, the thread, the proposal, the decision and the commits. |
+| `note` | The whole note, in the JSON of the notes model: its target with the quote and its context, the reader's point, the thread, the proposal, the decision, the commits, and its `history`: every action with who did it, when, where it came from (`page`, `mcp`, `api` or `unknown`) and the warning of a reader's action that did not come from the page. |
 | `review` | Its review: `id`, `kind` (`range` or `document`) and `scope`. |
 | `made_on` | The version it was made on: the commit, or `worktree`, and the quote's first and last line there. `lines` is `null` when that version can no longer be read. |
 | `now` | Where its words are in the version an agent edits: the range's newer side for a range's review, the working tree for a document's (`HEAD` in a bare repository). `revision` names that version; `state` is `exact`, `moved`, `fuzzy`, `outdated` or `orphaned`; then the bytes, the lines, the `score`, and `text` when the words there are not the quote. A note on the old side of a change stays on the version it was made on. |
@@ -765,7 +769,17 @@ It answers:
     "applied": [],
     "author": "Ana",
     "created_at": 1792357491,
-    "updated_at": 1792357491
+    "updated_at": 1792357491,
+    "history": [
+      {
+        "action": "made",
+        "role": "reader",
+        "by": "Ana",
+        "at": 1792357491,
+        "source": "page",
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+      }
+    ]
   },
   "review": {"id": 1, "kind": "range", "scope": "main...feature"},
   "made_on": {"revision": "59f1a26ed292405ee4ef67182b681d68723d2726", "lines": [9, 9]},
@@ -863,7 +877,8 @@ It answers:
     "decision": null,
     "applied": 0,
     "author": "Ana",
-    "updated_at": 1792357491
+    "updated_at": 1792357491,
+    "warnings": []
   },
   "reply": {
     "role": "agent",
@@ -916,7 +931,8 @@ It answers:
     "decision": null,
     "applied": 0,
     "author": "Ana",
-    "updated_at": 1792357491
+    "updated_at": 1792357491,
+    "warnings": []
   },
   "proposal": {
     "outcome": "modify",
@@ -991,7 +1007,8 @@ It answers:
     "decision": "change",
     "applied": 1,
     "author": "Ana",
-    "updated_at": 1792357491
+    "updated_at": 1792357491,
+    "warnings": []
   },
   "applied": [
     {

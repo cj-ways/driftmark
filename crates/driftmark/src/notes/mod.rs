@@ -8,7 +8,7 @@
 //! - [`place`] finds each note again in a version of its document, with the
 //!   rules in `driftmark_core::notes::anchor`.
 //!
-//! `driftmark serve` uses all three; `driftmark mcp` will too. The rules of
+//! `driftmark serve` and `driftmark mcp` use all three. The rules of
 //! the notes loop and the anchoring live in the core.
 
 pub mod store;
@@ -22,7 +22,7 @@ use driftmark_core::diff::{BlockMap, block_map};
 use driftmark_core::document::Document;
 use driftmark_core::notes::{Note, Origin, Placement, reanchor};
 
-pub use store::{Act, NewNote, NoteEdit, Review, Scope, Store, StoreError};
+pub use store::{Act, NewNote, NoteEdit, Review, Scope, SeenMark, Store, StoreError, Via};
 
 /// The notes file's name inside the `driftmark` folder of the git common
 /// directory.

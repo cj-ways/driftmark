@@ -37,6 +37,7 @@ fn note(id: u64, status: Status) -> Note {
         author: "ana".into(),
         created_at: 1,
         updated_at: 1,
+        history: Vec::new(),
     }
 }
 

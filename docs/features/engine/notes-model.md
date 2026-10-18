@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Notes model
 
-> Short version: a note is a reader's point on an exact stretch of a document's Markdown source, at the commit where it was made. `driftmark-core` holds the note, the rules of its loop and the anchoring: `notes::Note`, `notes::next_status`, `notes::anchor`, `notes::packet` and `notes::caused`. A note keeps its quote with up to 32 characters of context on each side, its byte offsets, its headings and its block. When the document changes, `reanchor` finds the quote again and gives the note one of five states: exact, moved, fuzzy, outdated or orphaned. An orphaned note is never deleted. The loop moves a note from open through sent, answered and discussing to decided and applied; only the reader decides. A review's notes go to an agent as a prompt or a review file, in two rounds: discuss, then apply. The program keeps notes in one SQLite file (`docs/features/notes.md`, decision 0004).
+> Short version: a note is a reader's point on an exact stretch of a document's Markdown source, at the commit where it was made. `driftmark-core` holds the note, the rules of its loop and the anchoring: `notes::Note`, `notes::next_status`, `notes::anchor`, `notes::packet`, `notes::caused` and `notes::history`. A note keeps the history of every action done to it, each with where its request came from, and a reader's action that did not come from the reader's page carries a warning. A note keeps its quote with up to 32 characters of context on each side, its byte offsets, its headings and its block. When the document changes, `reanchor` finds the quote again and gives the note one of five states: exact, moved, fuzzy, outdated or orphaned. An orphaned note is never deleted. The loop moves a note from open through sent, answered and discussing to decided and applied; only the reader decides. A review's notes go to an agent as a prompt or a review file, in two rounds: discuss, then apply. The program keeps notes in one SQLite file (`docs/features/notes.md`, decision 0004).
 
 ## The note
 
@@ -50,7 +50,17 @@ date: 2026-10-18
   "applied": [],
   "author": "Ana",
   "created_at": 1792352574,
-  "updated_at": 1792353010
+  "updated_at": 1792353010,
+  "history": [
+    {"action": "made", "role": "reader", "by": "Ana", "at": 1792352574, "source": "page",
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15"},
+    {"action": "send", "role": "reader", "by": "Ana", "at": 1792352900, "source": "api",
+     "user_agent": "curl/8.5.0", "warning": "Sent to an agent through the API, not on the page"},
+    {"action": "reply", "role": "agent", "by": "agent-session-1", "at": 1792353000, "source": "mcp",
+     "user_agent": "agent-session-1 1.0"},
+    {"action": "propose", "role": "agent", "by": "agent-session-1", "at": 1792353010, "source": "mcp",
+     "user_agent": "agent-session-1 1.0"}
+  ]
 }
 ```
 
@@ -70,6 +80,7 @@ date: 2026-10-18
 | `applied` | The commits that applied the decision: `commit`, `by`, `at`. |
 | `author` | The reader's name, from `driftmark serve --reader`. |
 | `created_at`, `updated_at` | Seconds since 1970 UTC. The core reads no clock; the program passes the time in. |
+| `history` | Every action done to the note, oldest first, with where it came from (see "History"). A note read from JSON without it has an empty one. |
 
 ### The target
 
@@ -119,6 +130,41 @@ The quote, the context, the position and the version follow the W3C Web Annotati
 | Withdraw | reader | any | withdrawn |
 
 Every other combination is refused with a `Refusal`: the note is final, only the reader may do it, only an agent proposes, the note is decided already, or only a decided note can be applied. `src/notes/loop.expected.txt` lists every status, action and role with its answer.
+
+## History
+
+`notes::history` holds a note's history (decision 0012). Each entry, `notes::Event`:
+
+| Field | What it holds |
+|---|---|
+| `action` | `made`, `edit`, `send`, `reply`, `propose`, `decide`, `applied` or `withdraw`. Every decision is `decide`, whatever its outcome; `EventAction::of` maps a loop action to its entry. |
+| `role` | `reader` or `agent`. |
+| `by` | The reader's name, or the agent's client. |
+| `at` | Seconds since 1970 UTC. |
+| `source` | Where the request came from: `page` (the reader's own page), `mcp` (the connector), `api` (any other request with the token) or `unknown` (recorded before driftmark kept sources). The program decides it; `docs/features/commands/serve.md` ("Where an action came from") says how. |
+| `user_agent` | What the sending program calls itself, cut to 160 characters: a browser's or a tool's `User-Agent`, or the MCP client's name and version. Left out when it gave none. |
+| `warning` | A sentence when the entry should be looked at; left out otherwise. |
+
+`notes::warning(action, role, source)` is the only rule that makes a warning, and `Event::new` applies it, so the page and the connector say the same thing:
+
+- an agent's action never warns: replying, proposing and recording commits through the connector is the loop;
+- a reader's action from the page never warns;
+- any other reader's action warns, with the action and the source in plain words.
+
+| Action | Through the API | Through the connector | Before sources were kept |
+|---|---|---|---|
+| `made` | Made through the API, not on the page | Made through the MCP connector, not on the page | Made before driftmark recorded where actions come from, so it may not have come from the page |
+| `edit` | Edited … | Edited … | Edited … |
+| `send` | Sent to an agent … | Sent to an agent … | Sent to an agent … |
+| `reply` | Replied … | Replied … | Replied … |
+| `propose` | Proposed … | Proposed … | Proposed … |
+| `decide` | Decided through the API, not on the page | Decided through the MCP connector, not on the page | Decided before driftmark recorded where actions come from, so it may not have come from the page |
+| `applied` | Marked applied … | Marked applied … | Marked applied … |
+| `withdraw` | Withdrawn … | Withdrawn … | Withdrawn … |
+
+The `…` stands for the rest of the sentence in the same column. `src/notes/history.expected.txt` lists every action, role and source with its warning. The connector has no tool for a reader's action, so the middle column shows only if the program is changed to allow one.
+
+The warning is worked out each time a note is read, from the action, the role and the source; the notes file keeps only those three. In the notes file, a version 1 file brought up to version 2 gets the actions it can show with the source `unknown`: the making of each note, each reply, the last proposal, the decision, each set of recorded commits (as the reader's when the name is the note's author, otherwise an agent's), and a withdrawal. Edits and sends left no trace before, so an old note's history has none.
 
 ## Anchoring
 
@@ -241,7 +287,7 @@ A commit that changed only the blank lines between blocks made no change. The an
 
 ## Seen marks
 
-`notes::change_key(path, change)` gives a change of a change page a key that stays the same while the change does: 16 hex digits of an XXH3 hash of the path, the kind of change and the text on each side. The program keeps each reader's "Seen" marks under these keys. A change seen once stays seen after an agent adds commits that leave it as it is; a change whose text moves on is new again.
+`notes::change_key(path, change)` gives a change of a change page a key that stays the same while the change does: 16 hex digits of an XXH3 hash of the path, the kind of change and the text on each side. The program keeps each reader's "Seen" marks under these keys. A change seen once stays seen after an agent adds commits that leave it as it is; a change whose text moves on is new again. The notes file keeps each mark with the reader's name, its source (as in "History") and its `User-Agent`; a mark shows no warning.
 
 ## Speed
 

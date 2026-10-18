@@ -5,15 +5,19 @@
 //! commit where it was made. [`anchor`] finds that stretch again in a later
 //! version. [`packet`] writes a review's notes as a prompt or a review file
 //! for an agent. [`caused`] finds the changes of a range that a commit
-//! recorded on a note made, for "changed because of note n12". This module holds the note itself and the rules of its
-//! loop: who may move a note to which status. The program keeps notes in its
-//! notes file; nothing here reads or writes it.
+//! recorded on a note made, for "changed because of note n12". [`history`]
+//! holds each action done to a note with where it came from, and the
+//! warning a reader's action off the page carries. This module holds the
+//! note itself and the rules of its loop: who may move a note to which
+//! status. The program keeps notes in its notes file; nothing here reads or
+//! writes it.
 //!
 //! `docs/features/engine/notes-model.md` states the contract in full.
 
 pub mod anchor;
 pub mod caused;
 mod fuzzy;
+pub mod history;
 pub mod packet;
 
 use std::fmt;
@@ -24,6 +28,7 @@ use crate::diff::{Change, Subject};
 
 pub use anchor::{Anchor, AnchorState, Origin, Placement, Quote, locate_text, reanchor};
 pub use caused::{Around, Ends, caused};
+pub use history::{Event, EventAction, Source, warning};
 
 /// Where a note was made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +259,10 @@ pub struct Note {
     pub created_at: i64,
     /// When it last changed, in seconds since 1970 UTC.
     pub updated_at: i64,
+    /// Every action done to it, oldest first, each with where it came from
+    /// (decision 0012).
+    #[serde(default)]
+    pub history: Vec<Event>,
 }
 
 /// Something a reader or an agent does to a note.

@@ -8,11 +8,6 @@ use std::path::PathBuf;
 /// Where the server listens when `--addr` is not given: this machine only.
 pub(crate) const DEFAULT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4170);
 
-/// The shortest token `--token` accepts. A token is the only thing between
-/// the network and the documents, so a short one that can be guessed is
-/// refused.
-pub(crate) const MIN_TOKEN_LEN: usize = 16;
-
 /// What `driftmark serve` was asked to do.
 #[derive(Debug, PartialEq)]
 pub(crate) enum Request {
@@ -29,8 +24,11 @@ pub(crate) struct Args {
     pub repo: PathBuf,
     /// The address and port to listen on. Port 0 picks a free port.
     pub addr: SocketAddr,
-    /// The token a browser must present, when given.
+    /// The token, when `--token` gave it.
     pub token: Option<String>,
+    /// The file to read the token from, when `--token-file` names one. It
+    /// is read when the server starts, not here.
+    pub token_file: Option<PathBuf>,
     /// The branch the home page and `auto` compare with, when given.
     pub base: Option<String>,
     /// The reader's name on notes, replies and seen marks, when given.
@@ -50,6 +48,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
     let mut repo = None;
     let mut addr = None;
     let mut token = None;
+    let mut token_file = None;
     let mut base = None;
     let mut reader = None;
     let mut review_dir = None;
@@ -66,7 +65,11 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
             "--help" | "-h" => return Ok(Request::Help),
             "--repo" => repo = Some(PathBuf::from(value(&mut args, name, inline)?)),
             "--addr" => addr = Some(address(&text_value(&mut args, name, inline)?)?),
-            "--token" => token = Some(checked_token(text_value(&mut args, name, inline)?)?),
+            "--token" => {
+                let value = text_value(&mut args, name, inline)?;
+                token = Some(super::token::checked(&value, "`--token`")?);
+            }
+            "--token-file" => token_file = Some(PathBuf::from(value(&mut args, name, inline)?)),
             "--base" => base = Some(text_value(&mut args, name, inline)?),
             "--reader" => reader = Some(checked_reader(&text_value(&mut args, name, inline)?)?),
             "--review-dir" => {
@@ -84,6 +87,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
         repo: repo.unwrap_or_else(|| PathBuf::from(".")),
         addr: addr.unwrap_or(DEFAULT_ADDR),
         token,
+        token_file,
         base,
         reader,
         review_dir,
@@ -135,23 +139,6 @@ fn address(text: &str) -> Result<SocketAddr, String> {
     })
 }
 
-/// A token goes into a web address and a cookie as it is, so it may hold
-/// only characters that need no escaping there.
-fn checked_token(token: String) -> Result<String, String> {
-    let plain = token
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~'));
-    if !plain {
-        return Err("`--token` may hold only letters, digits, `-`, `_`, `.` and `~`".to_owned());
-    }
-    if token.len() < MIN_TOKEN_LEN {
-        return Err(format!(
-            "`--token` needs at least {MIN_TOKEN_LEN} characters; leave it out to get a random one"
-        ));
-    }
-    Ok(token)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +163,7 @@ mod tests {
                 repo: PathBuf::from("."),
                 addr: DEFAULT_ADDR,
                 token: None,
+                token_file: None,
                 base: None,
                 reader: None,
                 review_dir: None,
@@ -199,6 +187,13 @@ mod tests {
         let args = serve(&["--repo=x", "--addr", "100.64.0.1:8000"]);
         assert_eq!(args.repo, PathBuf::from("x"));
         assert_eq!(args.addr.to_string(), "100.64.0.1:8000");
+        let args = serve(&["--token-file", "/run/t", "--token=a-B_c.d~0123456789"]);
+        assert_eq!(args.token_file, Some(PathBuf::from("/run/t")));
+        assert_eq!(args.token.as_deref(), Some("a-B_c.d~0123456789"));
+        assert_eq!(
+            serve(&["--token-file=t"]).token_file,
+            Some(PathBuf::from("t"))
+        );
         let args = serve(&["--reader", " Ana ", "--review-dir=/tmp/reviews"]);
         assert_eq!(args.reader.as_deref(), Some("Ana"));
         assert_eq!(args.review_dir, Some(PathBuf::from("/tmp/reviews")));
@@ -217,6 +212,7 @@ mod tests {
             (&["--reader", "  "], "`--reader` takes a name"),
             (&["--reader", "a\nb"], "`--reader` takes a name"),
             (&["--review-dir"], "`--review-dir` needs a value"),
+            (&["--token-file"], "`--token-file` needs a value"),
             (&["--port", "1"], "unknown option `--port`"),
             (&["main"], "`main` is not an option"),
         ] {

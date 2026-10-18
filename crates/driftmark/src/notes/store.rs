@@ -5,6 +5,12 @@
 //! carries a version in SQLite's `user_version`; each version adds one
 //! migration, applied once, in order, inside a transaction. A file made by a
 //! newer driftmark is refused rather than changed.
+//!
+//! Every action on a note, and every seen mark, records where its request
+//! came from (decision 0012): the reader's page, the MCP connector, or any
+//! other program that held the token. A note's history is read back with
+//! it, and a reader's action that did not come from the page carries the
+//! core's warning.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -12,20 +18,30 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use driftmark_core::notes::{
-    Action, Anchor, Applied, Ask, Decision, Note, Outcome, Quote, Refusal, Reply, ReplyStance,
-    Role, Side, Stance, Status, Target, next_status,
+    Action, Anchor, Applied, Ask, Decision, Event, EventAction, Note, Outcome, Quote, Refusal,
+    Reply, ReplyStance, Role, Side, Source, Stance, Status, Target, next_status,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::Serialize;
 
 /// The schema version this program writes.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The migrations, by the version they lead to. Version 1 is the first
 /// release's schema. A later version appends one; none is ever edited.
-const MIGRATIONS: &[(i64, &str)] = &[(
-    1,
-    "
+///
+/// Version 2 adds each action's source (decision 0012): the `actions`
+/// table, and a source and a `User-Agent` on each seen mark. The actions a
+/// version 1 file can show are copied in with the source `unknown`: each
+/// note's making, replies, the last proposal, the decision, each recorded
+/// set of commits, and a withdrawal. Edits and sends left no trace in
+/// version 1, so they are not in an old note's history. Who recorded old
+/// commits is a guess: the reader when the name is the note's author, an
+/// agent otherwise.
+const MIGRATIONS: &[(i64, &str)] = &[
+    (
+        1,
+        "
     CREATE TABLE reviews (
       id INTEGER PRIMARY KEY,
       kind TEXT NOT NULL CHECK (kind IN ('range', 'document')),
@@ -90,7 +106,92 @@ const MIGRATIONS: &[(i64, &str)] = &[(
       PRIMARY KEY (reader, change)
     );
     ",
-)];
+    ),
+    (
+        2,
+        "
+    CREATE TABLE actions (
+      id INTEGER PRIMARY KEY,
+      note INTEGER NOT NULL REFERENCES notes (id),
+      action TEXT NOT NULL,
+      role TEXT NOT NULL,
+      by TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      user_agent TEXT
+    );
+    CREATE INDEX actions_by_note ON actions (note);
+    ALTER TABLE seen ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown';
+    ALTER TABLE seen ADD COLUMN user_agent TEXT;
+    INSERT INTO actions (note, action, role, by, at, source)
+      SELECT id, 'made', 'reader', author, created_at, 'unknown' FROM notes ORDER BY id;
+    INSERT INTO actions (note, action, role, by, at, source)
+      SELECT note, 'reply', role, by, at, 'unknown' FROM replies ORDER BY id;
+    INSERT INTO actions (note, action, role, by, at, source)
+      SELECT id, 'propose', 'agent',
+        COALESCE(json_extract(proposal, '$.by'), ''),
+        COALESCE(json_extract(proposal, '$.at'), updated_at), 'unknown'
+      FROM notes WHERE json_valid(proposal) ORDER BY id;
+    INSERT INTO actions (note, action, role, by, at, source)
+      SELECT id, 'decide', 'reader',
+        COALESCE(json_extract(decision, '$.by'), author),
+        COALESCE(json_extract(decision, '$.at'), updated_at), 'unknown'
+      FROM notes WHERE json_valid(decision) ORDER BY id;
+    INSERT INTO actions (note, action, role, by, at, source)
+      SELECT applied.note, 'applied',
+        CASE WHEN applied.by = notes.author THEN 'reader' ELSE 'agent' END,
+        applied.by, applied.at, 'unknown'
+      FROM applied JOIN notes ON notes.id = applied.note
+      GROUP BY applied.note, applied.by, applied.at
+      ORDER BY applied.at, applied.note;
+    INSERT INTO actions (note, action, role, by, at, source)
+      SELECT id, 'withdraw', 'reader', author, updated_at, 'unknown'
+      FROM notes WHERE status = 'withdrawn' ORDER BY id;
+    ",
+    ),
+];
+
+/// The most characters of a `User-Agent` the file keeps.
+pub const AGENT_CHARS: usize = 160;
+
+/// Where a write to the notes file came from (decision 0012).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Via {
+    /// The reader's page, the MCP connector, or any other request with the
+    /// token.
+    pub source: Source,
+    /// What the sending program calls itself: a `User-Agent`, or the MCP
+    /// client's name and version. At most [`AGENT_CHARS`] characters, with
+    /// no control characters; `None` when it gave nothing.
+    pub user_agent: Option<String>,
+}
+
+impl Via {
+    /// A source with what the sending program called itself, cut short.
+    #[must_use]
+    pub fn new(source: Source, user_agent: Option<&str>) -> Via {
+        let user_agent = user_agent
+            .map(|text| {
+                text.chars()
+                    .filter(|c| !c.is_control())
+                    .take(AGENT_CHARS)
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            })
+            .filter(|text| !text.is_empty());
+        Via { source, user_agent }
+    }
+}
+
+/// A seen mark as the file keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenMark {
+    /// When it was set, in seconds since 1970 UTC.
+    pub at: i64,
+    /// Where it came from.
+    pub via: Via,
+}
 
 /// How long a writer waits for another process that holds the file.
 const BUSY_WAIT: Duration = Duration::from_secs(5);
@@ -395,6 +496,7 @@ fn read_note(values: Vec<rusqlite::types::Value>) -> Result<Note, StoreError> {
             author,
             created_at,
             updated_at,
+            history: Vec::new(),
         })
     }
 }
@@ -522,17 +624,24 @@ impl Store {
     }
 
     /// Adds a note to the review of `scope`, open, and returns it with its
-    /// number.
+    /// number. Its history starts with its making, from `via`.
     ///
     /// # Errors
     ///
     /// When the file cannot be written.
-    pub fn add(&self, scope: &Scope, new: &NewNote, now: i64) -> Result<Note, StoreError> {
+    pub fn add(
+        &self,
+        scope: &Scope,
+        new: &NewNote,
+        now: i64,
+        via: &Via,
+    ) -> Result<Note, StoreError> {
         let review = self.review_for(scope, now)?;
         let id = self.with(|connection| {
             let target = &new.target;
             let anchor = &target.anchor;
-            connection.execute(
+            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute(
                 &format!(
                     "INSERT INTO notes ({NOTE_COLUMNS}) VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL, NULL, ?19, ?20, ?20)"
                 ),
@@ -559,7 +668,18 @@ impl Store {
                     now,
                 ],
             )?;
-            Ok(to_u64(connection.last_insert_rowid()))
+            let id = transaction.last_insert_rowid();
+            record(
+                &transaction,
+                id,
+                EventAction::Made,
+                Role::Reader,
+                &new.author,
+                now,
+                via,
+            )?;
+            transaction.commit()?;
+            Ok(to_u64(id))
         })?;
         self.note(id)
     }
@@ -696,13 +816,44 @@ impl Store {
                     notes[index].applied.push(Applied { commit, by, at });
                 }
             }
+            let mut actions = connection.prepare(
+                "SELECT note, action, role, by, at, source, user_agent FROM actions ORDER BY at, id",
+            )?;
+            let rows = actions.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            })?;
+            for row in rows {
+                let (note, action, role, by, at, source, user_agent) = row?;
+                if let Some(&index) = wanted.get(&to_u64(note)) {
+                    let action = EventAction::from_name(&action).ok_or_else(|| {
+                        StoreError::File(format!("unknown action `{action}`"))
+                    })?;
+                    notes[index].history.push(Event::new(
+                        action,
+                        value_of(&role)?,
+                        by,
+                        at,
+                        source_of(&source)?,
+                        user_agent,
+                    ));
+                }
+            }
             Ok(notes)
         })
     }
 
     /// Does `act` to note `id` as `who`, named `by`, and returns the note
     /// after it. The loop's rules decide whether it may
-    /// (`driftmark_core::notes::next_status`).
+    /// (`driftmark_core::notes::next_status`). The note's history records
+    /// the action with `via`, in the same transaction.
     ///
     /// The status is read and written in one transaction that holds the
     /// file's write lock from its start. `serve` and `mcp` write the same
@@ -720,6 +871,7 @@ impl Store {
         by: &str,
         act: &Act,
         now: i64,
+        via: &Via,
     ) -> Result<Note, StoreError> {
         self.with(|connection| {
             let transaction =
@@ -793,6 +945,15 @@ impl Store {
                 "UPDATE notes SET status = ?2, updated_at = ?3 WHERE id = ?1",
                 params![key, status.name(), now],
             )?;
+            record(
+                &transaction,
+                key,
+                EventAction::of(act.action()),
+                who,
+                by,
+                now,
+                via,
+            )?;
             transaction.commit()?;
             Ok(())
         })?;
@@ -833,7 +994,8 @@ impl Store {
         })
     }
 
-    /// Marks a change seen or not seen by a reader.
+    /// Marks a change seen or not seen by a reader. A mark keeps where its
+    /// request came from; taking it back removes it.
     ///
     /// # Errors
     ///
@@ -844,12 +1006,13 @@ impl Store {
         key: &str,
         seen: bool,
         now: i64,
+        via: &Via,
     ) -> Result<(), StoreError> {
         self.with(|connection| {
             if seen {
                 connection.execute(
-                    "INSERT INTO seen (reader, change, at) VALUES (?1, ?2, ?3) ON CONFLICT (reader, change) DO UPDATE SET at = ?3",
-                    params![reader, key, now],
+                    "INSERT INTO seen (reader, change, at, source, user_agent) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (reader, change) DO UPDATE SET at = ?3, source = ?4, user_agent = ?5",
+                    params![reader, key, now, via.source.name(), via.user_agent],
                 )?;
             } else {
                 connection.execute(
@@ -882,6 +1045,72 @@ impl Store {
             Ok(found)
         })
     }
+
+    /// A reader's seen mark on one change, with where it came from; `None`
+    /// when the change is not marked seen.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be read.
+    pub fn seen_mark(&self, reader: &str, key: &str) -> Result<Option<SeenMark>, StoreError> {
+        self.with(|connection| {
+            let found = connection
+                .query_row(
+                    "SELECT at, source, user_agent FROM seen WHERE reader = ?1 AND change = ?2",
+                    params![reader, key],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            found
+                .map(|(at, source, user_agent)| {
+                    Ok(SeenMark {
+                        at,
+                        via: Via {
+                            source: source_of(&source)?,
+                            user_agent,
+                        },
+                    })
+                })
+                .transpose()
+        })
+    }
+}
+
+/// A source as the file names it.
+fn source_of(name: &str) -> Result<Source, StoreError> {
+    Source::from_name(name).ok_or_else(|| StoreError::File(format!("unknown source `{name}`")))
+}
+
+/// Adds one entry to note `note`'s history, inside the transaction that
+/// does the action.
+fn record(
+    transaction: &rusqlite::Transaction<'_>,
+    note: i64,
+    action: EventAction,
+    who: Role,
+    by: &str,
+    now: i64,
+    via: &Via,
+) -> Result<(), StoreError> {
+    transaction.execute(
+        "INSERT INTO actions (note, action, role, by, at, source, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            note,
+            action.name(),
+            text_of(&who),
+            by,
+            now,
+            via.source.name(),
+            via.user_agent
+        ],
+    )?;
+    Ok(())
 }
 
 /// A note or review number as SQLite stores it.
