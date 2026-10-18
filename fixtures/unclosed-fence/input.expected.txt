@@ -1,0 +1,15 @@
+title: Some("Unclosed fence")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 0..16
+    headings: []
+    containers: [], parent: None
+    text: "Unclosed fence"
+    source: "# Unclosed fence"
+
+[1] Code { language: Some("python"), closed: false } at 18..89
+    headings: ["Unclosed fence"]
+    containers: [], parent: None
+    text: "print(\"the fence never closes\")\n\n## Not a heading, still code"
+    source: "```python\nprint(\"the fence never closes\")\n\n## Not a heading, still code"

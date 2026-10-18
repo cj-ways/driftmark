@@ -1,0 +1,21 @@
+title: None
+summary: None
+front matter error: None
+
+[0] Paragraph at 0..29
+    headings: []
+    containers: [], parent: None
+    text: "Some text before any heading."
+    source: "Some text before any heading."
+
+[1] Heading { level: 2 } at 31..43
+    headings: []
+    containers: [], parent: None
+    text: "A section"
+    source: "## A section"
+
+[2] Paragraph at 45..55
+    headings: ["A section"]
+    containers: [], parent: None
+    text: "More text."
+    source: "More text."

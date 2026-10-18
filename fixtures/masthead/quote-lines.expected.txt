@@ -1,0 +1,30 @@
+title: Some("A plan")
+summary: Some("The plan in one sentence.")
+front matter error: None
+field: Masthead "Status" = Text("Draft"), links []
+field: Masthead "Owner" = Text("Ana"), links []
+field: Masthead "Last updated" = Text("2026-02-01"), links []
+
+[0] Heading { level: 1 } at 0..8
+    headings: []
+    containers: [], parent: None
+    text: "A plan"
+    source: "# A plan"
+
+[1] Paragraph at 12..77
+    headings: ["A plan"]
+    containers: [BlockQuote], parent: None
+    text: "Status: Draft Owner: Ana Last updated: 2026-02-01"
+    source: "**Status:** Draft\n> **Owner:** Ana\n> **Last updated:** 2026-02-01"
+
+[2] Paragraph at 81..106
+    headings: ["A plan"]
+    containers: [BlockQuote], parent: None
+    text: "The plan in one sentence."
+    source: "The plan in one sentence."
+
+[3] Paragraph at 108..118
+    headings: ["A plan"]
+    containers: [], parent: None
+    text: "Body text."
+    source: "Body text."

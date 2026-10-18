@@ -1,0 +1,153 @@
+title: Some("Nesting")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 0..9
+    headings: []
+    containers: [], parent: None
+    text: "Nesting"
+    source: "# Nesting"
+
+[1] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 11..24
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "Parent item"
+    source: "- Parent item"
+
+[2] ListItem(ListItem { depth: 1, ordered: false, number: None, task: None }) at 27..39
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(1)
+    text: "Child item"
+    source: "- Child item"
+
+[3] ListItem(ListItem { depth: 2, ordered: false, number: None, task: None }) at 44..61
+    headings: ["Nesting"]
+    containers: [ListItem, ListItem], parent: Some(2)
+    text: "Grandchild item"
+    source: "- Grandchild item"
+
+[4] ListItem(ListItem { depth: 1, ordered: false, number: None, task: None }) at 64..78
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(1)
+    text: "Second child"
+    source: "- Second child"
+
+[5] ListItem(ListItem { depth: 0, ordered: true, number: Some(1), task: None }) at 80..124
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "First step\n\nMore about the first step."
+    source: "1. First step\n\n   More about the first step."
+
+[6] Code { language: Some("sh"), closed: true } at 129..156
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(5)
+    text: "cargo build"
+    source: "```sh\n   cargo build\n   ```"
+
+[7] Paragraph at 161..176
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(5)
+    text: "After the code."
+    source: "After the code."
+
+[8] ListItem(ListItem { depth: 0, ordered: true, number: Some(2), task: None }) at 178..192
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "Second step"
+    source: "2. Second step"
+
+[9] Paragraph at 196..212
+    headings: ["Nesting"]
+    containers: [BlockQuote], parent: None
+    text: "Quote paragraph."
+    source: "Quote paragraph."
+
+[10] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 217..230
+    headings: ["Nesting"]
+    containers: [BlockQuote], parent: None
+    text: "Quoted item"
+    source: "- Quoted item"
+
+[11] Paragraph at 237..249
+    headings: ["Nesting"]
+    containers: [BlockQuote, BlockQuote], parent: None
+    text: "Inner quote."
+    source: "Inner quote."
+
+[12] Alert { kind: Tip, title: Some("Shortcut") } at 251..288
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "Use the keyboard."
+    source: "> [!TIP] Shortcut\n> Use the keyboard."
+
+[13] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 293..308
+    headings: ["Nesting"]
+    containers: [Alert], parent: Some(12)
+    text: "Press one key"
+    source: "- Press one key"
+
+[14] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 311..326
+    headings: ["Nesting"]
+    containers: [Alert], parent: Some(12)
+    text: "Press another"
+    source: "- Press another"
+
+[15] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 328..348
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "Item with a table:"
+    source: "- Item with a table:"
+
+[16] TableRow { header: true, cells: ["a", "b"] } at 352..373
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(15)
+    text: "a\tb"
+    source: "| a | b |\n  |---|---|"
+
+[17] TableRow { header: false, cells: ["1", "2"] } at 376..385
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(15)
+    text: "1\t2"
+    source: "| 1 | 2 |"
+
+[18] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 387..388
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: ""
+    source: "-"
+
+[19] Heading { level: 2 } at 389..412
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(18)
+    text: "A heading in an item"
+    source: "## A heading in an item"
+
+[20] Paragraph at 415..429
+    headings: ["Nesting"]
+    containers: [ListItem], parent: Some(18)
+    text: "Text under it."
+    source: "Text under it."
+
+[21] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 431..467
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "Text after an empty marker line."
+    source: "-\n  Text after an empty marker line."
+
+[22] Paragraph at 469..493
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "Text with a note."
+    source: "Text with a note.[^long]"
+
+[23] FootnoteDefinition { name: "long" } at 495..565
+    headings: ["Nesting"]
+    containers: [], parent: None
+    text: "The note's first paragraph.\n\nThe note's second paragraph."
+    source: "[^long]: The note's first paragraph.\n\n    The note's second paragraph."
+
+[24] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 571..591
+    headings: ["Nesting"]
+    containers: [FootnoteDefinition], parent: Some(23)
+    text: "A list in the note"
+    source: "- A list in the note"

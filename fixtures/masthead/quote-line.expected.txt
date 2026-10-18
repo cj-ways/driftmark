@@ -1,0 +1,30 @@
+title: Some("A decision")
+summary: None
+front matter error: None
+field: Masthead "Status" = Text("Superseded"), links []
+field: Masthead "Date" = Text("2026-01-05"), links []
+field: Masthead "Superseded by" = Text("0009 New choice"), links ["0009-new-choice.md"]
+
+[0] Heading { level: 1 } at 0..12
+    headings: []
+    containers: [], parent: None
+    text: "A decision"
+    source: "# A decision"
+
+[1] Paragraph at 16..109
+    headings: ["A decision"]
+    containers: [BlockQuote], parent: None
+    text: "Status: Superseded | Date: 2026-01-05 · Superseded by: 0009 New choice"
+    source: "Status: Superseded | Date: 2026-01-05 · Superseded by: [0009 New choice](0009-new-choice.md)"
+
+[2] Heading { level: 2 } at 111..122
+    headings: ["A decision"]
+    containers: [], parent: None
+    text: "Decision"
+    source: "## Decision"
+
+[3] Paragraph at 124..140
+    headings: ["A decision", "Decision"]
+    containers: [], parent: None
+    text: "Use plain files."
+    source: "Use plain files."

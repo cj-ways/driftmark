@@ -1,0 +1,36 @@
+title: Some("Use plain files")
+summary: None
+front matter error: None
+field: Masthead "Status" = Text("accepted"), links []
+field: Masthead "Deciders" = Text("Ana, Ben"), links []
+field: Masthead "Date" = Text("2026-03-02"), links []
+
+[0] Heading { level: 1 } at 0..17
+    headings: []
+    containers: [], parent: None
+    text: "Use plain files"
+    source: "# Use plain files"
+
+[1] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 19..37
+    headings: ["Use plain files"]
+    containers: [], parent: None
+    text: "Status: accepted"
+    source: "* Status: accepted"
+
+[2] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 38..58
+    headings: ["Use plain files"]
+    containers: [], parent: None
+    text: "Deciders: Ana, Ben"
+    source: "* Deciders: Ana, Ben"
+
+[3] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 59..77
+    headings: ["Use plain files"]
+    containers: [], parent: None
+    text: "Date: 2026-03-02"
+    source: "* Date: 2026-03-02"
+
+[4] Heading { level: 2 } at 79..111
+    headings: ["Use plain files"]
+    containers: [], parent: None
+    text: "Context and Problem Statement"
+    source: "## Context and Problem Statement"

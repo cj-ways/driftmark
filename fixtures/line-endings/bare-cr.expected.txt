@@ -1,0 +1,21 @@
+title: Some("Old Mac line endings")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 0..22
+    headings: []
+    containers: [], parent: None
+    text: "Old Mac line endings"
+    source: "# Old Mac line endings"
+
+[1] Paragraph at 24..47
+    headings: ["Old Mac line endings"]
+    containers: [], parent: None
+    text: "A paragraph that wraps."
+    source: "A paragraph\rthat wraps."
+
+[2] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 49..58
+    headings: ["Old Mac line endings"]
+    containers: [], parent: None
+    text: "An item"
+    source: "- An item"

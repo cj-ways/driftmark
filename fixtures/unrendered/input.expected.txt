@@ -1,0 +1,21 @@
+title: Some("Links")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 0..7
+    headings: []
+    containers: [], parent: None
+    text: "Links"
+    source: "# Links"
+
+[1] Paragraph at 9..47
+    headings: ["Links"]
+    containers: [], parent: None
+    text: "See the guide and the spec."
+    source: "See the [guide][guide] and [the spec]."
+
+[2] Unrendered at 49..156
+    headings: ["Links"]
+    containers: [], parent: None
+    text: "[guide]: https://example.com/guide \"Guide\"\n[the spec]: ./spec.md\n\n[^unused]: A note that nothing points to."
+    source: "[guide]: https://example.com/guide \"Guide\"\n[the spec]: ./spec.md\n\n[^unused]: A note that nothing points to."

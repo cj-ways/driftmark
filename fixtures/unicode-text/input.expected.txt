@@ -1,0 +1,39 @@
+title: Some("ქართული სათაური 👩\u{200d}💻")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 0..57
+    headings: []
+    containers: [], parent: None
+    text: "ქართული სათაური 👩\u{200d}💻"
+    source: "# ქართული სათაური 👩\u{200d}💻"
+
+[1] Paragraph at 59..159
+    headings: ["ქართული სათაური 👩\u{200d}💻"]
+    containers: [], parent: None
+    text: "ეს არის ქართული ტექსტი მუქი სიტყვით."
+    source: "ეს არის ქართული ტექსტი **მუქი** სიტყვით."
+
+[2] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 161..195
+    headings: ["ქართული სათაური 👩\u{200d}💻"]
+    containers: [], parent: None
+    text: "✅ Done, with the 🇬🇪 flag"
+    source: "- ✅ Done, with the 🇬🇪 flag"
+
+[3] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 196..225
+    headings: ["ქართული სათაური 👩\u{200d}💻"]
+    containers: [], parent: None
+    text: "日本語 and an emoji 😀"
+    source: "- 日本語 and an emoji 😀"
+
+[4] TableRow { header: true, cells: ["სახელი", "ემოჯი"] } at 227..277
+    headings: ["ქართული სათაური 👩\u{200d}💻"]
+    containers: [], parent: None
+    text: "სახელი\tემოჯი"
+    source: "| სახელი | ემოჯი |\n|---|---|"
+
+[5] TableRow { header: false, cells: ["ანა", "👩\u{200d}💻"] } at 278..305
+    headings: ["ქართული სათაური 👩\u{200d}💻"]
+    containers: [], parent: None
+    text: "ანა\t👩\u{200d}💻"
+    source: "| ანა | 👩\u{200d}💻 |"

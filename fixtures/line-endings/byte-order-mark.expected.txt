@@ -1,0 +1,15 @@
+title: Some("A file with a byte order mark")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 3..34
+    headings: []
+    containers: [], parent: None
+    text: "A file with a byte order mark"
+    source: "# A file with a byte order mark"
+
+[1] Paragraph at 36..41
+    headings: ["A file with a byte order mark"]
+    containers: [], parent: None
+    text: "Text."
+    source: "Text."

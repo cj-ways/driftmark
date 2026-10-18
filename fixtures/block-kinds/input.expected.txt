@@ -1,0 +1,155 @@
+title: Some("Every block kind")
+summary: Some("One file that holds each kind of block once.")
+front matter error: None
+field: FrontMatter "title" = Text("Every block kind"), links []
+field: FrontMatter "status" = Text("draft"), links []
+
+[0] FrontMatter at 0..45
+    headings: []
+    containers: [], parent: None
+    text: "title: Every block kind\nstatus: draft"
+    source: "---\ntitle: Every block kind\nstatus: draft\n---"
+
+[1] Heading { level: 1 } at 47..65
+    headings: []
+    containers: [], parent: None
+    text: "Every block kind"
+    source: "# Every block kind"
+
+[2] Paragraph at 69..113
+    headings: ["Every block kind"]
+    containers: [BlockQuote], parent: None
+    text: "One file that holds each kind of block once."
+    source: "One file that holds each kind of block once."
+
+[3] Heading { level: 2 } at 115..123
+    headings: ["Every block kind"]
+    containers: [], parent: None
+    text: "Prose"
+    source: "## Prose"
+
+[4] Paragraph at 125..216
+    headings: ["Every block kind", "Prose"]
+    containers: [], parent: None
+    text: "A paragraph with emphasis, strong text, code, a link and a second line."
+    source: "A paragraph with *emphasis*, **strong text**, `code`, a [link](other.md) and a\nsecond line."
+
+[5] Heading { level: 2 } at 218..247
+    headings: ["Every block kind"]
+    containers: [], parent: None
+    text: "Setext heading"
+    source: "Setext heading\n--------------"
+
+[6] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 249..264
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "A bullet item"
+    source: "- A bullet item"
+
+[7] ListItem(ListItem { depth: 0, ordered: true, number: Some(1), task: None }) at 265..283
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "An ordered item"
+    source: "1. An ordered item"
+
+[8] ListItem(ListItem { depth: 0, ordered: false, number: None, task: Some(Open) }) at 285..303
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "An open task"
+    source: "- [ ] An open task"
+
+[9] ListItem(ListItem { depth: 0, ordered: false, number: None, task: Some(Done) }) at 304..321
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "A done task"
+    source: "- [x] A done task"
+
+[10] TableRow { header: true, cells: ["Name", "Size"] } at 323..354
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "Name\tSize"
+    source: "| Name | Size |\n|:-----|-----:|"
+
+[11] TableRow { header: false, cells: ["apple", "3"] } at 355..368
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "apple\t3"
+    source: "| apple | 3 |"
+
+[12] TableRow { header: false, cells: ["pear", "12"] } at 369..382
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "pear\t12"
+    source: "| pear | 12 |"
+
+[13] Code { language: Some("rust"), closed: true } at 384..424
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "fn main() {}"
+    source: "```rust title=\"main.rs\"\nfn main() {}\n```"
+
+[14] Code { language: None, closed: true } at 430..443
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "indented code"
+    source: "indented code"
+
+[15] Diagram { language: Mermaid, closed: true } at 445..482
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "flowchart LR\n  A --> B"
+    source: "```mermaid\nflowchart LR\n  A --> B\n```"
+
+[16] Diagram { language: D2, closed: true } at 484..500
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "a -> b"
+    source: "```d2\na -> b\n```"
+
+[17] Code { language: None, closed: true } at 502..521
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "no language"
+    source: "```\nno language\n```"
+
+[18] Alert { kind: Warning, title: None } at 523..561
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "Back up the data first."
+    source: "> [!WARNING]\n> Back up the data first."
+
+[19] Paragraph at 565..584
+    headings: ["Every block kind", "Setext heading"]
+    containers: [BlockQuote], parent: None
+    text: "A quoted paragraph."
+    source: "A quoted paragraph."
+
+[20] Paragraph at 586..616
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "A sentence with a note."
+    source: "A sentence with a note.[^note]"
+
+[21] FootnoteDefinition { name: "note" } at 618..643
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "The note itself."
+    source: "[^note]: The note itself."
+
+[22] Html at 645..700
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "More &amp; less"
+    source: "<details>\n<summary>More &amp; less</summary>\n</details>"
+
+[23] ThematicBreak at 702..705
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: ""
+    source: "***"
+
+[24] Unrendered at 707..743
+    headings: ["Every block kind", "Setext heading"]
+    containers: [], parent: None
+    text: "[unused]: https://example.com/unused"
+    source: "[unused]: https://example.com/unused"

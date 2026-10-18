@@ -1,0 +1,29 @@
+title: Some("Front matter")
+summary: None
+front matter error: None
+field: FrontMatter "title" = Text("Front matter: quoted"), links []
+field: FrontMatter "status" = Text("accepted"), links []
+field: FrontMatter "date" = Text("2026-01-05"), links []
+field: FrontMatter "version" = Text("1.10"), links []
+field: FrontMatter "tags" = List([Text("docs"), Text("review")]), links []
+field: FrontMatter "owner" = Map([("name", Text("Ana")), ("team", Text("core"))]), links []
+field: FrontMatter "note" = Text("Two lines\nof text.\n"), links []
+field: FrontMatter "custom-key" = Text("kept"), links []
+
+[0] FrontMatter at 0..186
+    headings: []
+    containers: [], parent: None
+    text: "title: \"Front matter: quoted\"\nstatus: accepted\ndate: 2026-01-05\nversion: 1.10\ntags: [docs, review]\nowner:\n  name: Ana\n  team: core\nnote: |\n  Two lines\n  of text.\ncustom-key: kept"
+    source: "---\ntitle: \"Front matter: quoted\"\nstatus: accepted\ndate: 2026-01-05\nversion: 1.10\ntags: [docs, review]\nowner:\n  name: Ana\n  team: core\nnote: |\n  Two lines\n  of text.\ncustom-key: kept\n---"
+
+[1] Heading { level: 1 } at 188..202
+    headings: []
+    containers: [], parent: None
+    text: "Front matter"
+    source: "# Front matter"
+
+[2] Paragraph at 204..214
+    headings: ["Front matter"]
+    containers: [], parent: None
+    text: "Body text."
+    source: "Body text."

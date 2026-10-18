@@ -1,0 +1,27 @@
+title: Some("Escaped pipes")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 0..15
+    headings: []
+    containers: [], parent: None
+    text: "Escaped pipes"
+    source: "# Escaped pipes"
+
+[1] TableRow { header: true, cells: ["Expression", "Meaning"] } at 17..51
+    headings: ["Escaped pipes"]
+    containers: [], parent: None
+    text: "Expression\tMeaning"
+    source: "| Expression | Meaning |\n|---|---|"
+
+[2] TableRow { header: false, cells: ["a | b", "either a or b"] } at 52..84
+    headings: ["Escaped pipes"]
+    containers: [], parent: None
+    text: "a | b\teither a or b"
+    source: "| `a \\| b` | either **a** or b |"
+
+[3] TableRow { header: false, cells: ["x | y | z", "three | choices"] } at 85..121
+    headings: ["Escaped pipes"]
+    containers: [], parent: None
+    text: "x | y | z\tthree | choices"
+    source: "| x \\| y \\| z | three \\| *choices* |"

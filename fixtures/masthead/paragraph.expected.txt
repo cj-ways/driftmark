@@ -1,0 +1,24 @@
+title: Some("Feature Specification: Search")
+summary: None
+front matter error: None
+field: Masthead "Feature Branch" = Text("001-search"), links []
+field: Masthead "Created" = Text("2026-03-01"), links []
+field: Masthead "Status" = Text("Draft"), links []
+
+[0] Heading { level: 1 } at 0..31
+    headings: []
+    containers: [], parent: None
+    text: "Feature Specification: Search"
+    source: "# Feature Specification: Search"
+
+[1] Paragraph at 33..111
+    headings: ["Feature Specification: Search"]
+    containers: [], parent: None
+    text: "Feature Branch: 001-search\nCreated: 2026-03-01\nStatus: Draft"
+    source: "**Feature Branch**: `001-search`  \n**Created**: 2026-03-01  \n**Status**: Draft"
+
+[2] Heading { level: 2 } at 113..130
+    headings: ["Feature Specification: Search"]
+    containers: [], parent: None
+    text: "User Scenarios"
+    source: "## User Scenarios"

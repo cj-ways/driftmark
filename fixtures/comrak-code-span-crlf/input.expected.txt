@@ -1,0 +1,27 @@
+title: Some("Code spans across Windows line endings")
+summary: None
+front matter error: None
+
+[0] Heading { level: 1 } at 0..40
+    headings: []
+    containers: [], parent: None
+    text: "Code spans across Windows line endings"
+    source: "# Code spans across Windows line endings"
+
+[1] Paragraph at 44..71
+    headings: ["Code spans across Windows line endings"]
+    containers: [], parent: None
+    text: "A span across two lines."
+    source: "A `span\r\nacross` two lines."
+
+[2] Paragraph at 77..113
+    headings: ["Code spans across Windows line endings"]
+    containers: [BlockQuote], parent: None
+    text: "A quoted span across two lines."
+    source: "A quoted `span\r\n> across` two lines."
+
+[3] ListItem(ListItem { depth: 0, ordered: false, number: None, task: None }) at 117..161
+    headings: ["Code spans across Windows line endings"]
+    containers: [], parent: None
+    text: "An item with a span across two lines."
+    source: "- An item with a `span\r\n  across` two lines."

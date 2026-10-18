@@ -1,0 +1,39 @@
+# Rules for a made-up project that uses driftmark's starter layout, plus an
+# older folder of adr-tools records.
+
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+status = { front-matter = "status", masthead = "Status" }
+current = ["accepted"]
+superseded = ["superseded"]
+archived = ["rejected", "withdrawn"]
+date = { front-matter = "date", masthead = "Date" }
+superseded-by = { front-matter = "superseded-by", masthead = "Superseded by" }
+decision-headings = ["Decision"]
+
+[[type]]
+name = "feature"
+paths = ["docs/features/**/*.md"]
+status = { front-matter = "status" }
+current = ["target", "shipped"]
+archived = ["dropped"]
+lifecycle = "current"
+
+[[type]]
+name = "standard"
+paths = ["docs/standards/*.md"]
+lifecycle = "current"
+
+[[type]]
+name = "archive"
+paths = ["docs/archive/**"]
+lifecycle = "archived"
+
+[[type]]
+name = "adr"
+paths = ["doc/adr/*.md"]
+status = { section = "Status" }
+current = ["accepted"]
+superseded = ["superseded", "superceded"]
+decision-headings = ["Decision"]

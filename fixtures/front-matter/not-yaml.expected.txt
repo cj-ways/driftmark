@@ -1,0 +1,21 @@
+title: Some("Front matter that is not YAML")
+summary: None
+front matter error: Some("the front matter is not valid YAML: illegal placement of ':' indicator, on line 3 of the file")
+
+[0] FrontMatter at 0..42
+    headings: []
+    containers: [], parent: None
+    text: "status: [accepted\ndate: 2026-01-05"
+    source: "---\nstatus: [accepted\ndate: 2026-01-05\n---"
+
+[1] Heading { level: 1 } at 44..75
+    headings: []
+    containers: [], parent: None
+    text: "Front matter that is not YAML"
+    source: "# Front matter that is not YAML"
+
+[2] Paragraph at 77..99
+    headings: ["Front matter that is not YAML"]
+    containers: [], parent: None
+    text: "The body still parses."
+    source: "The body still parses."

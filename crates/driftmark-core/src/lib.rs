@@ -6,6 +6,9 @@
 //! `driftmark` program supplies all of that, so every rule here can be tested
 //! with plain values.
 
+pub mod document;
+pub mod rules;
+
 /// The version of the driftmark engine, as written in `Cargo.toml`.
 #[must_use]
 pub fn version() -> &'static str {

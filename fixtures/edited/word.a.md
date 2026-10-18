@@ -1,0 +1,1 @@
+The cache holds blocks.

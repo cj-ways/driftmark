@@ -1,0 +1,21 @@
+title: Some("A guide")
+summary: Some("Short version: this guide explains how the tool reads a folder of documents and why each step exists.")
+front matter error: None
+
+[0] Heading { level: 1 } at 0..9
+    headings: []
+    containers: [], parent: None
+    text: "A guide"
+    source: "# A guide"
+
+[1] Paragraph at 13..114
+    headings: ["A guide"]
+    containers: [BlockQuote], parent: None
+    text: "Short version: this guide explains how the tool reads a folder of documents and why each step exists."
+    source: "Short version: this guide explains how the tool reads a folder of documents and why each step exists."
+
+[2] Heading { level: 2 } at 116..129
+    headings: ["A guide"]
+    containers: [], parent: None
+    text: "First step"
+    source: "## First step"
