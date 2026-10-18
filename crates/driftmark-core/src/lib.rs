@@ -8,6 +8,7 @@
 
 pub mod document;
 pub mod git;
+pub mod lint;
 pub mod rules;
 
 /// The version of the driftmark engine, as written in `Cargo.toml`.

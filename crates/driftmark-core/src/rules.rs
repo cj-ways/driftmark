@@ -4,7 +4,8 @@
 //!
 //! The format is stated in `docs/features/engine/rules-file.md`. The program
 //! reads the file; this module only parses its text, so the core stays free of
-//! file access. A preset (M4) is a rules file in this same format.
+//! file access. A preset (M4) is a rules file in this same format. The file's
+//! `[lint]` table holds the writing check's settings; [`crate::lint`] reads it.
 
 use std::fmt;
 
@@ -12,6 +13,7 @@ use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
 
 use crate::document::{BlockKind, Document, FieldOrigin, normalize_key};
+use crate::lint::{LintSettings, RawLint};
 
 /// The type of a document that no rule matches.
 pub const DEFAULT_TYPE: &str = "document";
@@ -24,10 +26,12 @@ const MATCHING: MatchOptions = MatchOptions {
     require_literal_leading_dot: false,
 };
 
-/// A parsed rules file: an ordered list of document types.
+/// A parsed rules file: an ordered list of document types, and the writing
+/// check's settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Rules {
     types: Vec<TypeRule>,
+    lint: LintSettings,
 }
 
 /// One `[[type]]` entry of a rules file.
@@ -55,6 +59,13 @@ pub struct TypeRule {
     pub superseded_by: Option<Location>,
     /// Heading titles whose sections hold decisions, such as `Decision`.
     pub decision_headings: Vec<String>,
+    /// Front matter keys every document of this type must have, with a value.
+    /// The writing check reports the ones a document lacks.
+    pub required: Vec<String>,
+    /// Status values that are allowed but mean none of the three lifecycles,
+    /// such as `proposed`. With the three lists they make up every status the
+    /// writing check accepts.
+    pub other_statuses: Vec<String>,
 }
 
 /// Where a value is written in a document. When more than one place is
@@ -69,6 +80,38 @@ pub struct Location {
     /// The title of a section whose first line of text is the value, as in
     /// adr-tools' `## Status` section.
     pub section: Option<String>,
+}
+
+/// Which of a type's status lists a value is in.
+#[derive(Clone, Copy)]
+enum StatusList {
+    /// `current`, `superseded` or `archived`.
+    Lifecycle(Lifecycle),
+    /// `other-statuses`.
+    Other,
+}
+
+/// A value read from a document through a [`Location`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Located {
+    /// The value as written, trimmed.
+    pub text: String,
+    /// The targets of the links in the value, when it came from the
+    /// masthead.
+    pub links: Vec<String>,
+    /// Which of the location's places held it.
+    pub place: Place,
+}
+
+/// One of the three places a [`Location`] can name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// A key of the YAML front matter.
+    FrontMatter,
+    /// A key of the masthead.
+    Masthead,
+    /// The first line of text under a section heading.
+    Section,
 }
 
 /// What a document's status means for the status view.
@@ -121,6 +164,9 @@ pub enum RulesError {
         /// What is wrong, as a sentence.
         problem: String,
     },
+    /// The `[lint]` table is valid TOML but says something impossible, such
+    /// as an HTML element name with a space in it.
+    Lint(String),
 }
 
 impl fmt::Display for RulesError {
@@ -132,6 +178,7 @@ impl fmt::Display for RulesError {
                 name,
                 problem,
             } => write!(f, "the rules file's type {number} ({name:?}): {problem}"),
+            RulesError::Lint(problem) => write!(f, "the rules file's [lint] table: {problem}"),
         }
     }
 }
@@ -144,6 +191,8 @@ impl std::error::Error for RulesError {}
 struct RawRules {
     #[serde(default, rename = "type")]
     types: Vec<RawType>,
+    #[serde(default)]
+    lint: RawLint,
 }
 
 #[derive(Deserialize)]
@@ -163,6 +212,10 @@ struct RawType {
     superseded_by: Option<Location>,
     #[serde(default)]
     decision_headings: Vec<String>,
+    #[serde(default)]
+    required: Vec<String>,
+    #[serde(default)]
+    other_statuses: Vec<String>,
 }
 
 impl Rules {
@@ -171,9 +224,11 @@ impl Rules {
     /// # Errors
     ///
     /// [`RulesError::Syntax`] when the text is not valid TOML or holds an
-    /// unknown key, and [`RulesError::Invalid`] when a type has no name, no
+    /// unknown key, [`RulesError::Invalid`] when a type has no name, no
     /// paths, a pattern that does not parse, an empty location, status values
-    /// without a status location, or one status value in two lists.
+    /// without a status location, or one status value in two lists, and
+    /// [`RulesError::Lint`] when the `[lint]` table names an impossible HTML
+    /// element.
     pub fn parse(text: &str) -> Result<Rules, RulesError> {
         let raw: RawRules =
             toml::from_str(text).map_err(|error| RulesError::Syntax(error.to_string()))?;
@@ -183,7 +238,15 @@ impl Rules {
             .enumerate()
             .map(|(index, raw)| TypeRule::new(index + 1, raw))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Rules { types })
+        let lint = LintSettings::from_raw(raw.lint).map_err(RulesError::Lint)?;
+        Ok(Rules { types, lint })
+    }
+
+    /// The writing check's settings from the `[lint]` table, or the defaults
+    /// when the file has none.
+    #[must_use]
+    pub fn lint(&self) -> &LintSettings {
+        &self.lint
     }
 
     /// The types, in the order the file lists them.
@@ -261,7 +324,12 @@ impl TypeRule {
                 }
             }
         }
-        let lists = [&raw.current, &raw.superseded, &raw.archived];
+        let lists = [
+            &raw.current,
+            &raw.superseded,
+            &raw.archived,
+            &raw.other_statuses,
+        ];
         let mut seen = Vec::new();
         for value in lists.into_iter().flatten() {
             let normalized = normalize_status(value);
@@ -289,6 +357,9 @@ impl TypeRule {
         {
             return Err(invalid("a decision heading is empty".to_owned()));
         }
+        if raw.required.iter().any(|key| key.trim().is_empty()) {
+            return Err(invalid("a required key is empty".to_owned()));
+        }
         Ok(TypeRule {
             name: raw.name,
             paths: raw.paths,
@@ -301,6 +372,8 @@ impl TypeRule {
             date: raw.date,
             superseded_by: raw.superseded_by,
             decision_headings: raw.decision_headings,
+            required: raw.required,
+            other_statuses: raw.other_statuses,
         })
     }
 
@@ -320,11 +393,44 @@ impl TypeRule {
     /// `superseded`. When several listed values match, the longest wins.
     #[must_use]
     pub fn lifecycle_of(&self, status: &str) -> Option<Lifecycle> {
+        match self.best_match(status)? {
+            StatusList::Lifecycle(lifecycle) => Some(lifecycle),
+            StatusList::Other => None,
+        }
+    }
+
+    /// Whether one of this type's four status lists holds `status`, matched
+    /// as in [`TypeRule::lifecycle_of`]. `other-statuses` counts too.
+    #[must_use]
+    pub fn allows_status(&self, status: &str) -> bool {
+        self.best_match(status).is_some()
+    }
+
+    /// Every status value this type lists, in the order the file writes
+    /// them: `current`, `superseded`, `archived`, then `other-statuses`.
+    pub fn statuses(&self) -> impl Iterator<Item = &str> {
+        [
+            &self.current,
+            &self.superseded,
+            &self.archived,
+            &self.other_statuses,
+        ]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+    }
+
+    /// The list that holds the longest listed value matching `status`.
+    fn best_match(&self, status: &str) -> Option<StatusList> {
         let status = normalize_status(status);
         [
-            (Lifecycle::Current, &self.current),
-            (Lifecycle::Superseded, &self.superseded),
-            (Lifecycle::Archived, &self.archived),
+            (StatusList::Lifecycle(Lifecycle::Current), &self.current),
+            (
+                StatusList::Lifecycle(Lifecycle::Superseded),
+                &self.superseded,
+            ),
+            (StatusList::Lifecycle(Lifecycle::Archived), &self.archived),
+            (StatusList::Other, &self.other_statuses),
         ]
         .into_iter()
         .flat_map(|(lifecycle, values)| {
@@ -356,19 +462,19 @@ impl TypeRule {
         let status = self
             .status
             .as_ref()
-            .and_then(|location| location.read(document));
+            .and_then(|location| location.find(document));
         let lifecycle = status
             .as_ref()
-            .and_then(|(status, _)| self.lifecycle_of(status))
+            .and_then(|status| self.lifecycle_of(&status.text))
             .or(self.lifecycle);
         let date = self
             .date
             .as_ref()
-            .and_then(|location| location.read(document));
+            .and_then(|location| location.find(document));
         let superseded_by = self
             .superseded_by
             .as_ref()
-            .and_then(|location| location.read(document));
+            .and_then(|location| location.find(document));
         let decision_blocks = document
             .blocks
             .iter()
@@ -383,12 +489,13 @@ impl TypeRule {
             })
             .map(|(index, _)| index)
             .collect();
-        let (superseded_by, superseded_by_links) = superseded_by.unzip();
+        let (superseded_by, superseded_by_links) =
+            superseded_by.map(|found| (found.text, found.links)).unzip();
         Classification {
             doc_type: self.name.clone(),
-            status: status.map(|(status, _)| status),
+            status: status.map(|found| found.text),
             lifecycle,
-            date: date.map(|(date, _)| date),
+            date: date.map(|found| found.text),
             superseded_by,
             superseded_by_links: superseded_by_links.unwrap_or_default(),
             decision_blocks,
@@ -398,23 +505,37 @@ impl TypeRule {
 
 impl Location {
     /// The value at this location in `document`, with the targets of the
-    /// links in it. Empty values count as missing.
-    fn read(&self, document: &Document) -> Option<(String, Vec<String>)> {
+    /// links in it and the place that held it. The places are tried in the
+    /// order front matter, masthead, section. Empty values count as missing.
+    #[must_use]
+    pub fn find(&self, document: &Document) -> Option<Located> {
         let meta = &document.meta;
-        let field = |origin: FieldOrigin, key: &Option<String>| {
+        let field = |origin: FieldOrigin, key: &Option<String>, place: Place| {
             key.as_deref()
                 .and_then(|key| meta.field(origin, key))
                 .and_then(|field| {
                     let text = field.value.as_text()?.trim();
-                    (!text.is_empty()).then(|| (text.to_owned(), field.links.clone()))
+                    (!text.is_empty()).then(|| Located {
+                        text: text.to_owned(),
+                        links: field.links.clone(),
+                        place,
+                    })
                 })
         };
-        field(FieldOrigin::FrontMatter, &self.front_matter)
-            .or_else(|| field(FieldOrigin::Masthead, &self.masthead))
-            .or_else(|| {
-                let title = self.section.as_deref()?;
-                section_line(document, title).map(|line| (line, Vec::new()))
+        field(
+            FieldOrigin::FrontMatter,
+            &self.front_matter,
+            Place::FrontMatter,
+        )
+        .or_else(|| field(FieldOrigin::Masthead, &self.masthead, Place::Masthead))
+        .or_else(|| {
+            let title = self.section.as_deref()?;
+            section_line(document, title).map(|text| Located {
+                text,
+                links: Vec::new(),
+                place: Place::Section,
             })
+        })
     }
 }
 
@@ -678,6 +799,88 @@ current = ["accepted"]
         assert_eq!(found.decision_blocks, vec![3, 4, 5, 6]);
         assert!(rules.types()[0].is_decision_heading("  DECISION "));
         assert!(!rules.types()[0].is_decision_heading("Decisions"));
+    }
+
+    #[test]
+    fn other_statuses_are_allowed_without_a_lifecycle() {
+        let rules = Rules::parse(
+            "[[type]]\nname = \"d\"\npaths = [\"*.md\"]\nstatus = { masthead = \"Status\" }\ncurrent = [\"accepted\"]\nsuperseded = [\"superseded\"]\narchived = [\"rejected\"]\nother-statuses = [\"proposed\", \"superseded in part\"]\nlifecycle = \"current\"\nrequired = [\"date\"]\n",
+        )
+        .expect("valid");
+        let rule = &rules.types()[0];
+        assert_eq!(rule.required, ["date"]);
+        assert_eq!(
+            rule.statuses().collect::<Vec<_>>(),
+            [
+                "accepted",
+                "superseded",
+                "rejected",
+                "proposed",
+                "superseded in part"
+            ]
+        );
+        assert!(rule.allows_status("Proposed (2026-01)"));
+        assert_eq!(rule.lifecycle_of("Proposed"), None);
+        assert!(rule.allows_status("superseded in part by 0012"));
+        assert_eq!(rule.lifecycle_of("superseded in part by 0012"), None);
+        assert_eq!(
+            rule.lifecycle_of("superseded by 0012"),
+            Some(Lifecycle::Superseded)
+        );
+        assert!(!rule.allows_status("draft"));
+        let found = rules.classify("a.md", &document("# A\n\n> Status: proposed\n"));
+        assert_eq!(found.status.as_deref(), Some("proposed"));
+        assert_eq!(found.lifecycle, Some(Lifecycle::Current));
+    }
+
+    #[test]
+    fn locations_say_which_place_held_the_value() {
+        let location = Location {
+            front_matter: Some("status".to_owned()),
+            masthead: Some("Status".to_owned()),
+            section: Some("Status".to_owned()),
+        };
+        let place = |source: &str| {
+            location
+                .find(&document(source))
+                .map(|found| (found.text, found.place))
+        };
+        assert_eq!(
+            place("---\nstatus: a\n---\n\n# T\n\n> Status: b\n"),
+            Some(("a".to_owned(), Place::FrontMatter))
+        );
+        assert_eq!(
+            place("# T\n\n> Status: [b](b.md) | Date: x\n"),
+            Some(("b".to_owned(), Place::Masthead))
+        );
+        assert_eq!(
+            place("# T\n\n## Status\n\nc\n"),
+            Some(("c".to_owned(), Place::Section))
+        );
+        assert_eq!(place("# T\n"), None);
+        let links = location
+            .find(&document("# T\n\n> Status: [b](b.md) | Date: x\n"))
+            .map(|found| found.links);
+        assert_eq!(links, Some(vec!["b.md".to_owned()]));
+    }
+
+    #[test]
+    fn impossible_new_keys_are_refused() {
+        let base = "[[type]]\nname = \"t\"\npaths = [\"a/*.md\"]\n";
+        assert_eq!(
+            invalid(&format!("{base}required = [\"status\", \" \"]\n")),
+            "a required key is empty"
+        );
+        assert_eq!(
+            invalid(&format!("{base}other-statuses = [\"draft\"]\n")),
+            "it lists status values but no `status` location"
+        );
+        assert_eq!(
+            invalid(&format!(
+                "{base}status = {{ masthead = \"S\" }}\ncurrent = [\"draft\"]\nother-statuses = [\"Draft\"]\n"
+            )),
+            "the status value \"Draft\" is in more than one place"
+        );
     }
 
     #[test]

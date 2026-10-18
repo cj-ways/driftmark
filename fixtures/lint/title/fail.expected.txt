@@ -1,0 +1,3 @@
+fail.md:1:1: error title: this comes before the `#` title, and only front matter may; move it below the title
+fail.md:11:1: error title: this is a second `#` title, and a file has exactly one; make it a `##` section, or move it to a file of its own
+driftmark lint: 1 file checked, 2 errors and 0 warnings in 1 file

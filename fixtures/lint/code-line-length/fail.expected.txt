@@ -1,0 +1,2 @@
+fail.md:8:121: warning code-line-length: this code line has 123 characters, more than the limit of 120; break it into shorter lines
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file

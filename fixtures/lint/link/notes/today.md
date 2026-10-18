@@ -1,0 +1,3 @@
+# Today
+
+Notes for today.

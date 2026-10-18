@@ -1,0 +1,2 @@
+fail.md:5:1: warning summary: the document has no summary before its first section; add a paragraph or a `>` quote under the title that says in a sentence or two what the document is for
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file

@@ -9,7 +9,7 @@
 mod blocks;
 mod content;
 pub mod markdown;
-mod meta;
+pub(crate) mod meta;
 mod yaml;
 
 use std::any::Any;

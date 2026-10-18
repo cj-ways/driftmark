@@ -1,0 +1,2 @@
+fail.md:1:1: warning file-size: the file has 456 bytes, more than the limit of 400; split it into smaller documents that link to each other
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file

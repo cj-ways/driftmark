@@ -1,0 +1,2 @@
+fail.md:7:1: error code-closed: this code block is never closed, so the rest of the file shows as code; add a closing ``` line where the code ends
+driftmark lint: 1 file checked, 1 error and 0 warnings in 1 file

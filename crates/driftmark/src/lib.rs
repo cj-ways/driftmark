@@ -1,4 +1,5 @@
-//! The parts of the `driftmark` program that touch the outside world.
+//! The parts of the `driftmark` program that touch the outside world, and its
+//! commands.
 //!
 //! The rules live in `driftmark-core`, which reads no files and runs no git.
 //! This library supplies what the core asks for. It is a library beside the
@@ -6,3 +7,5 @@
 //! outside, the way the commands will use them.
 
 pub mod git;
+pub mod hook;
+pub mod lint;

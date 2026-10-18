@@ -1,0 +1,2 @@
+fail.md:5:1: warning heading-length: this heading has 110 characters, more than the limit of 100; shorten it and say the rest in the text below it
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file

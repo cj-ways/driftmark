@@ -55,8 +55,9 @@ pub(crate) fn read<'a>(root: &'a AstNode<'a>) -> Metadata {
     meta
 }
 
-/// What a block right under the title turned out to be.
-enum Head {
+/// What a block right under the title turned out to be. The writing check
+/// uses it too, to tell a summary from a masthead.
+pub(crate) enum Head {
     Masthead(Vec<Field>),
     Prose(String),
     Other,
@@ -76,7 +77,8 @@ fn read_head<'a>(title: &'a AstNode<'a>, meta: &mut Metadata) {
     }
 }
 
-fn head<'a>(node: &'a AstNode<'a>) -> Head {
+/// Reads one top-level block as a masthead, as prose or as neither.
+pub(crate) fn head<'a>(node: &'a AstNode<'a>) -> Head {
     let children: Vec<&'a AstNode<'a>> = node.children().collect();
     let only_paragraphs = !children.is_empty()
         && children

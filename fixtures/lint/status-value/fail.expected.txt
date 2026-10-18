@@ -1,0 +1,2 @@
+fail.md:2:9: warning status-value: the status "draft" is not one the `decision` type lists; use `accepted`, `superseded` or `proposed`
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file

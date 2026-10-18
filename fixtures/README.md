@@ -7,4 +7,5 @@
 - Public repos used in tests (OpenSpec, GitHub Spec Kit, an ADR repo) are fetched at a pinned commit when the test runs. They are never copied in here.
 - A document fixture `<name>.md` may have `<name>.expected.txt` beside it: the document model the test expects, written out. Each test run also writes its fresh output under the build folder's `tmp/document-dumps/`, so a deliberate change can be reviewed and copied over.
 - A pair of files `<name>.a.md` and `<name>.b.md` tests one difference between two versions of a document.
+- A folder under `lint/` is named after one writing rule and is a small repository of its own: `pass.md`, which no rule faults; `fail.md`, which only that rule faults; `fail.expected.txt`, its findings; and, when the rule needs them, a `driftmark.toml` and the files its links point to.
 - `.gitattributes` here keeps every fixture's bytes exactly as written, line endings included, on every system.

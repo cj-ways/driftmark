@@ -1,0 +1,2 @@
+fail.md:1:1: error required-field: the front matter lacks `date`, which every `decision` document needs; add it with a value
+driftmark lint: 1 file checked, 1 error and 0 warnings in 1 file

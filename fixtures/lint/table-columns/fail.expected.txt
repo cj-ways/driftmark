@@ -1,0 +1,2 @@
+fail.md:7:1: warning table-columns: this table has 9 columns, more than the limit of 8; split it into narrower tables, or turn some columns into rows
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file

@@ -1,0 +1,3 @@
+fail.md:7:1: warning code-language: this code block names no language; write it after the opening fence, such as ```sh, or ```text for plain text
+fail.md:13:5: warning code-language: this indented code block cannot name its language; write it as a fenced block instead, such as ```sh, or ```text for plain text
+driftmark lint: 1 file checked, 0 errors and 2 warnings in 1 file

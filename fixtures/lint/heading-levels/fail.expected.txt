@@ -1,0 +1,3 @@
+fail.md:5:1: warning heading-levels: this `###` heading skips a level after the `#` heading above it; make it `##`
+fail.md:11:1: warning heading-levels: this `####` heading skips a level after the `##` heading above it; make it `###`
+driftmark lint: 1 file checked, 0 errors and 2 warnings in 1 file

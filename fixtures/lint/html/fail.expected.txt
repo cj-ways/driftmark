@@ -1,0 +1,4 @@
+fail.md:5:1: warning html: `<div>` is raw HTML outside the allowed list; write it in Markdown, or add "div" to `allowed-html` in the rules file's `[lint]` table
+fail.md:6:3: warning html: `<img>` is raw HTML outside the allowed list; write it in Markdown, or add "img" to `allowed-html` in the rules file's `[lint]` table
+fail.md:11:9: warning html: `<span>` is raw HTML outside the allowed list; write it in Markdown, or add "span" to `allowed-html` in the rules file's `[lint]` table
+driftmark lint: 1 file checked, 0 errors and 3 warnings in 1 file

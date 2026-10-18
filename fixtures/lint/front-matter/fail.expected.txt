@@ -1,0 +1,2 @@
+fail.md:3:1: error front-matter: the front matter is not valid YAML: illegal placement of ':' indicator, on line 3 of the file; fix the YAML between the `---` lines
+driftmark lint: 1 file checked, 1 error and 0 warnings in 1 file

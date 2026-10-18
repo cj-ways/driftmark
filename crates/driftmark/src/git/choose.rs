@@ -79,6 +79,20 @@ impl Git {
         }
     }
 
+    /// The repo's working tree, where its files are on disk; `None` for a bare
+    /// repo.
+    #[must_use]
+    pub fn workdir(&self) -> Option<&Path> {
+        match &self.gix {
+            Some(gix) => gix.workdir(),
+            None => self
+                .command
+                .get()
+                .and_then(|opened| opened.as_ref().ok())
+                .and_then(CommandReader::workdir),
+        }
+    }
+
     /// Asks gix, unless it failed before, then the `git` command if gix fails
     /// in a way the command may not.
     fn ask<T>(

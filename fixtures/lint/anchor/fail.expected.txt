@@ -1,0 +1,4 @@
+fail.md:16:3: error anchor: `#Install` is not a heading in `guide.md`; anchors are lower case, so write `#install`
+fail.md:16:43: error anchor: `#setup` is not a heading in `guide.md`; link to a heading that exists; its anchor is its text in lower case, with spaces as `-` and punctuation left out
+fail.md:17:3: error anchor: `#step` is not a heading in `fail.md`; link to a heading that exists; its anchor is its text in lower case, with spaces as `-` and punctuation left out
+driftmark lint: 1 file checked, 3 errors and 0 warnings in 1 file

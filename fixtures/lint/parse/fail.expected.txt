@@ -1,0 +1,2 @@
+fail.md:5:1: error parse: the file is not UTF-8 text: byte 150, on line 5, is not valid UTF-8; save the file as UTF-8
+driftmark lint: 1 file checked, 1 error and 0 warnings in 1 file

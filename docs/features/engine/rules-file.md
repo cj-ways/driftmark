@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Rules file
 
-> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset (M4) is a rules file in this same format.
+> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset (M4) is a rules file in this same format. An optional `[lint]` table holds the writing check's settings.
 
 ## Who reads it
 
@@ -74,7 +74,7 @@ What it gives for a few files of that project:
 
 ## The format
 
-The file is TOML. It holds a list of `[[type]]` tables and nothing else. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
+The file is TOML. It holds a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
 
 ### Keys of a type
 
@@ -90,6 +90,8 @@ The file is TOML. It holds a list of `[[type]]` tables and nothing else. An unkn
 | `date` | no | a location | Where the date is written. |
 | `superseded-by` | no | a location | Where the document names the one that replaced it. |
 | `decision-headings` | no | list of text | Heading titles whose sections hold decisions, such as `Decision`. |
+| `other-statuses` | no | list of text | Status values that are allowed but mean none of the three lifecycles, such as `proposed` or `draft`. |
+| `required` | no | list of text | Front matter keys every document of this type must have, with a value. The writing check reports the ones a document lacks (`required-field`). |
 
 ### Paths
 
@@ -134,6 +136,23 @@ A status value means current, superseded or archived when one of the three lists
 - The status may go on after the listed value, as long as the next character is not a letter or a digit. `Superseded by 0009` matches `superseded`; `acceptedly` does not match `accepted`.
 - When several listed values match, the longest wins. With `superseded = ["superseded"]` and `archived = ["superseded in part"]`, the status `Superseded in part by 0010` is archived.
 - A status that matches no list, or no status at all, gives the type's `lifecycle`. With no `lifecycle`, it gives none.
+- A value in `other-statuses` takes part in the matching like the others, but means no lifecycle. So it also gives the type's `lifecycle`. With `superseded = ["superseded"]` and `other-statuses = ["superseded in part"]`, the status `Superseded in part by 0010` gives the type's `lifecycle`, because the longer value wins.
+- The four lists together are every status the type allows. When a type lists at least one value, the writing check reports a status that matches none of them (`status-value`). A type that lists no values accepts any status.
+
+For example, a type for decision records that may still be under discussion:
+
+```toml
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+status = { front-matter = "status" }
+current = ["accepted"]
+superseded = ["superseded"]
+other-statuses = ["proposed"]
+required = ["status", "date"]
+```
+
+Here `status: proposed` is allowed and has no lifecycle. `status: draft` gets a `status-value` warning. A decision without `date:` in its front matter gets a `required-field` error.
 
 ### Decision headings
 
@@ -151,6 +170,7 @@ A status value means current, superseded or archived when one of the three lists
 |---|---|
 | `Syntax` | The file is not valid TOML, a key is unknown or missing, or a value has the wrong shape. The TOML reader's message names the line and column and shows the line. |
 | `Invalid` | A type is valid TOML but says something impossible. The message names the type by its position and name, as in `the rules file's type 2 ("feature"): it lists no paths`. |
+| `Lint` | The `[lint]` table is valid TOML but names an HTML element that cannot exist, as in ``the rules file's [lint] table: `allowed-html` holds "<b>", …``. An unknown rule id or a limit of 0 is a `Syntax` error instead, because the TOML reader catches it with its line. |
 
 A misspelled key gives this `Syntax` message:
 
@@ -159,7 +179,7 @@ the rules file could not be read: TOML parse error at line 4, column 1
   |
 4 | stauts = { masthead = "S" }
   | ^^^^^^
-unknown field `stauts`, expected one of `name`, `paths`, `status`, `current`, `superseded`, `archived`, `lifecycle`, `date`, `superseded-by`, `decision-headings`
+unknown field `stauts`, expected one of `name`, `paths`, `status`, `current`, `superseded`, `archived`, `lifecycle`, `date`, `superseded-by`, `decision-headings`, `required`, `other-statuses`
 ```
 
 A type is invalid when:
@@ -167,9 +187,10 @@ A type is invalid when:
 - its name is empty;
 - it lists no paths, or a pattern does not parse;
 - a location names no place to look, or names an empty key or title;
-- it lists status values but has no `status` location;
+- it lists status values, in any of the four lists, but has no `status` location;
 - one status value is in two lists, or has no letters or digits;
-- a decision heading is empty.
+- a decision heading is empty;
+- a `required` key is empty.
 
 ## What `classify` returns
 
@@ -185,6 +206,12 @@ A type is invalid when:
 
 `rules.type_for(path)` returns the matching type itself. `rule.lifecycle_of(status)` and `rule.is_decision_heading(title)` apply one rule each.
 
+Three more lookups serve the writing check:
+
+- `rule.allows_status(status)` says whether any of the four lists holds the status, and `rule.statuses()` lists every value in the order the file writes them.
+- `location.find(&document)` reads one location. It returns a `Located`: the value's text, the targets of its links, and the `Place` that held it (`FrontMatter`, `Masthead` or `Section`), so a finding can point at the right line.
+- `rules.lint()` returns the `[lint]` settings, or the defaults when the file has no `[lint]` table.
+
 ## Presets
 
 A preset is a rules file in this same format, built into driftmark (M4). M4 decides how a repository turns one on and how its types combine with the repository's own. These sketches show that the planned presets fit the format:
@@ -199,4 +226,5 @@ A preset is a rules file in this same format, built into driftmark (M4). M4 deci
 - Excluding files, and naming which folders hold documents at all. The program decides which files it reads.
 - Choosing between `{a,b}` in a pattern.
 - More than one rules file in a repository.
-- Reading a date as a date, or checking that a status is in a list. The writing check (M4) can report statuses no list holds.
+- Reading a date as a date.
+- Checking that a masthead holds the `required` keys. `required` reads front matter only.
