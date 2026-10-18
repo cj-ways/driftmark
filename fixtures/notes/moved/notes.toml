@@ -1,0 +1,11 @@
+# A paragraph moved down in its section; another was copied to a later
+# section. The first note follows its block; the second stays on the block
+# that stayed in place.
+[[note]]
+quote = "tell every team in the channel"
+
+[[note]]
+quote = "Run the full test suite on the frozen branch."
+
+[[note]]
+quote = "error dashboards"

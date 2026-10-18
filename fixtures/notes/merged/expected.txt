@@ -1,0 +1,6 @@
+note 1: "headings rank above body text" (bytes 54..83, block 2, under Search › Ranking)
+  exact, score 1, block 2
+  now: "headings rank above body text" (bytes 54..83, under Search › Ranking)
+note 2: "so results never jump between two searches" (bytes 120..162, block 3, under Search › Ranking)
+  exact, score 1, block 2
+  now: "so results never jump between two searches" (bytes 119..161, under Search › Ranking)

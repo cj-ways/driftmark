@@ -515,3 +515,12 @@ fn a_ticked_checkbox_is_a_fact_whatever_the_words() {
     assert_eq!(signals, [&[Signal::TaskState][..], &[Signal::Wording][..]]);
     assert_eq!(changes[0].level, Level::Fact);
 }
+
+#[test]
+fn the_block_map_pairs_blocks_as_the_change_list_does() {
+    let old = parse("# T\n\nFirst one.\n\nSecond one.\n\nGone for good.\n");
+    let new = parse("# T\n\nSecond one.\n\nFirst one, edited.\n\nBrand new.\n");
+    let map = block_map(&old, &new);
+    assert_eq!(map.old_to_new, vec![Some(0), Some(2), Some(1), None]);
+    assert_eq!(map.in_place, vec![true, false, true, false]);
+}

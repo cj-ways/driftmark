@@ -1,0 +1,9 @@
+# A paragraph and a list item are gone. Their notes are kept, orphaned.
+[[note]]
+quote = "plain Markdown, comes later if readers ask for it"
+
+[[note]]
+quote = "keeps the reader's notes as a list at the end"
+
+[[note]]
+quote = "names the commit"

@@ -1,0 +1,10 @@
+# The same document on both sides: every note stays exact.
+[[note]]
+quote = "Keep each rendered page for one hour"
+
+[[note]]
+quote = "64 MB"
+
+[[note]]
+quote = "a second visit is fast"
+origin = "same"

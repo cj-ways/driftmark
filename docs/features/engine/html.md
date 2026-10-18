@@ -177,6 +177,8 @@ A made-up example. In `# T\n\nab *c* &amp; d![i](x.png)\n`, block 1 starts at by
 
 The design and its tests come from the anchoring spike (`docs/working/version-1/spikes/anchoring.md`, design B). Ranges are tight: a selected bold word maps to `bold`, not to `**bold**` (decision 0008).
 
+`driftmark serve` does not put the tables in the page. It serves them at `/api/positions/<revision>/-/<path>`, cached with the page's HTML, and the notes script loads them only when the reader starts a note, or when the page has notes to highlight (`docs/features/notes.md`).
+
 ## The page script
 
 `anchor.js` defines `window.driftmarkAnchor`:
@@ -311,7 +313,7 @@ Measured on 2026-10-18 on the 3,424 Markdown files under `docs/` of the private 
 ## Limits
 
 - **Raw HTML text is not mapped.** An HTML block has no `data-k`, because its tags can open in one block and close in another, as `<details>` does around Markdown. A selection inside its text gets no source range. On the corpus that was 2 of 34,240 selections.
-- **Change pages have no position tables.** Deleted words inside a block are not in the new version's source. Notes on change pages need a second table for the old version, or must skip `<del>` (M3).
+- **Change pages have no position tables.** Deleted words inside a block are not in the new version's source. A note on a change card sends the selected text instead, without the `<del>` text on the new side and the `<ins>` text on the old side, and the server finds it in the block's source (`docs/features/engine/notes-model.md`, "Text selected on a change page").
 - **A drawn diagram's text cannot carry a note.** The SVG replaces the code; a note on a diagram anchors to its whole block.
 - **Footnotes render at the end.** A selection from a paragraph into the footnote list covers two stretches of source and reports `reordered`.
 - **Tables in the change HTML are plain text**, cells separated by tabs.

@@ -12,6 +12,9 @@
 //! - `prism-core.js` and one `prism-<language>.js` per language: code
 //!   colouring, loaded only by pages with code, and only for the languages
 //!   the page uses.
+//! - `anchor.js` and `notes.js`: the reader's notes. `notes.js` loads on
+//!   reading and change pages; `anchor.js`, which turns a selection into
+//!   source bytes, loads only when the reader starts a note.
 //! - `mermaid.js`: the browser fallback for a diagram the server could not
 //!   draw, loaded only by pages with such a diagram. It is stored
 //!   compressed (1.6 MB instead of 5.5 MB) and sent as it is to a browser
@@ -181,6 +184,18 @@ impl Assets {
         for (name, bytes) in PRISM {
             files.push(Asset::new(name, JS, Bytes::from_static(bytes), false));
         }
+        files.push(Asset::new(
+            "anchor.js",
+            JS,
+            Bytes::from_static(driftmark_core::render::ANCHOR_SCRIPT.as_bytes()),
+            false,
+        ));
+        files.push(Asset::new(
+            "notes.js",
+            JS,
+            Bytes::from_static(include_bytes!("../../assets/notes.js")),
+            false,
+        ));
         let mut assets = Assets { files };
         let font = assets.address("liberation-sans-regular.woff2");
         let css = include_str!("../../assets/page.css").replace("__FONT__", &font);

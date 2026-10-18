@@ -15,7 +15,7 @@
 //! the security headers demand, so nothing here is an inline script or an
 //! inline style.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 use driftmark_core::diff::{
@@ -23,6 +23,7 @@ use driftmark_core::diff::{
 };
 use driftmark_core::document::{Field, MetaValue};
 use driftmark_core::git::RepoPath;
+use driftmark_core::notes::change_key;
 use driftmark_core::render::{Section, words};
 use driftmark_core::rules::{Classification, Lifecycle};
 
@@ -549,6 +550,9 @@ pub(crate) struct Reading<'a> {
     pub readable: bool,
     /// The open branches that change it.
     pub waiting: &'a [Waiting],
+    /// How many notes the reader made on it; `None` when the notes file
+    /// cannot be read, which leaves notes off on the page.
+    pub notes: Option<usize>,
 }
 
 /// How many changes each section has waiting on open branches, by heading
@@ -695,7 +699,14 @@ fn flag_sections(body: &str, counts: &HashMap<String, usize>, href: &str) -> Str
 pub(crate) fn reading(page: &Reading<'_>, now: i64) -> String {
     let path = page.path.to_lossy();
     let counts = pending(page.outline, page.waiting);
-    let mut out = String::from("<main id=\"Main\" class=\"read\">\n");
+    let notes = page.notes.map_or_else(String::new, |count| {
+        format!(
+            " data-notes=\"{count}\" data-path=\"{}\" data-rev=\"{}\"",
+            escape(&path),
+            escape(page.revision)
+        )
+    });
+    let mut out = format!("<main id=\"Main\" class=\"read\"{notes}>\n");
     waiting_box(&mut out, page, now);
     let at = match page.commit {
         Some(commit) => format!(
@@ -818,6 +829,12 @@ pub(crate) struct Review<'a> {
     pub base: Option<&'a str>,
     /// The one document of a document's own page.
     pub single: Option<&'a RepoPath>,
+    /// The changes the reader marked seen, by their keys
+    /// (`driftmark_core::notes::change_key`).
+    pub seen: &'a HashSet<String>,
+    /// How many notes are on the range's documents; `None` when the notes
+    /// file cannot be read, which leaves notes off on the page.
+    pub notes: Option<usize>,
 }
 
 /// The first words of a change's text, for the rail.
@@ -1011,6 +1028,20 @@ fn document_section(out: &mut String, page: &Review<'_>, shown: &Shown<'_>) {
             escape(&doc_changes_address(page.label, &document.path))
         )
     };
+    // Each change's key, in list order, and the ones the reader saw, for
+    // the "Seen" buttons.
+    let all: Vec<String> = document
+        .changes
+        .iter()
+        .map(|change| change_key(&document.path, change))
+        .collect();
+    let keys = all.join(" ");
+    let seen = all
+        .iter()
+        .filter(|key| page.seen.contains(*key))
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
     let status = document.status.as_ref().map_or_else(String::new, |status| {
         format!(
             "<span class=\"docchg-status\">status {} → {}</span>",
@@ -1020,13 +1051,28 @@ fn document_section(out: &mut String, page: &Review<'_>, shown: &Shown<'_>) {
     });
     let _ = write!(
         out,
-        "<section class=\"docchg\" id=\"{id}\" aria-labelledby=\"{id}-t\"><header class=\"docchg-head\"><h2 id=\"{id}-t\">{heading}</h2>\
+        "<section class=\"docchg\" id=\"{id}\" aria-labelledby=\"{id}-t\" data-keys=\"{keys}\" data-seen=\"{seen}\"><header class=\"docchg-head\"><h2 id=\"{id}-t\">{heading}</h2>\
          <p class=\"docchg-path\"><code>{}</code>{state}{own}</p><p class=\"docchg-meta\">{}<span>{}</span>{status}</p></header>\n{}</section>\n",
         escape(&document.path),
         document.summary.highest.map_or_else(String::new, badge),
         document_counts(&document.summary),
         shown.html
     );
+}
+
+/// The attributes that turn notes on for a change page's script: the count
+/// of notes on the range's documents, the range, and the one document of a
+/// document's own page. None when the notes file cannot be read.
+fn notes_attributes(page: &Review<'_>) -> String {
+    page.notes.map_or_else(String::new, |count| {
+        let path = page.single.map_or_else(String::new, |path| {
+            format!(" data-path=\"{}\"", escape(&path.to_lossy()))
+        });
+        format!(
+            " data-notes=\"{count}\" data-range=\"{}\"{path}",
+            escape(page.label)
+        )
+    })
 }
 
 /// A change page: a range's changes, or one document's.
@@ -1059,9 +1105,10 @@ pub(crate) fn review(page: &Review<'_>) -> String {
         Some(path) => address::json(&address::document_changes(page.label, path)),
         None => address::json(&address::changes(page.label)),
     };
+    let marked = notes_attributes(page);
     let _ = write!(
         out,
-        "<main id=\"Main\" class=\"review\">\n<header class=\"page-head\"><p class=\"kicker\">Changes in <code>{}</code> · {compared}{}{back} · <a href=\"{}\">JSON</a></p><h1>{}</h1></header>\n",
+        "<main id=\"Main\" class=\"review\"{marked}>\n<header class=\"page-head\"><p class=\"kicker\">Changes in <code>{}</code> · {compared}{}{back} · <a href=\"{}\">JSON</a></p><h1>{}</h1></header>\n",
         escape(page.label),
         if notes.is_empty() {
             String::new()

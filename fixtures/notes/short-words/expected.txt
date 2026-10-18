@@ -1,0 +1,9 @@
+note 1: "only" (bytes 25..29, block 2, under Lint › Rules)
+  exact, score 1, block 2
+  now: "only" (bytes 25..29, under Lint › Rules)
+note 2: "only" (bytes 61..65, block 2, under Lint › Rules)
+  outdated, score 0, block 2
+  now: "A rule only runs on Markdown files." (bytes 18..53, under Lint › Rules)
+note 3: "only" (bytes 105..109, block 3, under Lint › Rules)
+  exact, score 1, block 4
+  now: "only" (bytes 107..111, under Lint › Rules)

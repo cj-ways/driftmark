@@ -33,6 +33,10 @@ pub(crate) struct Args {
     pub token: Option<String>,
     /// The branch the home page and `auto` compare with, when given.
     pub base: Option<String>,
+    /// The reader's name on notes, replies and seen marks, when given.
+    pub reader: Option<String>,
+    /// Where review files go, when not next to the notes file.
+    pub review_dir: Option<PathBuf>,
 }
 
 /// Reads the arguments after `serve`.
@@ -47,6 +51,8 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
     let mut addr = None;
     let mut token = None;
     let mut base = None;
+    let mut reader = None;
+    let mut review_dir = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let text = arg
@@ -62,6 +68,10 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
             "--addr" => addr = Some(address(&text_value(&mut args, name, inline)?)?),
             "--token" => token = Some(checked_token(text_value(&mut args, name, inline)?)?),
             "--base" => base = Some(text_value(&mut args, name, inline)?),
+            "--reader" => reader = Some(checked_reader(&text_value(&mut args, name, inline)?)?),
+            "--review-dir" => {
+                review_dir = Some(PathBuf::from(value(&mut args, name, inline)?));
+            }
             _ if name.starts_with('-') => return Err(format!("unknown option `{name}`")),
             _ => {
                 return Err(format!(
@@ -75,7 +85,19 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
         addr: addr.unwrap_or(DEFAULT_ADDR),
         token,
         base,
+        reader,
+        review_dir,
     }))
+}
+
+/// A reader's name is shown on every note and reply, so it must be short
+/// and visible.
+fn checked_reader(name: &str) -> Result<String, String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
+        return Err("`--reader` takes a name of 1 to 64 visible characters".to_owned());
+    }
+    Ok(name)
 }
 
 /// The value of an option: after `=`, or the next argument.
@@ -155,6 +177,8 @@ mod tests {
                 addr: DEFAULT_ADDR,
                 token: None,
                 base: None,
+                reader: None,
+                review_dir: None,
             }
         );
         assert!(DEFAULT_ADDR.ip().is_loopback());
@@ -175,6 +199,9 @@ mod tests {
         let args = serve(&["--repo=x", "--addr", "100.64.0.1:8000"]);
         assert_eq!(args.repo, PathBuf::from("x"));
         assert_eq!(args.addr.to_string(), "100.64.0.1:8000");
+        let args = serve(&["--reader", " Ana ", "--review-dir=/tmp/reviews"]);
+        assert_eq!(args.reader.as_deref(), Some("Ana"));
+        assert_eq!(args.review_dir, Some(PathBuf::from("/tmp/reviews")));
         assert_eq!(parse_words(&["-h"]), Ok(Request::Help));
         assert_eq!(parse_words(&["--repo", "x", "--help"]), Ok(Request::Help));
     }
@@ -187,6 +214,9 @@ mod tests {
             (&["--base"], "`--base` needs a value"),
             (&["--token", "short"], "`--token` needs at least 16"),
             (&["--token=has space in it 1234"], "`--token` may hold only"),
+            (&["--reader", "  "], "`--reader` takes a name"),
+            (&["--reader", "a\nb"], "`--reader` takes a name"),
+            (&["--review-dir"], "`--review-dir` needs a value"),
             (&["--port", "1"], "unknown option `--port`"),
             (&["main"], "`main` is not an option"),
         ] {

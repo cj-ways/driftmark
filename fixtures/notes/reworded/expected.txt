@@ -1,0 +1,9 @@
+note 1: "Keep audit rows for thirty days, then delete them with the nightly job." (bytes 28..99, block 2, under Audit rows › Retention)
+  fuzzy, score 0.915, block 2
+  now: "Keep audit rows for thirty days, then archive them with the nightly job." (bytes 28..100, under Audit rows › Retention)
+note 2: "Only the support team reads audit rows, through the admin pages." (bytes 182..246, block 5, under Audit rows › Access)
+  fuzzy, score 0.781, block 5
+  now: "and security teams read audit rows, through the admin pages." (bytes 205..265, under Audit rows › Access)
+note 3: "move to cold storage before they are deleted" (bytes 124..168, block 3, under Audit rows › Retention)
+  outdated, score 0.705, block 3
+  now: "move to cold storage; nothing is deleted" (bytes 125..165, under Audit rows › Retention)

@@ -1,0 +1,9 @@
+note 1: "plain Markdown, comes later if readers ask for it" (bytes 97..146, block 3, under Exports › Formats)
+  orphaned, score 0
+  not in b.md
+note 2: "keeps the reader's notes as a list at the end" (bytes 196..241, block 5, under Exports › Formats)
+  orphaned, score 0
+  not in b.md
+note 3: "names the commit" (bytes 254..270, block 6, under Exports › Formats)
+  exact, score 1, block 4
+  now: "names the commit" (bytes 127..143, under Exports › Formats)

@@ -1,0 +1,6 @@
+# Two paragraphs became one. Both notes are still in their section.
+[[note]]
+quote = "headings rank above body text"
+
+[[note]]
+quote = "so results never jump between two searches"

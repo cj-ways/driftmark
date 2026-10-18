@@ -1,0 +1,6 @@
+note 1: "so every worktree sees it" (bytes 92..117, block 2, under Notes file › Where it lives)
+  exact, score 1, block 3
+  now: "so every worktree sees it" (bytes 120..145, under Notes file › Where it lives)
+note 2: "deleting the clone deletes the notes" (bytes 157..193, block 4, under Notes file › Backups)
+  moved, score 1, block 5
+  now: "deleting the clone deletes the notes" (bytes 184..220, under Notes file › Copies)

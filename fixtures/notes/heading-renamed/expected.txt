@@ -1,0 +1,3 @@
+note 1: "never looks inside the .git folder" (bytes 87..121, block 2, under Live updates › Polling)
+  exact, score 1, block 2
+  now: "never looks inside the .git folder" (bytes 101..135, under Live updates › How the watcher works)

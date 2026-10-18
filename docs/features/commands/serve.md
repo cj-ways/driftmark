@@ -5,12 +5,13 @@ date: 2026-10-18
 
 # The serve command
 
-> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, and one document's changes, each also as JSON. `/api/search` searches every document at a revision. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default; any other address needs a token, which a browser presents once and then keeps in a cookie.
+> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, and one document's changes, each also as JSON. `/api/search` searches every document at a revision. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default; any other address needs a token, which a browser presents once and then keeps in a cookie. The reader's notes and "Seen" marks go to one SQLite file in the clone's shared git folder, through the notes routes.
 
 ## Running it
 
 ```text
 driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>] [--base <branch>]
+                [--reader <name>] [--review-dir <path>]
 ```
 
 | Option | Meaning |
@@ -19,6 +20,8 @@ driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>] [--base <br
 | `--addr <ip:port>` | Where to listen. The default is `127.0.0.1:4170`, this machine only. Port `0` picks a free port. |
 | `--base <branch>` | The default branch: the one the home page and `auto` compare with. It wins over the rules file's `[compare] default-branch`. |
 | `--token <value>` | The token every request must bring. It needs at least 16 characters, and only letters, digits, `-`, `_`, `.` and `~`, so it fits in an address and a cookie as it is. |
+| `--reader <name>` | The reader's name on notes, replies and "Seen" marks: 1 to 64 visible characters. The default is `reader`. |
+| `--review-dir <path>` | Where review files go. The default is the `reviews` folder next to the notes file (see "Notes"). |
 | `--help` | Print the usage text. |
 
 When it starts, the server prints where it reads and the address to open:
@@ -94,8 +97,14 @@ The separator is `/-/` because branch names hold `/`, as in `feature/login`. The
 | `GET /events` | The working tree's changes, as server-sent events. |
 | `GET /static/<hash>/<name>` | The files the pages load, built into the program: the page script, the style sheet, the diagram font, Prism and mermaid.js (see "Static files"). |
 | `GET /api/status` | The cache's counts and the watcher's state, JSON. |
+| `GET /api/positions/<revision>/-/<path>` | A reading page's position tables, JSON, which its script loads when the reader starts a note (`docs/features/engine/html.md`). |
+| `GET /api/notes`, `POST /api/notes` | Notes on a document, a range or a review; a new note. See "Notes". |
+| `GET /api/notes/<n>`, `PATCH /api/notes/<n>` | One note; a change to its text, stance, ask or blocking flag. |
+| `POST /api/notes/<n>/<action>` | `withdraw`, `reply`, `decide` or `applied`. |
+| `POST /api/reviews/<r>/prompt`, `POST /api/reviews/<r>/file` | One round of a review as a prompt, or as a review file. |
+| `POST /api/seen` | A change marked seen, or not seen. |
 
-Every route also answers `HEAD`. A route that exists answers another method with `405`, and any other address answers `404`.
+Every `GET` route also answers `HEAD`. A route that exists answers another method with `405`, and any other address answers `404`.
 
 The pages follow the review-first design of decision 0010. `docs/features/pages.md` says what a reader sees on each; this document covers the routes, the JSON and how the server makes them.
 
@@ -374,6 +383,171 @@ A page writes each piece as text, never as HTML: a snippet holds the document's 
 
 A kind of entry shows once it was asked for: `rules`, `documents`, `pages`, `ranges`, `branches` or `search`. `worktree` is `null` in a bare repository. Its `files` are the Markdown files watched, `changes` counts the changes announced, `listeners` the open event streams, and `count_ms` how long the last count took. `search.worktree` is the working tree's search index: the documents it searches, the files read again since its last full build, and its estimated memory. It is `null` before the first search of the working tree, and in a bare repository.
 
+## Notes
+
+The reader's notes and "Seen" marks (decision 0004; `docs/features/notes.md` says what a reader sees, `docs/features/engine/notes-model.md` holds the note's JSON, its loop and its anchoring).
+
+### The notes file
+
+- **Where.** `driftmark/notes.db` in the git common directory, the folder `git rev-parse --git-common-dir` names: `.git` at the top of a clone, and the same folder for every linked worktree of it. Git never commits it. Deleting the clone deletes it.
+- **When.** The server opens it on the first note or seen mark, and makes it and its folder then. A page that only reads never makes it: until then the notes routes answer with no notes.
+- **Two programs at once.** It is SQLite in WAL mode, so `driftmark serve` and `driftmark mcp` can use it together; a writer waits up to five seconds for the other.
+- **Versions.** Its schema has a version, in SQLite's `user_version`, now 1. A newer driftmark adds a migration; an older one refuses a file it does not know, rather than change it, and the routes answer `503`.
+- **Review files** go to the `reviews` folder next to it, or to `--review-dir`.
+
+### What pages carry
+
+- A reading page's `<main>` carries `data-notes` (the number of notes on the document), `data-path` and `data-rev`. A change page's `<main>` carries `data-notes` (the notes on the range's documents), `data-range` and, on a document's own page, `data-path`. Without the attribute, the notes file cannot be read and the page has no notes.
+- Each document section of a change page, `<section class="docchg">`, carries `data-keys`: the key of each change, in the order of its change list, separated by spaces (`driftmark_core::notes::change_key`), and `data-seen`: the keys the reader marked seen.
+- `page.js` loads `notes.js` on such a page; `notes.js` loads `anchor.js` and the position tables when they are needed.
+
+### Listing notes
+
+`GET /api/notes` takes one of three forms:
+
+| Query | Answer |
+|---|---|
+| `?path=<path>&rev=<revision>` | The notes on one document, each placed in that revision: a reading page. `rev` is as in `/doc/<revision>/-/<path>`; the default is `worktree`, or `HEAD` in a bare repository. |
+| `?range=<range>[&path=<path>]` | The notes on the range's changed documents, or on one of them, each placed on a side of the change page. |
+| `?review=<r>` | The notes of one review, as `r3` or `3`, without places. |
+
+The answer, for a made-up repository whose `main` holds `docs/cache.md` and whose `feature` added a paragraph above the noted sentence (its `target` is shown in full in the notes model):
+
+```json
+{
+  "schema_version": 1,
+  "reader": "Ana",
+  "file": "/home/ana/cache-docs/.git/driftmark/notes.db",
+  "review": {"id": 1, "kind": "document", "scope": "docs/cache.md", "created_at": 1792352574},
+  "reviews": [{"id": 1, "kind": "document", "scope": "docs/cache.md", "created_at": 1792352574}],
+  "path": "docs/cache.md",
+  "revision": "feature",
+  "commit": "f5022182cf116f0c4a5e9035f6c9021b1de6a126",
+  "notes": [
+    {
+      "id": 1,
+      "review": 1,
+      "target": {"path": "docs/cache.md", "side": "reading", "start": 28, "end": 55, "…": "…"},
+      "stance": "disagree",
+      "ask": "change",
+      "blocking": true,
+      "body": "Phones keep pages longer.",
+      "status": "open",
+      "thread": [],
+      "proposal": null,
+      "decision": null,
+      "applied": [],
+      "author": "Ana",
+      "created_at": 1792352574,
+      "updated_at": 1792352574,
+      "placement": {
+        "side": "reading",
+        "state": "exact",
+        "start": 60,
+        "end": 87,
+        "score": 1.0,
+        "block": 3,
+        "lines": [7, 7],
+        "text": null
+      }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `reader` | The name from `--reader`. |
+| `file` | Where the notes file is. |
+| `review` | The review of this page's scope, or `null` before its first note. |
+| `reviews` | Every review the listed notes belong to. |
+| `path`, `revision`, `commit` | For a document: what was asked, and the commit it resolved to, or `worktree`. |
+| `range` | For a range: the range as written. |
+| `notes` | The notes, by number, each with its `placement`. |
+
+The server keeps each note's placement per version in memory, up to 50,000 of them, so a page opened again re-anchors nothing. `placement` says where the note sits on this page, or is `null` when it is not looked for here: a note on the old side of a change, seen from a reading page, and every note listed by review.
+
+| Field | Meaning |
+|---|---|
+| `side` | `reading`; on a change page `new` or `old`. A note made on the old side stays on the old version. Any other note is looked for in the newer version, and in the older one when its text is gone from the newer. |
+| `state` | `exact`, `moved`, `fuzzy`, `outdated` or `orphaned`. |
+| `start`, `end` | The source bytes it sits on in that version; `null` when orphaned. |
+| `score` | How well the quote matched, from 0 to 1. |
+| `block` | The block index the place starts in, the `data-k` of its elements on a reading page. |
+| `lines` | The 1-based first and last line. |
+| `text` | The source text there when it is not the quote, such as the new words of a fuzzy note. |
+
+### Making a note
+
+`POST /api/notes` takes one of two bodies. From a reading page, the position tables give the bytes:
+
+```json
+{"path": "docs/cache.md", "revision": "main", "start": 28, "end": 55,
+ "stance": "disagree", "ask": "change", "blocking": true, "body": "Phones keep pages longer."}
+```
+
+From a change page, the card gives the side, the block (its `data-old` or `data-new`), the selected text as shown, and where in the block's text the selection starts, in characters. Without `text`, the note is on the whole block:
+
+```json
+{"path": "docs/cache.md", "range": "origin/main...feature", "side": "new", "block": 2,
+ "text": "short intro", "hint": 2, "stance": "question", "ask": "explain", "body": "What is it for?"}
+```
+
+| Field | Meaning |
+|---|---|
+| `path` | The document, from the repository root. |
+| `revision` or `range` | Exactly one: the reading page's revision, or the change page's range. |
+| `side` | With `range`: `old` (the range's older commit) or `new` (its newer side). |
+| `start`, `end` | The source bytes, from `anchor.js`'s `toSource`. |
+| `block`, `text`, `hint` | Instead of `start` and `end`: the block, and the text found in its source (`notes::locate_text`). |
+| `stance` | `agree`, `disagree`, `question` or `suggestion`. |
+| `ask` | `change`, `explain` or `keep`. |
+| `blocking` | Optional; `false` when left out. |
+| `body` | The reader's point, at most 20,000 bytes. |
+
+The note joins the review of its page: the document's, or the range's. A note on the working tree keeps the file's bytes in the notes file, so it can be found again after the file changes. The answer is `201` with `{"schema_version": 1, "note": {…}}`: the note with its placement.
+
+| Answer | When |
+|---|---|
+| `400` | The body is not this JSON; it names both or neither of `revision` and `range`; a reading page names a side, or a change page does not; the block does not exist; the selected text is not in it; the selection is empty, white space only, outside the document, or longer than 20,000 bytes. |
+| `404` | The revision or the range names nothing, or the document is not there. |
+| `422` | The document cannot be read, such as a file that is not UTF-8. |
+| `503` | The notes file cannot be opened or written. |
+
+### Changing a note
+
+| Request | Body | Does |
+|---|---|---|
+| `GET /api/notes/<n>` | | The note, with its thread and commits. |
+| `PATCH /api/notes/<n>` | `{"stance"?, "ask"?, "blocking"?, "body"?}` | The reader edits the note. |
+| `POST /api/notes/<n>/reply` | `{"body", "stance"?}` | The reader replies. |
+| `POST /api/notes/<n>/decide` | `{"outcome": "change" \| "modify" \| "keep", "summary"}` | The reader decides; `keep` closes the note. |
+| `POST /api/notes/<n>/applied` | `{"commits": ["<id>", …]}` | The commits that applied a decided note, 7 to 64 hex digits each. |
+| `POST /api/notes/<n>/withdraw` | `{}` | The reader takes the note back. |
+
+`<n>` is the note's number, as `12` or `n12`. Each answers `{"schema_version": 1, "note": {…}}`. The loop's rules are the core's (`notes::next_status`): a change they refuse answers `409` with the reason, such as `the note is applied, so it cannot change`. An unknown note or action answers `404`. The server acts as the reader; an agent acts through the MCP connector.
+
+### Handing a review over
+
+`POST /api/reviews/<r>/prompt` and `POST /api/reviews/<r>/file` take `{"round": 1}` (discuss) or `{"round": 2}` (apply), and write the review's notes of that round in the prompt packet of the notes model. Notes are placed in the version an agent will edit: the range's newer side, or the working tree for a document's review. The answer:
+
+```json
+{
+  "schema_version": 1,
+  "review": {"id": 1, "kind": "document", "scope": "docs/cache.md", "created_at": 1792352574},
+  "round": 1,
+  "notes": [1],
+  "sent": [1],
+  "text": "Review r1 · docs/cache.md · 1 note · at worktree\nRound 1: discuss only. …"
+}
+```
+
+`notes` are the notes the text holds, `sent` the ones that moved from open to sent; only round 1 sends. `file` adds `"file"`: the review file it wrote, `r<number>.md`, whole or not at all. An unknown review answers `404`, a round other than 1 or 2 `400`.
+
+### Seen marks
+
+`POST /api/seen` with `{"key": "<16 hex digits>", "seen": true}` marks a change seen for the reader; `false` takes the mark back. The key is the change's entry in `data-keys`. The answer repeats the key and the mark. The change page shows the marks in `data-seen`.
+
 ## Errors
 
 | Status | When | Example message |
@@ -382,7 +556,7 @@ A kind of entry shows once it was asked for: `rules`, `documents`, `pages`, `ran
 | 404 | The address names nothing: an unknown revision, text that is not a range, a date in neither form, two points without a common history, a path that is not a Markdown file in the repository, a document missing at that revision, a document that did not change in the range, a named default branch that does not exist, or a working tree in a bare repository. | `` `nope` does not name a commit `` |
 | 500 | Reading git failed, or the rules file is broken. The message names the cause. | ``git could not be read: object 3f2a… is not in the repo`` |
 
-A page route answers with an HTML page that says so; an `/api/` route answers with JSON: `{"error": "<the message>"}`.
+A page route answers with an HTML page that says so; an `/api/` route answers with JSON: `{"error": "<the message>"}`. The notes routes add `409` (the loop refuses the change), `415` and `403` (the body rule in "Who may ask"), `422` (a document that cannot be read) and `503` (the notes file); "Notes" lists them.
 
 ## Live reload
 
@@ -417,6 +591,8 @@ These files are built into the program:
 | `liberation-sans-regular.woff2` | The diagram font, Liberation Sans 2.1.5, unmodified (147,036 bytes). | pages with a drawn diagram |
 | `prism-core.js`, `prism-<language>.js` | Prism 1.30.0 and 59 of its languages. | pages with code, for their languages |
 | `mermaid.js` | mermaid.js 12.1.0, for diagrams the server could not draw. | pages with such a diagram |
+| `notes.js` | The reader's notes: the selection button, the note form, the cards, the review list and the "Seen" buttons. | reading and change pages whose notes file can be read |
+| `anchor.js` | The position-table script of `driftmark-core` (`docs/features/engine/html.md`): a selection to source bytes and back. | a reading page, when the reader starts a note or the page has notes to highlight |
 
 Each is served at `/static/<hash>/<name>`, where the hash is 16 hex digits of a hash of its bytes, so a new build gives a new address. At the right hash, the answer says `Cache-Control: public, max-age=31536000, immutable`: the browser keeps it for a year. At an old hash, the same file comes back with `no-cache`, so a page loaded before an upgrade still works.
 
@@ -474,7 +650,7 @@ The rules version is part of a document's key because the rules file's masthead 
 - with an `Origin` other than `http://<the Host it asked for>` gets `403`, and so does `Origin: null`;
 - with `Sec-Fetch-Site` other than `same-origin` or `none` gets `403`.
 
-A request without `Origin`, such as one from a command-line tool, passes; it still needs the token where one is required. M2 has no route that takes a body, so an allowed request then gets `405`.
+A request without `Origin`, such as one from a command-line tool, passes; it still needs the token where one is required. The notes routes are the routes that take a body.
 
 ## Safety
 
@@ -539,6 +715,5 @@ What stays above the cache, from the spike's reading of glibc's own counters (`m
 
 - **Images and other files.** The server serves Markdown documents only. A reading page shows a link to any other file as its text, and an image as its alt text.
 - **A size limit before parsing.** A file with very deep nesting is refused by the parser after it reads it; the `render` lane adds a check before the parser sees the file.
-- **Notes** (M3).
 - **HTTPS.** The server speaks plain HTTP; across machines, use a private network such as Tailscale.
 - **Paths that are not UTF-8 in change lists.** A change list names files as text, so the link to such a file's changes may not lead back to it.

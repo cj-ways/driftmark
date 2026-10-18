@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Pages
 
-> Short version: `driftmark serve` shows three kinds of page in the review-first design of decision 0010. The inbox lists the branches whose documents changed and says where to start. A change page has a rail with every change and one card per change, with its level, what happened, how it is drawn and why it ranks there. A reading page shows a document with its status, its sections and the changes waiting on open branches. Every page keeps the same readability rules on a computer and a phone, in light and dark. Diagrams are drawn on the server, code is coloured in the browser, and pages that show the working tree update themselves.
+> Short version: `driftmark serve` shows three kinds of page in the review-first design of decision 0010. The inbox lists the branches whose documents changed and says where to start. A change page has a rail with every change and one card per change, with its level, what happened, how it is drawn and why it ranks there. A reading page shows a document with its status, its sections and the changes waiting on open branches. Every page keeps the same readability rules on a computer and a phone, in light and dark. Diagrams are drawn on the server, code is coloured in the browser, and pages that show the working tree update themselves. Reading and change pages carry the reader's notes and "Seen" marks (`docs/features/notes.md`).
 
 ## Every page
 
@@ -82,7 +82,7 @@ Every change is a card. Its first line says:
 - what happened: Edited, Added, Removed, Moved, Moved and edited, Formatting only, New document or Deleted document;
 - how it is drawn: Word marks, Side by side, Sentence by sentence, Rewritten or Line by line;
 - why it ranks there, in words, such as "in a decision section · a number or a name changed";
-- "Seen" and "Add a note". Both are inactive: notes and the seen mark arrive together in M3, kept in the notes file (decision 0004).
+- "Seen" and "Add a note", which work when the notes file can be read (`docs/features/notes.md`). "Seen" turns the card pale and dashed and counts it in the rail; "Add a note" notes the words selected in the card, or the whole changed block.
 
 Under it: the headings above the changed block ("in Decision › Not in version 1"), then the change itself:
 
@@ -165,6 +165,7 @@ On this repository's own documents and history, at 1440 px, in KB:
 | A branch's changes, 126 changes in 14 documents | 39.1 | 17.8 | 0 | 21.4 |
 | One document's changes, 45 changes | 27.5 | 17.8 | 0 | 9.8 |
 
+- Notes add to reading and change pages, measured after gzip on 2026-10-18: `notes.js`, 9.0 KB, once per device, and 1.3 KB more style sheet and script. `anchor.js` (4.8 KB) and the position tables (a median of 1.9 KB on the private corpus, `docs/features/engine/html.md`) load only when the reader starts a note or the page has notes to show. The largest page above stays near 50 KB.
 - A page with code also loads Prism: 4.7 KB for TOML and Rust, 6.5 KB with Bash added.
 - A page with a diagram the server could not draw also loads mermaid.js, 1,531 KB, once per device.
 - A drawn diagram travels inside the page's HTML: the private corpus's drawings take a median of 7 KB each after compression (`docs/working/version-1/spikes/mermaid.md`).
@@ -198,8 +199,6 @@ Every number is about pages, not documents: no path, title or text of the corpus
 
 ## Not covered yet
 
-- **Notes and the seen mark** (M3). Their buttons are on every card, inactive.
 - **A search page.** Results show only in the box.
 - **Images and other files** in a document show as text; the server serves only Markdown.
-- **Notes on a change page** need a second position table for the old version (`docs/features/engine/html.md`, "Limits").
 - **Safari** was not tested; every check ran in Chromium on Linux. The layout uses `:has()` (Safari 15.4 and later) and constructed style sheets for the browser's diagrams (Safari 16.4 and later).

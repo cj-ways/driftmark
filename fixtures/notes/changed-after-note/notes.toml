@@ -1,0 +1,7 @@
+# The text a note was made on was rewritten in place. The blocks are still
+# there, so each note stays on its block, marked outdated.
+[[note]]
+quote = "Any request from another machine must bring the token"
+
+[[note]]
+quote = "only"

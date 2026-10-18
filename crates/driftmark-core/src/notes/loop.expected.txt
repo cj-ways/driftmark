@@ -1,0 +1,144 @@
+open edit by reader: open
+open edit by agent: - only the reader can do this
+open send by reader: sent
+open send by agent: - only the reader can do this
+open reply by reader: open
+open reply by agent: answered
+open propose by reader: - only an agent can do this; the reader decides
+open propose by agent: answered
+open decide change by reader: decided
+open decide change by agent: - only the reader can do this
+open decide modify by reader: decided
+open decide modify by agent: - only the reader can do this
+open decide keep by reader: closed
+open decide keep by agent: - only the reader can do this
+open applied by reader: - only a decided note can be applied; this one is open
+open applied by agent: - only a decided note can be applied; this one is open
+open withdraw by reader: withdrawn
+open withdraw by agent: - only the reader can do this
+sent edit by reader: sent
+sent edit by agent: - only the reader can do this
+sent send by reader: sent
+sent send by agent: - only the reader can do this
+sent reply by reader: sent
+sent reply by agent: answered
+sent propose by reader: - only an agent can do this; the reader decides
+sent propose by agent: answered
+sent decide change by reader: decided
+sent decide change by agent: - only the reader can do this
+sent decide modify by reader: decided
+sent decide modify by agent: - only the reader can do this
+sent decide keep by reader: closed
+sent decide keep by agent: - only the reader can do this
+sent applied by reader: - only a decided note can be applied; this one is sent
+sent applied by agent: - only a decided note can be applied; this one is sent
+sent withdraw by reader: withdrawn
+sent withdraw by agent: - only the reader can do this
+answered edit by reader: answered
+answered edit by agent: - only the reader can do this
+answered send by reader: answered
+answered send by agent: - only the reader can do this
+answered reply by reader: discussing
+answered reply by agent: answered
+answered propose by reader: - only an agent can do this; the reader decides
+answered propose by agent: answered
+answered decide change by reader: decided
+answered decide change by agent: - only the reader can do this
+answered decide modify by reader: decided
+answered decide modify by agent: - only the reader can do this
+answered decide keep by reader: closed
+answered decide keep by agent: - only the reader can do this
+answered applied by reader: - only a decided note can be applied; this one is answered
+answered applied by agent: - only a decided note can be applied; this one is answered
+answered withdraw by reader: withdrawn
+answered withdraw by agent: - only the reader can do this
+discussing edit by reader: discussing
+discussing edit by agent: - only the reader can do this
+discussing send by reader: discussing
+discussing send by agent: - only the reader can do this
+discussing reply by reader: discussing
+discussing reply by agent: answered
+discussing propose by reader: - only an agent can do this; the reader decides
+discussing propose by agent: answered
+discussing decide change by reader: decided
+discussing decide change by agent: - only the reader can do this
+discussing decide modify by reader: decided
+discussing decide modify by agent: - only the reader can do this
+discussing decide keep by reader: closed
+discussing decide keep by agent: - only the reader can do this
+discussing applied by reader: - only a decided note can be applied; this one is discussing
+discussing applied by agent: - only a decided note can be applied; this one is discussing
+discussing withdraw by reader: withdrawn
+discussing withdraw by agent: - only the reader can do this
+decided edit by reader: - the note is decided already
+decided edit by agent: - only the reader can do this
+decided send by reader: decided
+decided send by agent: - only the reader can do this
+decided reply by reader: decided
+decided reply by agent: decided
+decided propose by reader: - only an agent can do this; the reader decides
+decided propose by agent: - the note is decided already
+decided decide change by reader: decided
+decided decide change by agent: - only the reader can do this
+decided decide modify by reader: decided
+decided decide modify by agent: - only the reader can do this
+decided decide keep by reader: closed
+decided decide keep by agent: - only the reader can do this
+decided applied by reader: applied
+decided applied by agent: applied
+decided withdraw by reader: withdrawn
+decided withdraw by agent: - only the reader can do this
+applied edit by reader: - the note is applied, so it cannot change
+applied edit by agent: - the note is applied, so it cannot change
+applied send by reader: - the note is applied, so it cannot change
+applied send by agent: - the note is applied, so it cannot change
+applied reply by reader: - the note is applied, so it cannot change
+applied reply by agent: - the note is applied, so it cannot change
+applied propose by reader: - the note is applied, so it cannot change
+applied propose by agent: - the note is applied, so it cannot change
+applied decide change by reader: - the note is applied, so it cannot change
+applied decide change by agent: - the note is applied, so it cannot change
+applied decide modify by reader: - the note is applied, so it cannot change
+applied decide modify by agent: - the note is applied, so it cannot change
+applied decide keep by reader: - the note is applied, so it cannot change
+applied decide keep by agent: - the note is applied, so it cannot change
+applied applied by reader: - the note is applied, so it cannot change
+applied applied by agent: - the note is applied, so it cannot change
+applied withdraw by reader: - the note is applied, so it cannot change
+applied withdraw by agent: - the note is applied, so it cannot change
+closed edit by reader: - the note is closed, so it cannot change
+closed edit by agent: - the note is closed, so it cannot change
+closed send by reader: - the note is closed, so it cannot change
+closed send by agent: - the note is closed, so it cannot change
+closed reply by reader: - the note is closed, so it cannot change
+closed reply by agent: - the note is closed, so it cannot change
+closed propose by reader: - the note is closed, so it cannot change
+closed propose by agent: - the note is closed, so it cannot change
+closed decide change by reader: - the note is closed, so it cannot change
+closed decide change by agent: - the note is closed, so it cannot change
+closed decide modify by reader: - the note is closed, so it cannot change
+closed decide modify by agent: - the note is closed, so it cannot change
+closed decide keep by reader: - the note is closed, so it cannot change
+closed decide keep by agent: - the note is closed, so it cannot change
+closed applied by reader: - the note is closed, so it cannot change
+closed applied by agent: - the note is closed, so it cannot change
+closed withdraw by reader: - the note is closed, so it cannot change
+closed withdraw by agent: - the note is closed, so it cannot change
+withdrawn edit by reader: - the note is withdrawn, so it cannot change
+withdrawn edit by agent: - the note is withdrawn, so it cannot change
+withdrawn send by reader: - the note is withdrawn, so it cannot change
+withdrawn send by agent: - the note is withdrawn, so it cannot change
+withdrawn reply by reader: - the note is withdrawn, so it cannot change
+withdrawn reply by agent: - the note is withdrawn, so it cannot change
+withdrawn propose by reader: - the note is withdrawn, so it cannot change
+withdrawn propose by agent: - the note is withdrawn, so it cannot change
+withdrawn decide change by reader: - the note is withdrawn, so it cannot change
+withdrawn decide change by agent: - the note is withdrawn, so it cannot change
+withdrawn decide modify by reader: - the note is withdrawn, so it cannot change
+withdrawn decide modify by agent: - the note is withdrawn, so it cannot change
+withdrawn decide keep by reader: - the note is withdrawn, so it cannot change
+withdrawn decide keep by agent: - the note is withdrawn, so it cannot change
+withdrawn applied by reader: - the note is withdrawn, so it cannot change
+withdrawn applied by agent: - the note is withdrawn, so it cannot change
+withdrawn withdraw by reader: - the note is withdrawn, so it cannot change
+withdrawn withdraw by agent: - the note is withdrawn, so it cannot change

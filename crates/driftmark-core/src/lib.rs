@@ -11,6 +11,7 @@ pub mod diff;
 pub mod document;
 pub mod git;
 pub mod lint;
+pub mod notes;
 pub mod render;
 pub mod rules;
 pub mod search;

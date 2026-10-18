@@ -1,0 +1,6 @@
+note 1: "Body text uses the device's own font, so no font file is loaded for text." (bytes 23..96, block 2, under Fonts › Body text)
+  fuzzy, score 0.932, block 2
+  now: "Body text uses the device's **own font**, so no font file is loaded⏎for text." (bytes 23..100, under Fonts › Body text)
+note 2: "Liberation Sans, the font the server measures" (bytes 111..156, block 3, under Fonts › Body text)
+  fuzzy, score 0.978, block 3
+  now: "Liberation Sans*, the font the server measures" (bytes 116..162, under Fonts › Body text)

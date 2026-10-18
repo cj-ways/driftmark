@@ -1,0 +1,9 @@
+note 1: "tell every team in the channel" (bytes 91..121, block 2, under Release steps › Before the release)
+  moved, score 1, block 4
+  now: "tell every team in the channel" (bytes 188..218, under Release steps › Before the release)
+note 2: "Run the full test suite on the frozen branch." (bytes 124..169, block 3, under Release steps › Before the release)
+  exact, score 1, block 2
+  now: "Run the full test suite on the frozen branch." (bytes 40..85, under Release steps › Before the release)
+note 3: "error dashboards" (bytes 253..269, block 6, under Release steps › After the release)
+  exact, score 1, block 6
+  now: "error dashboards" (bytes 253..269, under Release steps › After the release)

@@ -1,0 +1,9 @@
+note 1: "has six digits and lasts ten minutes" (bytes 36..72, block 2, under Sign-in › Codes)
+  exact, score 1, block 2
+  now: "has six digits and lasts ten minutes" (bytes 36..72, under Sign-in › Codes)
+note 2: "The waiting time doubles after each further mistake." (bytes 163..215, block 2, under Sign-in › Codes)
+  exact, score 1, block 3
+  now: "The waiting time doubles after each further mistake." (bytes 164..216, under Sign-in › Codes)
+note 3: "lasts ten minutes. After three wrong codes" (bytes 55..97, block 2, under Sign-in › Codes)
+  fuzzy, score 0.952, block 2
+  now: "lasts ten minutes.⏎⏎After three wrong codes" (bytes 55..98, under Sign-in › Codes)

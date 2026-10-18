@@ -1,0 +1,6 @@
+note 1: "Any request from another machine must bring the token" (bytes 25..78, block 2, under Token › Who may ask)
+  outdated, score 0, block 2
+  now: "Any request from another machine is refused unless it comes through the private network." (bytes 25..113, under Token › Who may ask)
+note 2: "only" (bytes 125..129, block 3, under Token › Who may ask)
+  outdated, score 0, block 3
+  now: "The token is accepted in a cookie, never in the address." (bytes 115..171, under Token › Who may ask)

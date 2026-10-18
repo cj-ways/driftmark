@@ -1,0 +1,7 @@
+# Only formatting changed: emphasis and a line break. The source differs, so
+# the matches are fuzzy, close to 1.
+[[note]]
+quote = "Body text uses the device's own font, so no font file is loaded for text."
+
+[[note]]
+quote = "Liberation Sans, the font the server measures"

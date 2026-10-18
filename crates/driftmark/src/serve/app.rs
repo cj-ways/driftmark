@@ -17,7 +17,7 @@ use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use driftmark_core::diff::{ChangeList, DocumentChanges, Summary, SummaryList};
 use driftmark_core::git::{ObjectId, RepoPath, ResolvedRange, Snapshot};
 use driftmark_core::render::{LinkKind, LinkResolver, Resolved, Section, Setup};
@@ -30,6 +30,7 @@ use super::assets::Assets;
 use super::cache::{Key, Sized, Stats};
 use super::compare::Skipped;
 use super::guard::{self, Access, Verdict};
+use super::notes::{self, NotesFile};
 use super::page::{self, Frame, Live, Tab, WorktreeLine};
 use super::repo::{DocumentAt, Located, Problem, Repo};
 use super::search::{self, Params, WorktreeIndex, WorktreeStatus};
@@ -58,6 +59,8 @@ pub(crate) struct App {
     pub assets: Assets,
     /// Who draws diagrams on reading pages.
     pub drawer: Arc<Drawer>,
+    /// The reader's notes.
+    pub notes: Arc<NotesFile>,
     /// Where the watcher announces changes.
     pub events: broadcast::Sender<Message>,
     /// Turns `true` when the server stops, which ends the event streams.
@@ -75,6 +78,12 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route("/changes/{*rest}", get(changes_page))
         .route("/api/changes/{*rest}", get(changes_json))
         .route("/api/search", get(search_json))
+        .route("/api/positions/{*rest}", get(positions_json))
+        .route("/api/notes", get(notes::list).post(notes::create))
+        .route("/api/notes/{id}", get(notes::one).patch(notes::edit))
+        .route("/api/notes/{id}/{action}", post(notes::action))
+        .route("/api/reviews/{id}/{kind}", post(notes::hand_off))
+        .route("/api/seen", post(notes::seen))
         .route("/events", get(events))
         .route("/static/{hash}/{name}", get(asset))
         .fallback(not_found)
@@ -503,6 +512,9 @@ const WAITING_LIMIT: usize = 6;
 pub(crate) struct ReadingPart {
     /// The document as HTML, or why it cannot be shown.
     html: String,
+    /// The position tables of its blocks, which a page loads when the
+    /// reader starts a note.
+    positions: driftmark_core::render::PositionTables,
     /// The headings, for "on this page".
     outline: Vec<Section>,
     /// Whether the document could be read.
@@ -564,6 +576,7 @@ fn reading_part(app: &App, document: &DocumentAt, path: &RepoPath) -> ReadingPar
             let reading = driftmark_core::render::reading(parsed, &setup);
             ReadingPart {
                 html: reading.html,
+                positions: reading.positions,
                 outline: reading.outline,
                 readable: true,
             }
@@ -573,9 +586,62 @@ fn reading_part(app: &App, document: &DocumentAt, path: &RepoPath) -> ReadingPar
                 "<p class=\"problem\">This document cannot be shown: {}.</p>\n",
                 page::escape(&error.to_string())
             ),
+            positions: driftmark_core::render::PositionTables::default(),
             outline: Vec::new(),
             readable: false,
         },
+    }
+}
+
+/// A document's reading part, from the cache when its blob was shown
+/// before.
+fn reading_cached(
+    app: &App,
+    document: &DocumentAt,
+    path: &RepoPath,
+) -> Result<Arc<ReadingPart>, Problem> {
+    let make = || {
+        let part = reading_part(app, document, path);
+        let bytes = part.html.capacity()
+            + part
+                .positions
+                .blocks
+                .iter()
+                .map(|table| 24 + table.capacity() * 8)
+                .sum::<usize>()
+            + part
+                .outline
+                .iter()
+                .map(|section| 64 + section.id.capacity() + section.text.capacity())
+                .sum::<usize>();
+        Ok::<_, Problem>(Sized { value: part, bytes })
+    };
+    match &document.blob {
+        Some(blob) => {
+            let key = Key::Reading(blob.clone(), document.rules.id.clone(), path.clone());
+            app.repo.cache.get_or_load(&key, make)
+        }
+        None => Ok(Arc::new(make()?.value)),
+    }
+}
+
+/// `GET /api/positions/<revision>/-/<path>`: the position tables of a
+/// reading page, which its script loads when the reader starts a note
+/// (`docs/features/engine/html.md`).
+async fn positions_json(State(app): Shared, uri: Uri) -> Response {
+    let (revision, path) = match document_address(after(&uri, "/api/positions/")) {
+        Ok(found) => found,
+        Err(problem) => return refuse(&app, &problem, true),
+    };
+    let work = Arc::clone(&app);
+    let made = blocking(move || {
+        let document = work.repo.document_at(&revision, &path)?;
+        reading_cached(&work, &document, &path)
+    })
+    .await;
+    match made {
+        Ok(part) => json(&part.positions),
+        Err(problem) => refuse(&app, &problem, true),
     }
 }
 
@@ -588,33 +654,18 @@ async fn document_page(State(app): Shared, uri: Uri) -> Response {
     let (asked, wanted) = (revision.clone(), path.clone());
     let made = blocking(move || {
         let document = work.repo.document_at(&asked, &wanted)?;
-        let make = || {
-            let part = reading_part(&work, &document, &wanted);
-            let bytes = part.html.capacity()
-                + part
-                    .outline
-                    .iter()
-                    .map(|section| 64 + section.id.capacity() + section.text.capacity())
-                    .sum::<usize>();
-            Ok::<_, Problem>(Sized { value: part, bytes })
-        };
-        let part = match &document.blob {
-            Some(blob) => {
-                let key = Key::Reading(blob.clone(), document.rules.id.clone(), wanted.clone());
-                work.repo.cache.get_or_load(&key, make)?
-            }
-            None => Arc::new(make()?.value),
-        };
+        let part = reading_cached(&work, &document, &wanted)?;
         // A page shows its document even when the branches cannot be read.
         let waiting = work
             .repo
             .waiting(&wanted, document.commit.as_ref(), WAITING_LIMIT)
             .unwrap_or_default();
-        Ok((document, part, waiting))
+        let notes = work.notes.count_on(&wanted);
+        Ok((document, part, waiting, notes))
     })
     .await;
     match made {
-        Ok((document, part, waiting)) => {
+        Ok((document, part, waiting, notes)) => {
             let parsed = document.parsed.as_ref().as_ref().ok();
             let title = parsed
                 .and_then(|parsed| parsed.meta.title.clone())
@@ -647,6 +698,7 @@ async fn document_page(State(app): Shared, uri: Uri) -> Response {
                     body: &part.html,
                     readable: part.readable,
                     waiting: &waiting,
+                    notes,
                 },
                 page::now(),
             );
@@ -890,6 +942,7 @@ async fn changes_page(State(app): Shared, uri: Uri) -> Response {
         Ok(made) => made,
         Err(problem) => return problem_page(&app, &problem),
     };
+    let (seen, notes) = notes_of(&app, &parts, &list).await;
     let shown: Vec<page::Shown<'_>> = parts
         .iter()
         .filter_map(|part| {
@@ -911,6 +964,8 @@ async fn changes_page(State(app): Shared, uri: Uri) -> Response {
         head: &head,
         base: base.as_deref(),
         single: single.as_ref(),
+        seen: &seen,
+        notes,
     });
     let title = match &single {
         Some(path) => path.to_lossy().into_owned(),
@@ -928,6 +983,35 @@ async fn changes_page(State(app): Shared, uri: Uri) -> Response {
         revision: None,
     };
     html(StatusCode::OK, page::page(&app.assets, &frame, &content))
+}
+
+/// The reader's seen marks for the changes a page shows, and how many notes
+/// are on the range's documents: read per request, never cached with the
+/// page.
+async fn notes_of(
+    app: &Arc<App>,
+    parts: &[Arc<ChangesPart>],
+    list: &ChangeList,
+) -> (std::collections::HashSet<String>, Option<usize>) {
+    let keys: Vec<String> = parts
+        .iter()
+        .filter_map(|part| part.document())
+        .flat_map(|document| {
+            document
+                .changes
+                .iter()
+                .map(|change| driftmark_core::notes::change_key(&document.path, change))
+        })
+        .collect();
+    let paths: std::collections::HashSet<String> = list
+        .documents
+        .iter()
+        .map(|document| document.path.clone())
+        .collect();
+    let work = Arc::clone(app);
+    tokio::task::spawn_blocking(move || (work.notes.seen(&keys), work.notes.count_on_any(&paths)))
+        .await
+        .unwrap_or_default()
 }
 
 fn live_for(range: &ResolvedRange) -> Live {

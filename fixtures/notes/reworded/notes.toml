@@ -1,0 +1,11 @@
+# Small rewordings: the notes follow the new words as fuzzy matches.
+[[note]]
+quote = "Keep audit rows for thirty days, then delete them with the nightly job."
+
+[[note]]
+quote = "Only the support team reads audit rows, through the admin pages."
+
+# Half of this sentence was rewritten: too little of the quote is left, so
+# the note stays on its block as outdated.
+[[note]]
+quote = "move to cold storage before they are deleted"

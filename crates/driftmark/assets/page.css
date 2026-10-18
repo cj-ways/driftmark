@@ -467,6 +467,76 @@ section.more h2, section.skipped h2 { font-size: 1.2rem; }
 
 main.plain { max-width: 48rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
 
+/* ---------- notes (decision 0004): selection button, form, cards, review list */
+
+.change .head .acts button:not([disabled]) { cursor: pointer; color: var(--text); border-style: solid; }
+.change .head .acts button:not([disabled]):hover { border-color: var(--accent); }
+.change .head .acts button.seen[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--text); }
+.change .head .acts button.seen[aria-pressed="true"]::before { content: "✓ "; }
+li.change.is-seen { background: var(--surface-2); border-style: dashed; }
+.dm-seen-count { white-space: nowrap; }
+
+.dm-float { position: absolute; z-index: 30; font: 700 0.9375rem/1 var(--font-ui); color: var(--surface); background: var(--accent); border: 0; border-radius: 8px; padding: 0.6rem 0.85rem; box-shadow: 0 6px 18px rgb(0 0 0 / 0.25); cursor: pointer; }
+.dm-toast { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 40; max-width: min(34rem, calc(100vw - 2rem)); margin: 0; background: var(--surface); color: var(--text); border: 1px solid var(--rule-strong); border-radius: var(--radius); padding: 0.7rem 1rem; box-shadow: 0 8px 24px rgb(0 0 0 / 0.2); }
+
+dialog.dm-dialog { width: min(36rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); padding: 0; border: 1px solid var(--rule-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+dialog.dm-dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+.dm-form { padding: 1.1rem 1.25rem 1.25rem; }
+.dm-form h2 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+.dm-form label { font-weight: 600; }
+.dm-form textarea, .dm-inline textarea { display: block; width: 100%; margin-top: 0.3rem; padding: 0.55rem 0.7rem; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--rule-strong); border-radius: 8px; resize: vertical; }
+.dm-choice { border: 0; margin: 0 0 0.75rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; }
+.dm-choice legend { font-weight: 700; margin-bottom: 0.35rem; padding: 0; }
+.dm-choice label { font-weight: 400; display: inline-flex; align-items: center; gap: 0.3rem; min-height: 2rem; }
+.dm-choice input, .dm-check input { accent-color: var(--accent); width: 1.1rem; height: 1.1rem; }
+.dm-check { display: flex; align-items: center; gap: 0.3rem; }
+.dm-check label { font-weight: 400; }
+.dm-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0 0; }
+.dm-buttons button { font-size: 0.9375rem; font-weight: 600; color: var(--text); background: var(--surface-2); border: 1px solid var(--rule-strong); border-radius: 8px; padding: 0.45rem 0.8rem; cursor: pointer; }
+.dm-buttons button:hover { border-color: var(--accent); }
+.dm-buttons .dm-primary { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+.dm-problem { color: var(--text); border-left: 4px solid var(--danger-line); padding-left: 0.6rem; }
+.dm-quote { margin: 0 0 0.75rem; padding: 0.4rem 0.75rem; border-left: 4px solid var(--note-line); background: var(--note-bg); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow-y: auto; font-size: 0.9375rem; }
+
+::highlight(dm-notes) { background-color: var(--note-bg); text-decoration: underline 2px var(--note-line); }
+::highlight(dm-notes-changed) { background-color: var(--warn-bg); text-decoration: underline wavy 2px var(--warn-line); }
+
+.dm-note { margin: 0.5rem 0 1.25rem; padding: 0.75rem 0.9rem; background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--note-line); border-radius: 8px; font-size: 0.9375rem; white-space: normal; max-width: 40rem; color: var(--text); }
+.doc-body .dm-note p, .dm-note p { margin: 0 0 0.45rem; }
+.dm-note[data-state="fuzzy"], .dm-note[data-state="outdated"] { border-left-color: var(--warn-line); }
+.dm-note[data-state="orphaned"] { border-left-style: dashed; border-left-color: var(--rule-strong); }
+.dm-note[data-status="withdrawn"], .dm-note[data-status="closed"], .dm-note[data-status="applied"] { background: var(--surface-2); }
+.dm-note-head { font-weight: 700; }
+.dm-note-state { font-weight: 600; color: var(--text-soft); }
+.dm-note-state::before { content: "⚑ "; }
+.dm-now-label { font-weight: 600; color: var(--text-soft); }
+.dm-quote.dm-now { border-left-color: var(--warn-line); background: var(--warn-bg); }
+.dm-body { white-space: pre-wrap; }
+.dm-thread { list-style: none; margin: 0 0 0.5rem; padding: 0; border-top: 1px solid var(--rule); }
+.dm-thread li { margin: 0; padding: 0.4rem 0; border-bottom: 1px solid var(--rule); white-space: pre-wrap; }
+.dm-thread li[data-role="agent"] strong::before { content: "↳ "; }
+.dm-proposal, .dm-decision, .dm-applied { padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--surface-2); }
+.dm-decision { border: 1px solid var(--accent); }
+.dm-inline { margin-top: 0.6rem; }
+.dm-inline label { font-weight: 600; }
+
+.dm-review { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--note-line); border-radius: var(--radius); padding: 0.9rem 1.1rem; margin: 0 0 1.5rem; }
+main.read .dm-review { max-width: var(--measure); }
+.dm-review h2 { font-size: 1.15rem; margin: 0 0 0.6rem; }
+.dm-review h3 { font-size: 1rem; margin: 0.75rem 0 0.35rem; overflow-wrap: anywhere; }
+.dm-tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; border-bottom: 1px solid var(--rule); margin: 0 0 0.6rem; }
+.dm-tabs [role="tab"] { font-size: 0.9375rem; font-weight: 600; color: var(--text-soft); background: none; border: 0; border-bottom: 3px solid transparent; padding: 0.4rem 0.6rem; cursor: pointer; }
+.dm-tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.dm-rows { margin: 0.5rem 0 0; padding-left: 1.2rem; font-size: 0.9375rem; }
+.dm-rows li { margin: 0.25rem 0; }
+.dm-rows li[data-status="withdrawn"] { color: var(--text-soft); }
+.dm-row-path { color: var(--text-soft); }
+.dm-hint, .dm-file { font-size: 0.875rem; color: var(--text-soft); margin: 0.6rem 0 0; overflow-wrap: anywhere; }
+.dm-say { margin: 0.6rem 0 0; font-weight: 600; }
+.dm-say:empty { display: none; }
+.dm-unchanged { margin: 0 0 1rem; }
+.dm-unchanged-title { font-weight: 700; margin: 0 0 0.3rem; }
+
 /* ---------- code colours (Prism), AA in both themes */
 
 .token.comment, .token.prolog, .token.doctype, .token.cdata { color: var(--tok-comment); font-style: italic; }

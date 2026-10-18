@@ -507,6 +507,29 @@ pub enum View {
     Lines,
 }
 
+/// Which block of a new version each block of an old version became, as the
+/// change list pairs them. Notes use it to follow a sentence from one version
+/// to the next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockMap {
+    /// For each old block, the new block it pairs with, if any.
+    pub old_to_new: Vec<Option<usize>>,
+    /// For each old block, whether its pair stayed in place. False for a
+    /// block without a pair and for one that moved.
+    pub in_place: Vec<bool>,
+}
+
+/// Pairs the blocks of two versions of one document, exactly as [`compare`]
+/// does.
+#[must_use]
+pub fn block_map(old: &Document, new: &Document) -> BlockMap {
+    let pairing = pair::pair(&old.blocks, &new.blocks);
+    BlockMap {
+        old_to_new: pairing.old_to_new,
+        in_place: pairing.in_place,
+    }
+}
+
 /// Compares two versions of the document at `path`.
 ///
 /// Give `None` for the side where the file does not exist. Both `None` gives

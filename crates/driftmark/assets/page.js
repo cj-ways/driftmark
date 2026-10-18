@@ -11,7 +11,8 @@
 // - a Mermaid diagram the server could not draw is drawn by mermaid.js,
 //   loaded only on a page that has one;
 // - a page that shows the working tree reloads its content when a file
-//   changes, keeping the scroll position.
+//   changes, keeping the scroll position;
+// - a reading or change page loads notes.js, which runs the reader's notes.
 //
 // The page's security policy allows no inline script and no inline style,
 // so everything here works through classes, attributes and the CSSOM.
@@ -73,6 +74,10 @@
     }
     return loaded.get(name);
   };
+
+  // The notes script loads anchor.js through this when the reader starts a
+  // note.
+  window.driftmarkLoad = load;
 
   // ---- code colours ------------------------------------------------------------
 
@@ -331,11 +336,24 @@
     }
   };
 
+  // Notes: on a reading or change page whose notes file can be read
+  // (docs/features/notes.md), the notes script takes over.
+  const startNotes = (scope) => {
+    const main = scope.matches && scope.matches("main[data-notes]") ? scope : scope.querySelector("main[data-notes]");
+    if (!main) {
+      return;
+    }
+    load("notes.js")
+      .then(() => window.driftmarkNotes && window.driftmarkNotes.start(main))
+      .catch(() => {});
+  };
+
   const prepare = (scope) => {
     openWide(scope);
     fitTables(scope);
     colourCode(scope);
     drawDiagrams(scope);
+    startNotes(scope);
   };
 
   // ---- live reload -------------------------------------------------------------

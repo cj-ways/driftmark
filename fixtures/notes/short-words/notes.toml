@@ -1,0 +1,12 @@
+# Notes on one word. The word occurs three times; context decides which one,
+# and a word whose sentence changed is not moved to another "only".
+[[note]]
+quote = "only"
+
+[[note]]
+quote = "only"
+nth = 1
+
+[[note]]
+quote = "only"
+nth = 2

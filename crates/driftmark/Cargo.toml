@@ -78,6 +78,11 @@ percent-encoding = "2.3.2"
 rmcp = { version = "=3.5.1", default-features = false, features = ["server", "transport-io"] }
 # Serializes the server's JSON answers.
 serde = { version = "1.0.228", features = ["derive"] }
+# The notes file (decision 0004): one SQLite database in the clone's shared
+# git folder, which `serve` and the coming `mcp` command open at the same
+# time in WAL mode. `bundled` builds SQLite from its C source, so no system
+# library is needed on any of the three systems.
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 # Reads Claude Code's hook input and `.claude/settings.json`, and writes
 # `--json` output. `preserve_order` keeps the keys of a settings file in their
 # written order when the hook installer adds its entry.

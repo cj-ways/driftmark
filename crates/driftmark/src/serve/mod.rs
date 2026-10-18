@@ -20,6 +20,7 @@ mod assets;
 mod cache;
 pub(crate) mod compare;
 mod guard;
+mod notes;
 mod page;
 pub(crate) mod repo;
 pub(crate) mod search;
@@ -28,6 +29,7 @@ mod watch;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -53,7 +55,7 @@ const STOP_WAIT: Duration = Duration::from_secs(2);
 /// How `driftmark serve` is called.
 const USAGE: &str = "\
 usage: driftmark serve [--repo <path>] [--addr <ip:port>] [--token <value>]
-                       [--base <branch>]
+                       [--base <branch>] [--reader <name>] [--review-dir <path>]
 
 Serves the repository's Markdown documents and their changes as pages. Each
 page reads git when it is opened, so branches show their latest commits.
@@ -69,6 +71,14 @@ Options:
                      (default: the rules file's [compare] default-branch,
                      else the first of origin/main, main, origin/master,
                      master, origin/dev, dev)
+  --reader <name>    the name on your notes, replies and seen marks
+                     (default: reader)
+  --review-dir <path>
+                     where review files go (default: the reviews folder
+                     next to the notes file, in the git folder)
+
+Notes are kept in driftmark/notes.db in the clone's shared git folder, so
+every worktree sees them and git never commits them.
 
 Open the address it prints. Stop it with Ctrl-C.
 
@@ -98,6 +108,28 @@ pub fn run(args: &[OsString], stdout: &mut dyn Write, stderr: &mut dyn Write) ->
             EXIT_ERROR
         }
     }
+}
+
+/// The notes file the server uses (decision 0011, item 2), and where review
+/// files are written: beside it, unless `--review-dir` says otherwise.
+fn notes_file(args: &args::Args) -> notes::NotesFile {
+    let notes_path = crate::notes::notes_file(&args.repo).unwrap_or_else(|_| {
+        args.repo
+            .join(".git")
+            .join("driftmark")
+            .join(crate::notes::FILE_NAME)
+    });
+    let reviews = args.review_dir.clone().unwrap_or_else(|| {
+        notes_path.parent().map_or_else(
+            || PathBuf::from(crate::notes::REVIEWS),
+            |folder| folder.join(crate::notes::REVIEWS),
+        )
+    });
+    notes::NotesFile::new(
+        notes_path,
+        reviews,
+        args.reader.clone().unwrap_or_else(|| "reader".to_owned()),
+    )
 }
 
 fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
@@ -151,6 +183,7 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
         index.start(events.subscribe());
         index
     });
+    let notes = Arc::new(notes_file(args));
     let (stop, stopping) = tokio::sync::watch::channel(false);
     let mut stopped = stopping.clone();
     let app = Arc::new(App {
@@ -160,6 +193,7 @@ fn serve(args: &args::Args, stdout: &mut dyn Write) -> Result<(), String> {
         access: guard::Access::new(bound, token.clone()),
         assets: assets::Assets::built_in(),
         drawer: Arc::new(crate::diagram::Drawer::new()),
+        notes,
         events,
         stopping,
     });

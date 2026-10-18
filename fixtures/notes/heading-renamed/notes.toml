@@ -1,0 +1,4 @@
+# The heading above the note was renamed; the note's block stayed in place,
+# so the note is exact.
+[[note]]
+quote = "never looks inside the .git folder"

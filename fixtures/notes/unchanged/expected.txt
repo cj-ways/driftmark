@@ -1,0 +1,9 @@
+note 1: "Keep each rendered page for one hour" (bytes 143..179, block 4, under Page cache › Decision)
+  exact, score 1, block 4
+  now: "Keep each rendered page for one hour" (bytes 143..179, under Page cache › Decision)
+note 2: "64 MB" (bytes 269..274, block 6, under Page cache › Decision)
+  exact, score 1, block 6
+  now: "64 MB" (bytes 269..274, under Page cache › Decision)
+note 3: "a second visit is fast" (bytes 105..127, block 2, under Page cache)
+  exact, score 1, block 2
+  now: "a second visit is fast" (bytes 105..127, under Page cache)

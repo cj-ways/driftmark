@@ -13,5 +13,6 @@ pub mod hook;
 pub mod lint;
 pub mod mcp;
 mod memory;
+pub mod notes;
 pub mod search;
 pub mod serve;
