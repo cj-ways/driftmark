@@ -354,18 +354,24 @@ pub(crate) fn document_path(context: &Context, text: &str) -> Result<RepoPath, S
 /// not inside the working tree.
 pub(crate) fn repo_relative(context: &Context, text: &str) -> Result<String, String> {
     let path = std::path::Path::new(text);
-    if !path.is_absolute() {
+    // `has_root`, not `is_absolute`: on Windows `/etc/x.md` has a root but no
+    // drive, and it must not be read as a path from the repository root.
+    if !path.has_root() {
         return Ok(text.strip_prefix("./").unwrap_or(text).to_owned());
     }
+    // Both sides are compared as written and with links resolved: on macOS
+    // `/var` is a link to `/private/var`, so a path through the link and git's
+    // working tree can name one folder two ways.
+    let given = [Some(path.to_path_buf()), resolved(path)];
     let inside = context.workdir.as_ref().and_then(|root| {
-        let canonical = root.canonicalize().ok();
-        std::iter::once(root.clone())
-            .chain(canonical)
-            .find_map(|root| {
-                path.strip_prefix(&root)
+        let roots = [Some(root.clone()), root.canonicalize().ok()];
+        roots.iter().flatten().find_map(|root| {
+            given.iter().flatten().find_map(|path| {
+                path.strip_prefix(root)
                     .ok()
                     .map(std::path::Path::to_path_buf)
             })
+        })
     });
     let relative = inside.ok_or_else(|| {
         format!("`{text}` is outside the repository; give a path from the repository root, such as docs/guide.md")
@@ -377,6 +383,16 @@ pub(crate) fn repo_relative(context: &Context, text: &str) -> Result<String, Str
     parts
         .map(|parts| parts.join("/"))
         .ok_or_else(|| format!("`{text}` is not valid text"))
+}
+
+/// `path` with links resolved. A document deleted in a range no longer
+/// exists, so the deepest folder that exists is resolved and the rest is
+/// added back as written.
+fn resolved(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    path.ancestors().find_map(|existing| {
+        let rest = path.strip_prefix(existing).ok()?;
+        existing.canonicalize().ok().map(|real| real.join(rest))
+    })
 }
 
 /// A problem reading git, as the sentence a tool gives back.
