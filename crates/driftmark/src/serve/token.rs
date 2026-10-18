@@ -134,6 +134,14 @@ pub(crate) fn checked(token: &str, what: &str) -> Result<String, String> {
 /// The text of a token file that only its owner can read and change.
 fn read_private(path: &Path) -> Result<String, String> {
     let shown = path.display();
+    // Windows refuses to open a folder ("Access is denied"), so a folder is
+    // named as one before opening. The check on the open handle below still
+    // guards against the path changing in between.
+    if std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+        return Err(format!(
+            "`--token-file` names `{shown}`, which is not a file"
+        ));
+    }
     let mut file = std::fs::File::open(path)
         .map_err(|error| format!("`--token-file` cannot read `{shown}`: {error}"))?;
     let metadata = file
