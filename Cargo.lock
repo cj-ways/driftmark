@@ -570,6 +570,7 @@ dependencies = [
  "futures-util",
  "getrandom",
  "gix",
+ "jiff",
  "merman",
  "merman-core",
  "percent-encoding",

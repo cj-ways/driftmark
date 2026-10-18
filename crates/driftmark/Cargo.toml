@@ -87,6 +87,10 @@ rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"
 # `--json` output. `preserve_order` keeps the keys of a settings file in their
 # written order when the hook installer adds its entry.
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
+# Today's date in the local time zone, for the `date` of a document that
+# `driftmark new` starts; already a dependency of gix (through gix-date),
+# with these default features, so it adds no crate.
+jiff = "0.2.38"
 
 [lints]
 workspace = true

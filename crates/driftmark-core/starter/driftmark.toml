@@ -1,0 +1,95 @@
+# driftmark's rules for the starter layout that `driftmark init` sets up.
+#
+# Each [[type]] says which files hold one kind of document, where its status
+# is written, and what each status means: current, superseded or archived.
+# The first type whose paths match a file wins. The format is described in
+# driftmark's documentation, in docs/features/engine/rules-file.md.
+
+# A folder's README says what belongs in the folder. It needs no status.
+[[type]]
+name = "readme"
+paths = ["docs/README.md", "docs/*/README.md"]
+lifecycle = "current"
+
+# Decision records: written once, numbered, and replaced by a later record
+# instead of being edited.
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+status = { front-matter = "status" }
+other-statuses = ["proposed"]
+current = ["accepted"]
+superseded = ["superseded"]
+archived = ["rejected"]
+date = { front-matter = "date" }
+superseded-by = { front-matter = "superseded-by" }
+decision-headings = ["Decision"]
+required = ["status", "date"]
+
+# Standards: rules that stay true over time and change in place.
+[[type]]
+name = "standard"
+paths = ["docs/standards/**/*.md"]
+status = { front-matter = "status" }
+other-statuses = ["draft"]
+current = ["active"]
+archived = ["retired"]
+date = { front-matter = "date" }
+required = ["status", "date"]
+
+# Features: the decided target of each feature.
+[[type]]
+name = "feature"
+paths = ["docs/features/**/*.md"]
+status = { front-matter = "status" }
+current = ["target", "shipped"]
+archived = ["dropped"]
+date = { front-matter = "date" }
+required = ["status", "date"]
+
+# Active work: one folder per topic, with a plan and a status file.
+[[type]]
+name = "plan"
+paths = ["docs/working/*/plan.md"]
+status = { front-matter = "status" }
+other-statuses = ["paused"]
+current = ["active"]
+archived = ["done"]
+date = { front-matter = "date" }
+required = ["status", "date"]
+
+[[type]]
+name = "status"
+paths = ["docs/working/*/status.md"]
+status = { front-matter = "status" }
+other-statuses = ["paused"]
+current = ["active"]
+archived = ["done"]
+date = { front-matter = "date" }
+required = ["status", "date"]
+
+# Anything else a working folder holds: notes, findings, drafts.
+[[type]]
+name = "working"
+paths = ["docs/working/**"]
+status = { front-matter = "status" }
+other-statuses = ["paused"]
+current = ["active"]
+archived = ["done"]
+date = { front-matter = "date" }
+lifecycle = "current"
+
+# Finished working folders, kept as a record. Their status is not read.
+[[type]]
+name = "archive"
+paths = ["docs/archive/**"]
+lifecycle = "archived"
+
+# The writing check, `driftmark lint`. These are its defaults, written out so
+# they can be changed here; docs/standards/writing.md names the same values.
+[lint]
+allowed-html = ["details", "summary", "br", "sub", "sup", "kbd"]
+max-table-columns = 8
+max-code-line-length = 120
+max-file-size = 100000
+max-heading-length = 100

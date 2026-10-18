@@ -1,0 +1,3 @@
+# `driftmark init` writes these files, and the tests compare them, byte for
+# byte, so git must never change their line endings, on any system.
+* -text

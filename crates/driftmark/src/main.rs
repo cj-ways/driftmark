@@ -1,5 +1,4 @@
-//! The `driftmark` program. Version 1 adds `init` and `export` to the
-//! commands here.
+//! The `driftmark` program. Version 1 adds `export` to the commands here.
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
@@ -19,6 +18,8 @@ Commands:
   mcp            answer an agent over MCP: changes, documents, search, lint
   mcp install    add the MCP connector to this repository's .mcp.json
   hook install   run the lint after each edit Claude Code makes
+  init           set up a docs layout with templates and writing rules
+  new            start a document from a template of that layout
 
 Run `driftmark <command> --help` for a command's options.";
 
@@ -61,6 +62,8 @@ fn main() -> ExitCode {
             &mut stderr,
         ),
         Some("hook") => driftmark::hook::run(&args[1..], &mut stdout, &mut stderr),
+        Some("init") => driftmark::init::run(&args[1..], &mut stdout, &mut stderr),
+        Some("new") => driftmark::new::run(&args[1..], &mut stdout, &mut stderr),
         Some("serve") => driftmark::serve::run(&args[1..], &mut stdout, &mut stderr),
         _ => {
             let _ = writeln!(stderr, "{USAGE}");
