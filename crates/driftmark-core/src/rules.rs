@@ -1358,7 +1358,7 @@ current = ["accepted"]
         assert!(message.contains("line 2"), "{message}");
         assert!(
             message.contains(
-                "driftmark has no preset \"nope\"; the presets are \"openspec\", \"spec-kit\", \"adr\", \"kiro\""
+                "driftmark has no preset \"nope\"; the presets are \"openspec\", \"spec-kit\", \"adr\", \"kiro\", \"starter\""
             ),
             "{message}"
         );

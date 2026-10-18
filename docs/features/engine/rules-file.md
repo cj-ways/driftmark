@@ -87,9 +87,9 @@ presets = ["openspec", "adr"]
 ```
 
 - The file's own types come first, then each preset's, in the order named. A file can therefore type some of a preset's paths its own way.
-- The names are `openspec`, `spec-kit`, `adr` and `kiro`. A name driftmark does not know is a `Syntax` error with its line: ``driftmark has no preset "backlog"; the presets are "openspec", "spec-kit", "adr", "kiro"``. A name written twice counts once.
+- The names are `openspec`, `spec-kit`, `adr`, `kiro` and `starter`. A name driftmark does not know is a `Syntax` error with its line: ``driftmark has no preset "backlog"; the presets are "openspec", "spec-kit", "adr", "kiro", "starter"``. A name written twice counts once.
 - The masthead keys of every named preset are known too.
-- A preset gives types and masthead keys only. The `[lint]` and `[compare]` tables come from this file.
+- A preset gives types and masthead keys only. The `[lint]` and `[compare]` tables come from this file. A preset's own `[lint]` table, which only the starter preset has, is not applied; it writes out the defaults.
 - A rules file with no `presets` key uses no preset, even where a preset's markers are. With no rules file at all, driftmark uses every preset whose markers it finds.
 
 `docs/features/presets.md` describes each preset, its markers and how to copy one into this file.
@@ -287,7 +287,7 @@ Three more lookups serve the writing check:
 
 ## Presets
 
-A preset is a rules file in this same format, built into driftmark. Version 1 has four: `openspec`, `spec-kit`, `adr` and `kiro`. `docs/features/presets.md` lists each one's types, statuses, lifecycles and decision headings, and the markers driftmark finds it by. `driftmark presets show <name>` prints one, so it can be copied into `driftmark.toml` and changed.
+A preset is a rules file in this same format, built into driftmark. Version 1 has five: `openspec`, `spec-kit`, `adr`, `kiro` and `starter`. The first four are found by their marker files in a repository with no rules file; `starter`, the rules file `driftmark init` writes, is used only when named. `docs/features/presets.md` lists each one's types, statuses, lifecycles and decision headings, and the markers driftmark finds it by. `driftmark presets show <name>` prints one, so it can be copied into `driftmark.toml` and changed.
 
 How the presets meet a rules file is under "Presets" in "The format" above.
 

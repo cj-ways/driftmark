@@ -285,6 +285,11 @@ fn list(repo: &Path, stdout: &mut dyn Write) -> Result<(), String> {
             (None, Some(marker)) => {
                 format!("found {marker}, but not in use: {RULES_FILE} does not name it")
             }
+            // A preset with no markers, such as the starter layout's, is
+            // never looked for, so "not found" would mislead.
+            (None, None) if preset.markers.is_empty() => {
+                format!("used only when {RULES_FILE} names it")
+            }
             (Some(_) | None, None) => "not found here".to_owned(),
         };
         let _ = writeln!(out, "{:<10} {}", preset.name, preset.title);

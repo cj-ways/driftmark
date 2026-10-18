@@ -93,7 +93,7 @@ fn every_built_in_preset_is_a_valid_rules_file_of_types_only() {
         assert_eq!(rules.presets(), [] as [String; 0], "{}", preset.name);
         assert_eq!(find(preset.name), Some(preset));
     }
-    assert_eq!(seen, ["openspec", "spec-kit", "adr", "kiro"]);
+    assert_eq!(seen, ["openspec", "spec-kit", "adr", "kiro", "starter"]);
     assert_eq!(find("nope"), None);
     assert_ne!(PRESETS[0], PRESETS[1]);
     assert!(format!("{:?}", PRESETS[0]).contains("openspec"));
@@ -546,4 +546,34 @@ fn spec_kit_reads_its_bold_lines_and_cc_sdd_its_spec_json() {
     );
     assert_eq!(plain_kiro.status, None);
     assert_eq!(plain_kiro.lifecycle, Some(Lifecycle::Current));
+}
+
+#[test]
+fn the_starter_preset_is_used_only_when_named() {
+    let starter = find("starter").expect("starter");
+    assert!(starter.markers.is_empty());
+    assert_eq!(starter.text, crate::starter::preset::RULES);
+    let layout = Repo::new(&[
+        ("docs/README.md", "# Docs\n"),
+        ("docs/standards/writing.md", "# Writing\n"),
+        ("docs/features/export.md", "# Export\n"),
+        ("docs/working/move-queue/plan.md", "# Plan\n"),
+        ("docs/archive/old/plan.md", "# Old\n"),
+    ]);
+    assert_eq!(names(&detect(&layout)), []);
+    let named = Setup::build(
+        Some(Rules::parse("presets = [\"starter\"]\n").expect("valid")),
+        &layout,
+    )
+    .expect("valid");
+    assert_eq!(
+        type_of(&named.rules, "docs/working/move-queue/plan.md").as_deref(),
+        Some("plan")
+    );
+    assert_eq!(
+        named.rules.types(),
+        Rules::parse(crate::starter::preset::RULES)
+            .expect("valid")
+            .types()
+    );
 }

@@ -464,7 +464,7 @@ What it gives:
 ### Joining the presets
 
 - The preset's name is `starter`. Its text is `driftmark_core::starter::preset::RULES`, which `init` writes as it is.
-- It is a rules file in the usual format, so it can join the built-in presets unchanged.
+- It is a rules file in the usual format, so it joins the built-in presets unchanged. A `driftmark.toml` with `presets = ["starter"]` gives the same types and settings as the text `init` writes (`docs/features/presets.md`).
 
 ## The writing standard
 

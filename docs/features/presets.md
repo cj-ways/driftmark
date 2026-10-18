@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Presets
 
-> Short version: a preset is a ready-made rules file for a popular folder layout, built into driftmark. driftmark has four: OpenSpec, GitHub Spec Kit, ADR folders, and Kiro with cc-sdd. A repository with no `driftmark.toml` uses every preset whose marker files it has. A repository with a `driftmark.toml` uses the presets it names in `presets = [...]`, after its own types. `driftmark presets` lists them and says which ones apply, and `driftmark presets show <name>` prints one to copy and change. driftmark only reads these folders; it never moves, renames or rewrites a document (decision 0006).
+> Short version: a preset is a ready-made rules file for a popular folder layout, built into driftmark. driftmark has five: OpenSpec, GitHub Spec Kit, ADR folders, Kiro with cc-sdd, and driftmark's own starter layout. A repository with no `driftmark.toml` uses every preset whose marker files it has; the starter preset has none, so it is used only when named. A repository with a `driftmark.toml` uses the presets it names in `presets = [...]`, after its own types. `driftmark presets` lists them and says which ones apply, and `driftmark presets show <name>` prints one to copy and change. driftmark only reads these folders; it never moves, renames or rewrites a document (decision 0006).
 
 ## What a preset gives
 
@@ -19,7 +19,7 @@ A preset is a rules file in the format of `docs/features/engine/rules-file.md`. 
 
 With a preset, the change list ranks a change under a decision heading as "decision" (`docs/features/engine/change-list.md`). The reading pages, the MCP connector and the coming status page show each document's type, status, lifecycle and date.
 
-A preset holds only `[[type]]` entries and a `[masthead]` table. The writing check's `[lint]` settings and the `[compare]` table come from the repository's own `driftmark.toml`, never from a preset.
+A preset gives only its `[[type]]` entries and its `[masthead]` table. The writing check's `[lint]` settings and the `[compare]` table come from the repository's own `driftmark.toml`, never from a preset. The starter preset's text also holds a `[lint]` table, because `driftmark init` writes that text as the repository's `driftmark.toml`. The table writes out the defaults, and a test keeps them equal, so naming the preset gives the same settings.
 
 ## Choosing presets
 
@@ -33,6 +33,7 @@ A repository with no `driftmark.toml` uses every preset whose layout it has. dri
 | `spec-kit` | the file `.specify/memory/constitution.md`; the file `memory/constitution.md`; a Markdown file at `specs/NNN-name/spec.md`, with three digits |
 | `adr` | the file `.adr-dir`; the file `.log4brains.yml`; a Markdown file one of its types matches |
 | `kiro` | a Markdown file one of its types matches |
+| `starter` | none: it is used only when a rules file names it |
 
 - More than one preset may apply. Their types are added in the order of this table.
 - A folder named `specs/` alone does not count as Spec Kit, because many projects have one. The feature folders need Spec Kit's three-digit numbers, or the constitution must be there.
@@ -58,7 +59,7 @@ exclude = ["vendor/**"]
 
 - The file's own types come first, then each named preset's types, in the order named. The first type whose paths match a file wins, so an own type can take over files a preset would type.
 - A preset named twice counts once.
-- A name driftmark does not know is an error, with its line: ``driftmark has no preset "backlog"; the presets are "openspec", "spec-kit", "adr", "kiro"``.
+- A name driftmark does not know is an error, with its line: ``driftmark has no preset "backlog"; the presets are "openspec", "spec-kit", "adr", "kiro", "starter"``.
 - Masthead keys from the file and from every named preset are all known.
 - A file with no `presets` key uses its own types only, even when a layout's markers are there. `driftmark presets` then says which presets it found but does not use.
 
@@ -91,6 +92,8 @@ adr        ADR folders: adr-tools, MADR, log4brains and Nygard-style records
            also reads the records in architecture/records, named by .adr-dir or .log4brains.yml
 kiro       Kiro and cc-sdd: specs and steering under .kiro/
            not found here
+starter    driftmark's starter layout, as driftmark init sets it up
+           used only when driftmark.toml names it
 
 This repository has no driftmark.toml, so driftmark uses every preset it finds.
 To keep this choice, or to add types of your own, write this line in driftmark.toml:
@@ -105,7 +108,8 @@ Each preset's second line is one of:
 - `in use: found <marker>`: no rules file, and this marker showed the layout;
 - `in use: driftmark.toml names it`;
 - `found <marker>, but not in use: driftmark.toml does not name it`;
-- `not found here`.
+- `not found here`;
+- `used only when driftmark.toml names it`, for a preset with no markers, such as `starter`.
 
 The command exits with 0 when it ran, and with 2 for an unknown preset, a broken rules file, or a folder outside any git repository. `show` works outside a repository too, and then prints the preset as it is built in.
 
@@ -243,10 +247,42 @@ A made-up cc-sdd spec folder `.kiro/specs/shopping-list/` with this `spec.json`:
 
 Its `requirements.md` is a `requirements` document with the status `design-generated`, current, dated `2026-02-03T16:30:00Z`. A copied preset can read the approval instead, with `status = { file = "spec.json", key = "approvals.requirements.approved" }`; the status is then `true` or `false`.
 
+## Starter layout
+
+The `starter` preset is the rules file of the layout `driftmark init` sets up: decisions, standards, features, working folders and an archive. `docs/features/starter-layout.md` describes the layout, its templates and its rules file in full. `init` writes the preset's text as the repository's `driftmark.toml`, so a repository made by `init` names no preset; it holds the types themselves. A `driftmark.toml` with `presets = ["starter"]` gives the same types instead.
+
+| Type | Paths | Status | Lifecycle by status | Date | Decision headings |
+|---|---|---|---|---|---|
+| `readme` | `docs/README.md`, `docs/*/README.md` | none | current | none | none |
+| `decision` | `docs/decisions/*.md` | front matter `status` | current: `accepted`; superseded: `superseded`; archived: `rejected`; none: `proposed` | front matter `date` | `Decision` |
+| `standard` | `docs/standards/**/*.md` | front matter `status` | current: `active`; archived: `retired`; none: `draft` | front matter `date` | none |
+| `feature` | `docs/features/**/*.md` | front matter `status` | current: `target`, `shipped`; archived: `dropped` | front matter `date` | none |
+| `plan`, `status` | `docs/working/*/plan.md`, `docs/working/*/status.md` | front matter `status` | current: `active`; archived: `done`; none: `paused` | front matter `date` | none |
+| `working` | `docs/working/**` | front matter `status` | as `plan`; current when no status says otherwise | front matter `date` | none |
+| `archive` | `docs/archive/**` | not read | archived | none | none |
+
+- **No markers.** The layout's folders are common names, and a numbered `docs/decisions/` is also MADR's default folder. A repository with no rules file is therefore never taken for the starter layout. Its numbered decision records are found by the `adr` preset instead, which reads their front matter status too.
+- A decision, standard, feature, plan or status file must have `status` and `date` in its front matter (`required`).
+
+A made-up record, `docs/decisions/0002-keep-one-database.md`:
+
+```markdown
+---
+status: superseded
+date: 2026-02-10
+superseded-by: 0005-split-the-database.md
+---
+
+# Keep one database
+```
+
+It is a `decision`, superseded, dated `2026-02-10`, superseded by `0005-split-the-database.md`.
+
 ## Where it is tested
 
 - `fixtures/presets/<name>/` holds a made-up tree for each preset, and its `expected.txt` lists every Markdown file's type, status, lifecycle, date and decision sections. The core test reads the trees from disk. The program test commits each tree to a git repository and reads it at the commit and in the working tree.
 - The program test also edits a sentence under a decision heading of each layout and checks that `driftmark diff` ranks it as "decision".
+- For the starter preset, the program test runs `driftmark init --write` and `driftmark new` for each kind in a git repository. Every Markdown file must read the same with the rules file `init` wrote and with `presets = ["starter"]`: the same types, masthead keys, lint settings, classifications and `driftmark lint` output.
 - `crates/driftmark/tests/presets_public.rs` fetches public repositories at pinned commits, and compares driftmark's counts of types, lifecycles, statuses and dates with counts made by hand. The `presets-public` CI job runs it; it is the only job that uses the network.
 
 | Preset | Repository | Commit |

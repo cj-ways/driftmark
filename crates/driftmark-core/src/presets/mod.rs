@@ -28,10 +28,14 @@ pub struct Preset {
     /// What the preset is for, in a few words.
     pub title: &'static str,
     /// The rules file, as a user can copy it. It holds `[[type]]` entries
-    /// and, when the layout needs them, a `[masthead]` table.
+    /// and, when the layout needs them, a `[masthead]` table. A `[lint]`
+    /// table in it is not applied when the preset is used, so it may only
+    /// write out the defaults, as the starter preset's does for a copy.
     pub text: &'static str,
     /// How the preset is found in a repository that has no rules file, tried
-    /// in order. A preset with none is used only when a rules file names it.
+    /// in order. A preset with none is used only when a rules file names it,
+    /// as the starter preset is: `driftmark init` writes its text as the
+    /// rules file.
     pub markers: &'static [Marker],
     /// Where the preset learns of folders its text does not name.
     pub folders: Folders,
@@ -110,6 +114,13 @@ pub const PRESETS: &[Preset] = &[
         title: "Kiro and cc-sdd: specs and steering under .kiro/",
         text: include_str!("kiro.toml"),
         markers: &[Marker::Types],
+        folders: Folders::None,
+    },
+    Preset {
+        name: crate::starter::preset::NAME,
+        title: "driftmark's starter layout, as driftmark init sets it up",
+        text: crate::starter::preset::RULES,
+        markers: &[],
         folders: Folders::None,
     },
 ];

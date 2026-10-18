@@ -278,6 +278,8 @@ adr        ADR folders: adr-tools, MADR, log4brains and Nygard-style records
            also reads the records in architecture/records, packages/checkout/docs/adr, named by .adr-dir or .log4brains.yml
 kiro       Kiro and cc-sdd: specs and steering under .kiro/
            not found here
+starter    driftmark's starter layout, as driftmark init sets it up
+           used only when driftmark.toml names it
 
 This repository has no driftmark.toml, so driftmark uses every preset it finds.
 To keep this choice, or to add types of your own, write this line in driftmark.toml:
@@ -364,7 +366,7 @@ fn show_prints_a_preset_ready_to_copy() {
     assert_eq!(code, 2);
     assert_eq!(
         err,
-        "driftmark presets: driftmark has no preset \"nope\"; the presets are openspec, spec-kit, adr, kiro\n"
+        "driftmark presets: driftmark has no preset \"nope\"; the presets are openspec, spec-kit, adr, kiro, starter\n"
     );
     let (code, out, _) = driftmark(&repo.dir, &["presets", "--help"]);
     assert_eq!(code, 0);
@@ -411,7 +413,7 @@ fn a_rules_file_adds_its_own_types_before_the_presets_it_names() {
         "{err}"
     );
     assert!(
-        err.contains("driftmark has no preset \"backlog\"; the presets are \"openspec\", \"spec-kit\", \"adr\", \"kiro\""),
+        err.contains("driftmark has no preset \"backlog\"; the presets are \"openspec\", \"spec-kit\", \"adr\", \"kiro\", \"starter\""),
         "{err}"
     );
 }
@@ -547,4 +549,92 @@ fn reading_pages_show_a_status_from_spec_json() {
     );
     let _ = server.kill();
     let _ = server.wait();
+}
+
+/// Each Markdown file of the working tree with what the rules say about it.
+fn classes(git: &Git) -> Vec<(String, Classification)> {
+    let side = Snapshot::Worktree;
+    let setup = setup_at(git, &side).expect("the rules load");
+    let files = files_at(git, &side);
+    git.markdown_files(&side, &driftmark_core::git::Roots::all())
+        .expect("the files list")
+        .into_iter()
+        .map(|file| {
+            let bytes = git.read_worktree_file(&file.path).expect("the file reads");
+            let document =
+                Document::parse_with(bytes, setup.rules.masthead_keys()).expect("parses");
+            let path = file.path.to_lossy().into_owned();
+            let class = setup.rules.classify_with(&path, &document, &files);
+            (path, class)
+        })
+        .collect()
+}
+
+#[test]
+fn the_starter_preset_reads_an_init_layout_as_its_own_rules_file_does() {
+    let repo = TestRepo::new("presets-starter");
+    repo.write("README.md", "# Readme\n");
+    repo.commit("first", T0);
+    let (code, _, err) = driftmark(&repo.dir, &["init", "--write"]);
+    assert_eq!((code, err.as_str()), (0, ""));
+    for (kind, title) in [
+        ("decision", "Keep one database"),
+        ("standard", "Name things plainly"),
+        ("feature", "Export to PDF"),
+        ("plan", "Move the queue"),
+        ("status", "Move the queue"),
+    ] {
+        let (code, _, err) = driftmark(&repo.dir, &["new", kind, title]);
+        assert_eq!((code, err.as_str()), (0, ""), "{kind}");
+    }
+    let git = Git::open(&repo.dir).expect("opens");
+
+    // The rules file `init` wrote is the starter preset's own text.
+    let written = std::fs::read_to_string(repo.dir.join("driftmark.toml")).expect("reads");
+    assert_eq!(written, find("starter").expect("starter").text);
+    let own = setup_at(&git, &Snapshot::Worktree).expect("valid");
+    assert_eq!(own.presets, []);
+    let own_classes = classes(&git);
+    let (_, own_lint, _) = driftmark(&repo.dir, &["lint"]);
+
+    repo.write("driftmark.toml", "presets = [\"starter\"]\n");
+    let named = setup_at(&git, &Snapshot::Worktree).expect("valid");
+    let used: Vec<(&str, Option<&str>)> = named
+        .presets
+        .iter()
+        .map(|in_use| (in_use.preset.name, in_use.found.as_deref()))
+        .collect();
+    assert_eq!(used, [("starter", None)]);
+    assert_eq!(named.rules.types(), own.rules.types());
+    assert_eq!(named.rules.masthead_keys(), own.rules.masthead_keys());
+    // The starter text's `[lint]` table is not applied, but it writes out the
+    // defaults, so the writing check's settings are the same.
+    assert_eq!(named.rules.lint(), own.rules.lint());
+    assert_eq!(classes(&git), own_classes);
+    let (code, named_lint, _) = driftmark(&repo.dir, &["lint"]);
+    assert_eq!(named_lint, own_lint);
+    assert_eq!(code, 0, "{named_lint}");
+
+    // The comparison is not empty: every kind of the layout is typed.
+    let mut types: Vec<&str> = own_classes
+        .iter()
+        .map(|(_, class)| class.doc_type.as_str())
+        .collect();
+    types.sort_unstable();
+    types.dedup();
+    for wanted in [
+        "decision", "feature", "plan", "readme", "standard", "status",
+    ] {
+        assert!(types.contains(&wanted), "{wanted} in {types:?}");
+    }
+    let (_, record) = own_classes
+        .iter()
+        .find(|(path, _)| path.starts_with("docs/decisions/0001-"))
+        .expect("the new decision record");
+    assert_eq!(record.doc_type, "decision");
+    assert!(
+        record.status.is_some() && record.date.is_some(),
+        "{record:?}"
+    );
+    assert!(!record.decision_blocks.is_empty(), "{record:?}");
 }
