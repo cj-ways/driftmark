@@ -25,6 +25,7 @@ pub(crate) const READ: Tool = Tool {
     description: "Reads one Markdown document at a revision: its metadata (type, status, title, summary, size), its outline (each section's heading path, anchor, block index, first line and size) and its text, whole or for one section. Ask for a section by the anchor the outline or a search result gives. A long text is cut after a whole line; the answer's `cut.next` holds the arguments that read on.",
     arguments,
     required: &["path"],
+    read_only: true,
     run: read,
 };
 

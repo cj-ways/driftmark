@@ -248,10 +248,7 @@ fn decide_and_apply(store: &Store, scope: &Scope, id: u64) {
         },
         7,
     );
-    assert_eq!(
-        refused,
-        Err(StoreError::Refused("only the reader can do this".into()))
-    );
+    assert_eq!(refused, Err(StoreError::Refused(Refusal::ReaderOnly)));
     let decided = store
         .act(
             id,
@@ -285,9 +282,7 @@ fn decide_and_apply(store: &Store, scope: &Scope, id: u64) {
     assert_eq!(commits, ["a".repeat(40), "b".repeat(40)]);
     assert_eq!(
         store.act(id, Role::Reader, "ana", &Act::Withdraw, 10),
-        Err(StoreError::Refused(
-            "the note is applied, so it cannot change".into()
-        ))
+        Err(StoreError::Refused(Refusal::Final(Status::Applied)))
     );
     let other = store
         .add(scope, &new_note("docs/a.md", "x"), 11)
@@ -348,6 +343,68 @@ fn two_processes_share_the_file() {
     drop((serve, mcp));
     let again = Store::open(&temp.file()).unwrap();
     assert_eq!(again.note(id).unwrap().thread.len(), 1);
+}
+
+#[test]
+fn a_decision_and_a_proposal_at_once_never_overwrite_each_other() {
+    // The reader decides through one handle, then an agent proposes through
+    // another. The proposal reads the status the decision left, inside its
+    // own write, so it is refused instead of writing "answered" over
+    // "decided".
+    let temp = Temp::new();
+    let serve = Store::open(&temp.file()).unwrap();
+    let mcp = Store::open(&temp.file()).unwrap();
+    let scope = Scope::Document("docs/a.md".into());
+    let id = serve
+        .add(&scope, &new_note("docs/a.md", "x"), 1)
+        .unwrap()
+        .id;
+    serve
+        .act(
+            id,
+            Role::Reader,
+            "ana",
+            &Act::Decide {
+                outcome: Outcome::Change,
+                summary: "Yes.".into(),
+            },
+            2,
+        )
+        .unwrap();
+    let late = mcp.act(
+        id,
+        Role::Agent,
+        "agent",
+        &Act::Propose {
+            outcome: Outcome::Keep,
+            summary: "No.".into(),
+        },
+        3,
+    );
+    assert_eq!(late, Err(StoreError::Refused(Refusal::AlreadyDecided)));
+    let note = serve.note(id).unwrap();
+    assert_eq!(note.status, Status::Decided);
+    assert_eq!(note.proposal, None);
+    // A writer that holds the file makes the other wait, then go on.
+    let holder = Connection::open(temp.file()).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let waited = std::thread::spawn(move || {
+        mcp.act(
+            id,
+            Role::Agent,
+            "agent",
+            &Act::Reply {
+                body: "Applying.".into(),
+                stance: None,
+            },
+            4,
+        )
+    });
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    holder.execute_batch("COMMIT").unwrap();
+    let replied = waited.join().unwrap().unwrap();
+    assert_eq!(replied.status, Status::Decided);
+    assert_eq!(replied.thread.len(), 1);
 }
 
 #[test]
@@ -426,7 +483,10 @@ fn stored_values_that_make_no_sense_are_reported() {
     for (error, text) in [
         (StoreError::NoNote(4), "there is no note n4"),
         (StoreError::NoReview(5), "there is no review r5"),
-        (StoreError::Refused("no".into()), "no"),
+        (
+            StoreError::Refused(Refusal::AlreadyDecided),
+            "the note is decided already",
+        ),
     ] {
         assert_eq!(error.to_string(), text);
     }

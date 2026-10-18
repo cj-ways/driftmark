@@ -4,9 +4,12 @@
 //!
 //! The tools read what `driftmark serve` reads, through the same git
 //! reader, cache and comparisons: what changed in a range, one document's
-//! changes, a document or one of its sections, a search, and the writing
-//! check. They never write a document and never run a program other than
-//! git. `docs/features/commands/mcp.md` is the contract of every tool.
+//! changes, a document or one of its sections, a search, the writing check,
+//! and the reader's notes. Three note tools write to the notes file that
+//! `serve` writes, as the agent: a reply, a proposed decision, and the
+//! commits that applied a decision. No tool writes a document or runs a
+//! program other than git. `docs/features/commands/mcp.md` is the contract
+//! of every tool.
 //!
 //! - [`protocol`] is the only part that names the rmcp crate.
 //! - [`tools`] lists the tools and reads their arguments; one module per
@@ -18,6 +21,7 @@ mod document;
 mod fit;
 mod install;
 mod lint;
+mod notes;
 mod protocol;
 mod search;
 mod tools;
@@ -32,6 +36,7 @@ use serde_json::{Map, Value};
 
 use crate::git::Git;
 use crate::memory::{IDLE_AFTER, Idle, give_back};
+use crate::serve::placing::NotesFile;
 use crate::serve::repo::Repo;
 use protocol::Connector;
 
@@ -51,13 +56,15 @@ const CACHE_BYTES: usize = 32 * 1024 * 1024;
 /// How `driftmark mcp` is called.
 const USAGE: &str = "\
 usage: driftmark mcp [--repo <path>] [--base <branch>]
-       driftmark mcp install [--write]
+       driftmark mcp install [--write] [--notes-line]
 
 Answers an agent over the Model Context Protocol on standard input and
 output: what changed in the docs, a document or one section of it, a search,
-and the writing check. An agent such as Claude Code starts it; it stops when
-the agent closes standard input. It reads only through git and the
-repository's files, and never writes a document.
+the writing check, and the reader's notes. An agent such as Claude Code
+starts it; it stops when the agent closes standard input. It reads only
+through git and the repository's files, never writes a document, and writes
+only replies, proposals and applied commits to the notes file that
+`driftmark serve` keeps.
 
 Options:
   --repo <path>     a folder inside the repository (default: here)
@@ -67,7 +74,9 @@ Options:
 
 `driftmark mcp install` prints the entry for this repository's .mcp.json,
 and the `claude mcp add` command that adds the same; with --write it adds
-the entry to .mcp.json and leaves every other entry as it was.
+the entry to .mcp.json and leaves every other entry as it was. With
+--notes-line it also shows, or with --write adds, a line at the end of
+AGENTS.md (or CLAUDE.md) that tells agents to look for the reader's notes.
 
 Exit codes: 0 the session ended or install did its work, 1 could not start
 or install refused, 2 the command line is wrong.";
@@ -86,6 +95,9 @@ enum Request {
     Install {
         /// Whether to write it.
         write: bool,
+        /// Whether to add the line about notes to the agent instruction
+        /// file too.
+        line: bool,
     },
     /// Print the usage text.
     Help,
@@ -98,11 +110,19 @@ fn parse(args: &[OsString]) -> Result<Request, String> {
         .map(|arg| arg.to_str().ok_or("an argument is not valid text"))
         .collect::<Result<_, _>>()?;
     match words.as_slice() {
-        ["install"] => return Ok(Request::Install { write: false }),
-        ["install", "--write"] => return Ok(Request::Install { write: true }),
         ["install", "--help" | "-h"] | ["--help" | "-h"] => return Ok(Request::Help),
-        ["install", ..] => {
-            return Err("`install` takes only `--write`".to_owned());
+        ["install", options @ ..] => {
+            let (mut write, mut line) = (false, false);
+            for option in options {
+                match *option {
+                    "--write" if !write => write = true,
+                    "--notes-line" if !line => line = true,
+                    _ => {
+                        return Err("`install` takes only `--write` and `--notes-line`".to_owned());
+                    }
+                }
+            }
+            return Ok(Request::Install { write, line });
         }
         _ => {}
     }
@@ -146,7 +166,7 @@ pub fn run(args: &[OsString], stdout: &mut dyn Write, stderr: &mut dyn Write) ->
             let _ = writeln!(stdout, "{USAGE}");
             EXIT_OK
         }
-        Request::Install { write } => install::run(write, stdout, stderr),
+        Request::Install { write, line } => install::run(write, line, stdout, stderr),
         Request::Serve { repo, base } => match serve(&repo, base) {
             Ok(()) => EXIT_OK,
             Err(message) => {
@@ -175,10 +195,19 @@ fn serve(start: &std::path::Path, base: Option<String>) -> Result<(), String> {
         let repo = Arc::clone(&repo);
         Idle::start(IDLE_AFTER, move || give_back(&repo.git))
     };
+    // The notes file of decision 0011, item 2, shared with `driftmark serve`.
+    let notes_path = crate::notes::notes_file(start).map_err(|error| {
+        format!(
+            "the notes file of `{}` cannot be found: {error}",
+            start.display()
+        )
+    })?;
+    let reviews = notes_path.with_file_name(crate::notes::REVIEWS);
     let context = tools::Context {
         repo,
         workdir,
         worktree_search: search::WorktreeSearch::default(),
+        notes: NotesFile::new(notes_path, reviews, String::new()),
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -210,9 +239,18 @@ impl Connector for Watched {
         self.tools.tools()
     }
 
-    fn call(&self, name: &str, arguments: Map<String, Value>) -> Option<protocol::Reply> {
+    fn call(
+        &self,
+        name: &str,
+        arguments: Map<String, Value>,
+        client: &str,
+    ) -> Option<protocol::Reply> {
         let _busy = self.idle.begin();
-        self.tools.call(name, arguments)
+        self.tools.call(name, arguments, client)
+    }
+
+    fn missing(&self, name: &str) -> String {
+        self.tools.missing(name)
     }
 }
 
@@ -246,14 +284,35 @@ mod tests {
         assert_eq!(read(&["serve"]), Err("unknown argument `serve`".into()));
         assert_eq!(read(&["--help"]), Ok(Request::Help));
         assert_eq!(read(&["install", "-h"]), Ok(Request::Help));
-        assert_eq!(read(&["install"]), Ok(Request::Install { write: false }));
+        assert_eq!(
+            read(&["install"]),
+            Ok(Request::Install {
+                write: false,
+                line: false
+            })
+        );
         assert_eq!(
             read(&["install", "--write"]),
-            Ok(Request::Install { write: true })
+            Ok(Request::Install {
+                write: true,
+                line: false
+            })
         );
         assert_eq!(
-            read(&["install", "--force"]),
-            Err("`install` takes only `--write`".into())
+            read(&["install", "--notes-line", "--write"]),
+            Ok(Request::Install {
+                write: true,
+                line: true
+            })
         );
+        for wrong in [
+            &["install", "--force"][..],
+            &["install", "--write", "--write"],
+        ] {
+            assert_eq!(
+                read(wrong),
+                Err("`install` takes only `--write` and `--notes-line`".into())
+            );
+        }
     }
 }

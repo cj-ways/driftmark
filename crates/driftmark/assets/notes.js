@@ -11,7 +11,10 @@
 // - shows each note in place (a highlight and a card under its block), a
 //   review list with its notes, an "Unanchored" tab for notes whose text is
 //   gone, and the buttons that hand a review to an agent;
-// - lets the reader reply, decide, edit and withdraw.
+// - lets the reader reply, decide, edit and withdraw;
+// - on a change page, marks each card a note's applied commits made,
+//   "Changed because of note n12", and lists those changes on the note's
+//   card.
 //
 // Every text from the server goes into the page through textContent, never
 // as HTML. The routes are in docs/features/commands/serve.md ("Notes").
@@ -470,6 +473,19 @@
     if (note.applied.length) {
       box.append(el("p", { class: "dm-applied" }, el("strong", { text: "Applied in " }), note.applied.map((a) => a.commit.slice(0, 7)).join(", ")));
     }
+    if (note.caused && note.caused.length) {
+      box.append(el("p", { class: "dm-caused-head" }, el("strong", { text: "Changes it caused on this page:" })),
+        el("ul", { class: "dm-caused" }, ...note.caused.map((made) => {
+          const target = cardFor(made);
+          if (!target) {
+            const own = `${location.pathname.replace(/\/-\/.*$/, "")}/-/${made.path}`;
+            return el("li", {}, el("a", { href: own, text: `A change in ${made.path}, on its own page` }));
+          }
+          const kindText = (target.querySelector(".head .kind") || {}).textContent || "A change";
+          const where = [...target.querySelectorAll("ol.path li")].map((li) => li.textContent).join(" › ");
+          return el("li", {}, el("a", { href: `#${target.id}`, text: where ? `${kindText}, in ${where}` : kindText }));
+        })));
+    }
     if (!FINAL.has(note.status)) {
       const acts = el("p", { class: "dm-buttons" });
       const open = (what) => {
@@ -497,6 +513,51 @@
       box.append(acts);
     }
     return box;
+  };
+
+  // The change card a note's applied commit made, when this page shows it
+  // and its key still names the same change.
+  const cardFor = (made) => {
+    const list = [...main.querySelectorAll("ol.changes[data-path]")].find((ol) => ol.dataset.path === made.path);
+    const section = list ? list.closest("section.docchg[data-keys]") : null;
+    if (!section || section.dataset.keys.split(" ")[made.change] !== made.key) return null;
+    return [...list.querySelectorAll("li.change")].find((item) => Number(item.id.split(".").pop()) === made.change) || null;
+  };
+
+  // A link to a note's card opens the "Unanchored" tab first when the card
+  // sits there, so the page can scroll to it.
+  const reveal = (id) => {
+    const target = document.getElementById(`Note${id}`);
+    const panel = target ? target.closest("[role=tabpanel]") : null;
+    if (panel && panel.hidden) {
+      const button = document.getElementById(`${panel.id}b`);
+      if (button) button.click();
+    }
+  };
+
+  // "Changed because of note n12" on each card a note's commits made.
+  const markCaused = () => {
+    const byCard = new Map();
+    for (const note of notes) {
+      if (note.status === "withdrawn") continue;
+      for (const made of note.caused || []) {
+        const target = cardFor(made);
+        if (!target) continue;
+        if (!byCard.has(target)) byCard.set(target, []);
+        if (!byCard.get(target).includes(note)) byCard.get(target).push(note);
+      }
+    }
+    for (const [target, causes] of byCard) {
+      const line = el("p", { class: "dm-because", "data-gen": true }, "Changed because of ");
+      causes.forEach((note, at) => {
+        if (at > 0) line.append(at === causes.length - 1 ? " and " : ", ");
+        line.append(el("a", { href: `#Note${note.id}`, text: `note n${note.id}`, onclick: () => reveal(note.id) }));
+      });
+      const head = target.querySelector(".head");
+      if (head) head.after(line);
+      else target.prepend(line);
+      target.classList.add("is-caused");
+    }
   };
 
   // Where a note's card goes on a reading page: after its block.
@@ -533,7 +594,8 @@
   };
 
   const clearShown = () => {
-    for (const old of main.querySelectorAll(".dm-note, .dm-unchanged, .dm-pin")) old.remove();
+    for (const old of main.querySelectorAll(".dm-note, .dm-unchanged, .dm-pin, .dm-because")) old.remove();
+    for (const marked of main.querySelectorAll("li.change.is-caused")) marked.classList.remove("is-caused");
     if (window.CSS && CSS.highlights) {
       CSS.highlights.delete("dm-notes");
       CSS.highlights.delete("dm-notes-changed");
@@ -568,6 +630,7 @@
         if (list.length) CSS.highlights.set(name, new Highlight(...list));
       }
     }
+    if (kind === "review") markCaused();
     panel();
   };
 

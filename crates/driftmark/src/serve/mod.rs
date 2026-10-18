@@ -11,8 +11,8 @@
 //! `docs/features/commands/serve.md` is the user's guide and the contract of
 //! the routes.
 
-// `address`, `compare`, `repo` and `search` are shared with the MCP
-// connector, which answers the same questions over another channel.
+// `address`, `compare`, `placing`, `repo` and `search` are shared with the
+// MCP connector, which answers the same questions over another channel.
 pub(crate) mod address;
 mod app;
 mod args;
@@ -22,6 +22,7 @@ pub(crate) mod compare;
 mod guard;
 mod notes;
 mod page;
+pub(crate) mod placing;
 pub(crate) mod repo;
 pub(crate) mod search;
 mod watch;
@@ -112,7 +113,7 @@ pub fn run(args: &[OsString], stdout: &mut dyn Write, stderr: &mut dyn Write) ->
 
 /// The notes file the server uses (decision 0011, item 2), and where review
 /// files are written: beside it, unless `--review-dir` says otherwise.
-fn notes_file(args: &args::Args) -> notes::NotesFile {
+fn notes_file(args: &args::Args) -> placing::NotesFile {
     let notes_path = crate::notes::notes_file(&args.repo).unwrap_or_else(|_| {
         args.repo
             .join(".git")
@@ -125,7 +126,7 @@ fn notes_file(args: &args::Args) -> notes::NotesFile {
             |folder| folder.join(crate::notes::REVIEWS),
         )
     });
-    notes::NotesFile::new(
+    placing::NotesFile::new(
         notes_path,
         reviews,
         args.reader.clone().unwrap_or_else(|| "reader".to_owned()),

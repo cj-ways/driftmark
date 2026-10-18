@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Notes
 
-> Short version: on any reading page or change page, the reader selects a sentence and adds a note: what they think of it, what they want done, whether it blocks the work, and their point. The note shows under its sentence, which is highlighted, and it stays on that sentence while agents edit the document. Each page with notes has a review list, with an "Unanchored" tab for notes whose sentence is gone. "Copy as prompt" and "Write review file" hand a review to an agent in two rounds: discuss, then apply what the reader decided. Notes live in one file in the clone's shared git folder, which git never commits.
+> Short version: on any reading page or change page, the reader selects a sentence and adds a note: what they think of it, what they want done, whether it blocks the work, and their point. The note shows under its sentence, which is highlighted, and it stays on that sentence while agents edit the document. Each page with notes has a review list, with an "Unanchored" tab for notes whose sentence is gone. An agent reads and answers the notes through `driftmark mcp`; "Copy as prompt" and "Write review file" hand a review to an agent without it. Either way the round has two halves: discuss, then apply what the reader decided. Once an agent records the commits that applied a note, the change page marks the changes they made: "Changed because of note n12". Notes live in one file in the clone's shared git folder, which git never commits.
 
 ## Making a note
 
@@ -57,7 +57,20 @@ Each review in the list has three buttons:
 
 A browser on another device, over plain HTTP, may not let the page copy. The prompt then opens in a box to copy by hand.
 
-The prompt's format is in `docs/features/engine/notes-model.md` ("The prompt packet"). With the MCP connector (`driftmark mcp`, a later milestone), an agent reads the notes and answers them directly; the review file is for agents without it.
+The prompt's format is in `docs/features/engine/notes-model.md` ("The prompt packet").
+
+### Through the MCP connector
+
+An agent with `driftmark mcp` (`docs/features/commands/mcp.md`) reads and answers the notes itself, in the same notes file, while `driftmark serve` runs. A whole round:
+
+1. The reader writes notes on a branch's change page or a reading page.
+2. The agent calls `notes_list` and sees them. `note_get` gives one note with where its words are now and the section around them; `review_get` gives a review as the same prompt "Copy as prompt" copies.
+3. The agent answers each note with `note_reply`, with a stance: agree, counter, question or proposal. It may suggest what to do with `note_propose_decision`. The note becomes "answered", and the reply shows on its card when the page reloads.
+4. The reader replies or decides on the page. A proposal fills in the decision form.
+5. The agent reads round 2 (`review_get` with round 2), edits the documents as decided, commits, and records the commits with `note_mark_applied`. The note becomes "applied".
+6. The change page shows which changes came from which note (below).
+
+The agent replies under the name its client gives, such as `claude-code`. It never decides, edits or withdraws a note: the connector has no tool for those, and the notes file refuses them from an agent with a sentence that says why. `driftmark mcp install --notes-line` adds a line to `AGENTS.md` or `CLAUDE.md` that tells agents to look for notes before they edit.
 
 ## Deciding
 
@@ -69,6 +82,15 @@ Under each note that is not settled:
 - **Withdraw** takes the note back. It stays in the notes file, marked withdrawn.
 
 The loop: open → sent → answered ⇄ discussing → decided → applied, or closed without a change, or withdrawn. An agent replies, proposes and records the commits that applied a decision; it never decides.
+
+## Changed because of a note
+
+When the notes of a range's change page have applied commits inside that range, the page marks what those commits did:
+
+- **On a change card:** a line under its head, "↳ Changed because of note n12", for each card whose block a note's commit wrote, edited, moved or deleted. The note's number is a link to its card.
+- **On the note's card:** "Changes it caused on this page", a list of those changes by kind and headings, each a link to its card. A change in a document the page does not show in full links to that document's own change page.
+
+Only the note's own document counts, and only commits the range holds: the newer side has them and the older side does not. A later commit that edits the same block again keeps the mark, because the block is followed from the commit to the range's newer side; a block a commit deleted is followed back to the older side. A new or deleted document is one card, marked when the commit changed any block of it. The rule is `notes::caused` in the core (`docs/features/engine/notes-model.md`).
 
 ## "Seen"
 
@@ -86,12 +108,12 @@ Every change card has a "Seen" button. Pressing it marks the change seen for the
 
 - `fixtures/notes/`: made-up edits and where each note lands, checked by `crates/driftmark-core/tests/notes_fixtures.rs`.
 - `crates/driftmark/tests/serve_notes.rs`: every notes route on small repos, the same-origin rule, and the notes file shared by a linked worktree.
-- `tests/browser/notes.mjs`: the loop in Chromium. It selects a sentence on a reading page, saves a note, reloads and finds it highlighted in place; edits the file and finds it exact, then fuzzy, then unanchored; and on a change page notes a card's words and marks the card seen. Run `npm ci` in `tests/browser/`, then `node notes.mjs <target>/debug/driftmark [<screenshot folder>]`.
+- `crates/driftmark/tests/mcp_notes.rs`: a whole round between the routes and the MCP connector on one notes file, every action an agent may not take, and the size limits of the note tools.
+- `tests/browser/notes.mjs`: the loop in Chromium. It selects a sentence on a reading page, saves a note, reloads and finds it highlighted in place; edits the file and finds it exact, then fuzzy, then unanchored; on a change page notes a card's words and marks the card seen; and after an agent applies that note through `driftmark mcp`, finds "Changed because of note" on the card and the change listed on the note. Run `npm ci` in `tests/browser/`, then `node notes.mjs <target>/debug/driftmark [<screenshot folder>]`.
 - `crates/driftmark/tests/notes_history.rs` (ignored): notes made at an old commit of a real repository, found again at a newer one, with the counts per state.
 
 ## Not covered yet
 
-- **"Changed because of note N" on change pages.** The notes file records which commits applied each note; the change page does not show it yet.
 - **Notes on diagrams and raw HTML.** A drawn diagram's text and the text inside a raw HTML block cannot be selected for a note (`docs/features/engine/html.md`, "Limits"). A note on a whole change card works for them.
 - **Keyboard selection.** A selection made with the keyboard shows the same button, but it comes last in the tab order.
 - **Sharing notes in a team** (decision 0005).

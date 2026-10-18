@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Notes model
 
-> Short version: a note is a reader's point on an exact stretch of a document's Markdown source, at the commit where it was made. `driftmark-core` holds the note, the rules of its loop and the anchoring: `notes::Note`, `notes::next_status`, `notes::anchor` and `notes::packet`. A note keeps its quote with up to 32 characters of context on each side, its byte offsets, its headings and its block. When the document changes, `reanchor` finds the quote again and gives the note one of five states: exact, moved, fuzzy, outdated or orphaned. An orphaned note is never deleted. The loop moves a note from open through sent, answered and discussing to decided and applied; only the reader decides. A review's notes go to an agent as a prompt or a review file, in two rounds: discuss, then apply. The program keeps notes in one SQLite file (`docs/features/notes.md`, decision 0004).
+> Short version: a note is a reader's point on an exact stretch of a document's Markdown source, at the commit where it was made. `driftmark-core` holds the note, the rules of its loop and the anchoring: `notes::Note`, `notes::next_status`, `notes::anchor`, `notes::packet` and `notes::caused`. A note keeps its quote with up to 32 characters of context on each side, its byte offsets, its headings and its block. When the document changes, `reanchor` finds the quote again and gives the note one of five states: exact, moved, fuzzy, outdated or orphaned. An orphaned note is never deleted. The loop moves a note from open through sent, answered and discussing to decided and applied; only the reader decides. A review's notes go to an agent as a prompt or a review file, in two rounds: discuss, then apply. The program keeps notes in one SQLite file (`docs/features/notes.md`, decision 0004).
 
 ## The note
 
@@ -220,6 +220,24 @@ Commit:
 - A note on the old side of a change says so, with the commit it was made at.
 - The thread follows the reader's point, one `Reader:` or `Agent:` line per reply, later lines of a reply indented. An agent's open proposal shows as `Proposed:`.
 - The tool names, `note_reply` and `note_mark_applied`, are the MCP connector's (decision 0004); an agent without it answers on the `Agent:` and `Commit:` lines.
+
+## Changes a note caused
+
+`notes::caused(changes, around, ends)` says which changes of a range a commit made, so a change page can mark them "Changed because of note n12" for the commits recorded on a note. It reads no git: the program gives it four versions of one document, each parsed the way the range's change list parsed its ends.
+
+| Argument | What it holds |
+|---|---|
+| `changes` | The document's change list for the range. |
+| `around.before`, `around.after` | The document at the commit's first parent and at the commit; `None` where it does not exist. |
+| `ends.base`, `ends.head` | The document at the range's two ends; `None` where it does not exist. |
+
+It works in three steps:
+
+1. **What the commit did.** The blocks of `before` and `after` are paired as the change list pairs them (`diff::block_map`). A block of `after` the commit wrote: one without a partner, one whose source differs from its partner's, or one that moved. A block of `before` it deleted: one without a partner.
+2. **Where that is in the range.** A written block is followed forward, from `after` to `head`, through the pairing of those two versions. A deleted block is followed back to `base`, through the pairing of `base` and `before`. So a later commit that moves or edits the block again does not hide the first commit's part in it.
+3. **Which changes.** A change is the commit's when its new block is one the commit wrote, or its old block is one the commit deleted. A side without a block, such as the new side of a removed block, never counts, whatever place it names. A new or deleted document is one change, and it is the commit's when the commit wrote or deleted any block of it.
+
+A commit that changed only the blank lines between blocks made no change. The answer is the changes' indices, in list order. The unit tests of `src/notes/caused.rs` cover each case with made-up documents: two commits each with its own edit, an edit edited again later, a deletion, a move, a commit that left a block alone, a new and a deleted document, and the two places where a gap's index equals a block the commit touched.
 
 ## Seen marks
 

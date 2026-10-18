@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use support::{DAY, T0, TestRepo};
+use support::{DAY, Expected, T0, TestRepo, documented_repo, examples};
 
 const PROGRAM: &str = env!("CARGO_BIN_EXE_driftmark");
 
@@ -250,7 +250,7 @@ fn driftmark(dir: &Path, args: &[&str]) -> (i32, String, String) {
 // ---- the session ---------------------------------------------------------
 
 #[test]
-fn the_tools_are_listed_with_schemas_and_marked_read_only() {
+fn the_tools_are_listed_with_schemas_and_marked_read_only_or_not() {
     let repo = branch_repo();
     let mut client = Client::start(&repo.dir, &[]);
     let listed = client.request("tools/list", json!({}));
@@ -266,21 +266,35 @@ fn the_tools_are_listed_with_schemas_and_marked_read_only() {
             "changes_document",
             "document_read",
             "search",
-            "lint"
+            "lint",
+            "notes_list",
+            "note_get",
+            "review_get",
+            "note_reply",
+            "note_propose_decision",
+            "note_mark_applied"
         ]
     );
+    let writers = ["note_reply", "note_propose_decision", "note_mark_applied"];
     for tool in tools {
-        assert!(tool["description"].as_str().unwrap().len() > 100);
+        let name = tool["name"].as_str().unwrap();
+        assert!(tool["description"].as_str().unwrap().len() > 100, "{name}");
         let schema = &tool["inputSchema"];
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["additionalProperties"], false);
         assert_eq!(schema["properties"]["max_chars"]["maximum"], 40_000);
-        assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        let reads = !writers.contains(&name);
+        assert_eq!(tool["annotations"]["readOnlyHint"], reads, "{name}");
+        assert_eq!(tool["annotations"]["idempotentHint"], reads, "{name}");
         assert_eq!(tool["annotations"]["destructiveHint"], false);
         assert_eq!(tool["annotations"]["openWorldHint"], false);
     }
     assert_eq!(tools[1]["inputSchema"]["required"], json!(["path"]));
     assert_eq!(tools[3]["inputSchema"]["required"], json!(["query"]));
+    assert_eq!(
+        tools[8]["inputSchema"]["required"],
+        json!(["note", "body", "stance"])
+    );
     let unknown = client.request("tools/call", json!({"name": "nope", "arguments": {}}));
     assert_eq!(unknown["error"]["code"], -32602);
     assert_eq!(unknown["error"]["message"], "driftmark has no tool `nope`");
@@ -1234,8 +1248,79 @@ fn install_prints_the_entry_and_writes_it_only_when_asked() {
     assert_eq!(code, 0);
     assert_eq!(
         out,
-        ".mcp.json already starts `driftmark mcp` as the server `driftmark`; nothing to add\n"
+        ".mcp.json already starts `driftmark mcp` as the server `driftmark`; nothing to add\n\nAgents learn about the reader's notes from the `notes_list` tool. `driftmark mcp install --notes-line` shows a line that tells them to call it, for AGENTS.md or CLAUDE.md.\n"
     );
+}
+
+#[test]
+fn install_adds_the_line_about_notes_only_when_asked() {
+    let repo = branch_repo();
+    // Without an instruction file, the line is shown to add by hand.
+    let (code, out, _) = driftmark(&repo.dir, &["mcp", "install", "--notes-line"]);
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("There is no AGENTS.md or CLAUDE.md at the repository root."),
+        "{out}"
+    );
+    // CLAUDE.md gets it when there is no AGENTS.md; nothing is written
+    // without `--write`, and `--write` alone leaves it alone.
+    repo.write("CLAUDE.md", "# Rules\r\n\r\nBe brief.");
+    let (_, out, _) = driftmark(&repo.dir, &["mcp", "install", "--notes-line"]);
+    assert!(
+        out.contains("It would add this line at the end of CLAUDE.md"),
+        "{out}"
+    );
+    driftmark(&repo.dir, &["mcp", "install", "--write"]);
+    assert_eq!(
+        std::fs::read_to_string(repo.dir.join("CLAUDE.md")).unwrap(),
+        "# Rules\r\n\r\nBe brief."
+    );
+    // AGENTS.md comes first, and keeps its own line endings.
+    repo.write("AGENTS.md", "# Agents\n\nBe kind.\n");
+    let (code, out, _) = driftmark(&repo.dir, &["mcp", "install", "--notes-line", "--write"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.ends_with("Added a line about the reader's notes at the end of AGENTS.md.\n"),
+        "{out}"
+    );
+    let agents = std::fs::read_to_string(repo.dir.join("AGENTS.md")).unwrap();
+    assert!(
+        agents.starts_with("# Agents\n\nBe kind.\n\nReader's notes: "),
+        "{agents}"
+    );
+    assert!(agents.ends_with("`note_mark_applied`.\n"), "{agents}");
+    assert!(agents.contains("call the driftmark tool `notes_list`"));
+    // Running it again adds nothing.
+    let (_, out, _) = driftmark(&repo.dir, &["mcp", "install", "--notes-line", "--write"]);
+    assert!(
+        out.ends_with("AGENTS.md already tells agents about `notes_list`; nothing to add there\n"),
+        "{out}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.dir.join("AGENTS.md")).unwrap(),
+        agents
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.dir.join("CLAUDE.md")).unwrap(),
+        "# Rules\r\n\r\nBe brief."
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn install_never_writes_through_a_linked_instruction_file() {
+    let repo = branch_repo();
+    let outside = support::TempDir::new("mcp-outside");
+    let target = outside.path().join("AGENTS.md");
+    std::fs::write(&target, "# Elsewhere\n").unwrap();
+    std::os::unix::fs::symlink(&target, repo.dir.join("AGENTS.md")).unwrap();
+    let (code, out, _) = driftmark(&repo.dir, &["mcp", "install", "--notes-line", "--write"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("AGENTS.md is a link, so driftmark leaves it alone."),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "# Elsewhere\n");
 }
 
 #[test]
@@ -1322,102 +1407,6 @@ fn the_installed_entry_starts_a_working_connector() {
 
 // ---- the documented examples ---------------------------------------------------
 
-/// The decision record of `docs/features/engine/change-list.md`, before and
-/// after its change.
-const RECORD_BEFORE: &str = "---\nstatus: proposed\n---\n\n# Cache rendered pages\n\n## Decision\n\nKeep each rendered page in the cache for 60 minutes.\n\n## Notes\n\nThe cache lives in memory.\n";
-const RECORD_AFTER: &str = "---\nstatus: accepted\n---\n\n# Cache rendered pages\n\n## Decision\n\nKeep each rendered page in the cache for 90 minutes.\n\nNever cache a page with open notes.\n";
-const DOC_GUIDE: &str = "# Cache guide\n\n> Short version: how to turn the page cache on and size it.\n\n## Install\n\nRun `cache install` once on each server.\n\n## Configure\n\nSet `cache.size` in megabytes. The default keeps 500 pages.\n";
-
-/// The repository of the examples in `docs/features/commands/mcp.md`.
-fn documented_repo() -> TestRepo {
-    let repo = TestRepo::new("mcp-doc");
-    repo.write(
-        "driftmark.toml",
-        "[[type]]\nname = \"decision\"\npaths = [\"docs/decisions/*.md\"]\nstatus = { front-matter = \"status\" }\ncurrent = [\"accepted\"]\nother-statuses = [\"proposed\"]\ndecision-headings = [\"Decision\"]\n",
-    );
-    repo.write("docs/decisions/0002-cache-rendered-pages.md", RECORD_BEFORE);
-    repo.write("docs/guide.md", DOC_GUIDE);
-    let base = repo.commit("first", T0);
-    repo.git(&["update-ref", "refs/remotes/origin/main", &base]);
-    repo.git(&["checkout", "-q", "-b", "feature"]);
-    repo.write("docs/decisions/0002-cache-rendered-pages.md", RECORD_AFTER);
-    repo.write(
-        "docs/notes/cache-sizes.md",
-        "# Cache sizes\n\n> Short version: the size limit of the page cache.\n\nIt holds 500 pages.\n",
-    );
-    repo.commit("feature", T0 + DAY);
-    repo.write(
-        "docs/guide.md",
-        format!("{DOC_GUIDE}\n```\ncache status\n```\n"),
-    );
-    repo
-}
-
-/// What a documented call must give back.
-enum Expected {
-    Answer(Value),
-    Refusal(String),
-}
-
-/// The fenced block that starts on the first line after `at` that is not
-/// blank, with its language and its text.
-fn block_after(lines: &[&str], at: usize) -> (String, String, usize) {
-    let mut line = at + 1;
-    while lines[line].trim().is_empty() {
-        line += 1;
-    }
-    let language = lines[line]
-        .strip_prefix("```")
-        .expect("a fenced block")
-        .to_owned();
-    let mut text = String::new();
-    line += 1;
-    while lines[line] != "```" {
-        text.push_str(lines[line]);
-        text.push('\n');
-        line += 1;
-    }
-    (language, text, line)
-}
-
-/// Every example of a document: each "Call `tool` with:" block, and the
-/// "It answers:" or "It refuses:" block after it.
-fn examples(document: &str) -> Vec<(String, Value, Expected)> {
-    let lines: Vec<&str> = document.lines().collect();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at < lines.len() {
-        let Some(tool) = lines[at]
-            .strip_prefix("Call `")
-            .and_then(|rest| rest.strip_suffix("` with:"))
-        else {
-            at += 1;
-            continue;
-        };
-        let (language, arguments, end) = block_after(&lines, at);
-        assert_eq!(language, "json", "{tool}");
-        let mut next = end + 1;
-        while !lines[next].starts_with("It answers:") && !lines[next].starts_with("It refuses:") {
-            next += 1;
-        }
-        let (language, text, end) = block_after(&lines, next);
-        let expected = if lines[next].starts_with("It answers:") {
-            assert_eq!(language, "json", "{tool}");
-            Expected::Answer(serde_json::from_str(&text).expect("an answer in JSON"))
-        } else {
-            assert_eq!(language, "text", "{tool}");
-            Expected::Refusal(text.trim_end().to_owned())
-        };
-        found.push((
-            tool.to_owned(),
-            serde_json::from_str(&arguments).expect("arguments in JSON"),
-            expected,
-        ));
-        at = end + 1;
-    }
-    found
-}
-
 #[test]
 fn the_documented_examples_hold() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/features/commands/mcp.md");
@@ -1425,7 +1414,11 @@ fn the_documented_examples_hold() {
     let document = std::fs::read_to_string(path)
         .expect("the document")
         .replace("\r\n", "\n");
-    let examples = examples(&document);
+    // The note tools' examples need notes; `mcp_notes.rs` checks them.
+    let examples: Vec<_> = examples(&document)
+        .into_iter()
+        .filter(|(tool, _, _)| !support::NOTE_TOOLS.contains(&tool.as_str()))
+        .collect();
     assert!(examples.len() >= 9, "{} examples", examples.len());
     let repo = documented_repo();
     let mut client = Client::start(&repo.dir, &[]);

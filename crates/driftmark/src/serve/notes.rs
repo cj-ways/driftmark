@@ -1,134 +1,45 @@
 //! The notes routes: making, changing and listing notes, marking changes
 //! seen, and handing a review to an agent as a prompt or a review file.
 //!
-//! Every route reads or writes the notes file through [`NotesFile`], which
-//! opens it on first use. A page that only reads never makes the file: until
+//! Every route reads or writes the notes file through
+//! [`NotesFile`](super::placing::NotesFile), which opens it on first use. A page that only reads never makes the file: until
 //! the first note or seen mark, there is nothing to read. Every request with
 //! a body has already passed the same-origin JSON rule of `guard.rs`.
 //! `docs/features/commands/serve.md` ("Notes") is the contract.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use driftmark_core::document::Document;
-use driftmark_core::git::{GitError, GitRead, ObjectId, RepoPath, Snapshot};
-use driftmark_core::notes::packet::{self, Item, Round};
+use driftmark_core::git::{RepoPath, Snapshot};
+use driftmark_core::notes::packet::Round;
 use driftmark_core::notes::{
     Anchor, AnchorState, Ask, Note, Outcome, Placement, ReplyStance, Role, Side, Stance, Target,
     locate_text,
 };
-use driftmark_core::rules::Rules;
-use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 
-use super::address::{self, Revision};
+use super::address;
 use super::app::App;
-use super::cache::RulesId;
-use super::compare::{self, RulesAt};
 use super::page;
-use super::repo::{Problem, Repo};
-use crate::notes::{self, Act, NewNote, NoteEdit, Review, Scope, Store, StoreError};
+use super::placing::{
+    Failure, MAX_TEXT, NoteJson, Packet, PlacedJson, Placements, Version, caused_in, document_path,
+    placed, range, revision, version_at, version_on,
+};
+use super::repo::Repo;
+use crate::notes::{Act, NewNote, NoteEdit, Review, Scope, Store, StoreError};
 
 /// The version of the notes routes' JSON.
 pub(crate) const SCHEMA_VERSION: u32 = 1;
 
-/// The longest note text, reply or summary, in bytes.
-const MAX_TEXT: usize = 20_000;
-
 /// The longest quote, in bytes of source. A note sits on a sentence or a
 /// few; a longer selection is refused so every search stays fast.
 const MAX_QUOTE: usize = 20_000;
-
-/// The notes file of the repository the server reads, opened on first use.
-pub(crate) struct NotesFile {
-    /// Where the file is.
-    path: PathBuf,
-    /// Where review files go.
-    reviews: PathBuf,
-    /// The reader's name, for notes, replies and seen marks.
-    pub reader: String,
-    /// The open file, once opened.
-    open: Mutex<Option<Arc<Store>>>,
-    /// Where notes were found before.
-    placements: Placements,
-}
-
-impl NotesFile {
-    /// The notes file at `path`, with review files in `reviews`.
-    pub(crate) fn new(path: PathBuf, reviews: PathBuf, reader: String) -> NotesFile {
-        NotesFile {
-            path,
-            reviews,
-            reader,
-            open: Mutex::new(None),
-            placements: Placements::new(),
-        }
-    }
-
-    /// Where the file is.
-    pub(crate) fn path(&self) -> &std::path::Path {
-        &self.path
-    }
-
-    /// The file, opened and made when needed.
-    fn store(&self) -> Result<Arc<Store>, StoreError> {
-        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(store) = open.as_ref() {
-            return Ok(Arc::clone(store));
-        }
-        let store = Arc::new(Store::open(&self.path)?);
-        *open = Some(Arc::clone(&store));
-        Ok(store)
-    }
-
-    /// The file when it exists; `None` when no note was ever made, so a read
-    /// makes nothing.
-    fn existing(&self) -> Result<Option<Arc<Store>>, StoreError> {
-        let opened = self
-            .open
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_some();
-        if opened || self.path.exists() {
-            self.store().map(Some)
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// How many notes are on a document, for its page; `None` when the file
-    /// cannot be read.
-    pub(crate) fn count_on(&self, path: &RepoPath) -> Option<usize> {
-        match self.existing() {
-            Ok(Some(store)) => store.count_on(&path.to_lossy()).ok(),
-            Ok(None) => Some(0),
-            Err(_) => None,
-        }
-    }
-
-    /// How many notes are on any of these documents; `None` when the file
-    /// cannot be read.
-    pub(crate) fn count_on_any(&self, paths: &HashSet<String>) -> Option<usize> {
-        match self.existing() {
-            Ok(Some(store)) => store.notes_on_any(paths).ok().map(|notes| notes.len()),
-            Ok(None) => Some(0),
-            Err(_) => None,
-        }
-    }
-
-    /// Which of these changes the reader marked seen.
-    pub(crate) fn seen(&self, keys: &[String]) -> HashSet<String> {
-        match self.existing() {
-            Ok(Some(store)) => store.seen(&self.reader, keys).unwrap_or_default(),
-            _ => HashSet::new(),
-        }
-    }
-}
 
 // ---- answers ------------------------------------------------------------------
 
@@ -158,55 +69,9 @@ fn problem(status: StatusCode, message: &str) -> Response {
     json(status, &Error { error: message })
 }
 
-/// Why a notes request failed.
-struct Failure {
-    status: StatusCode,
-    message: String,
-}
-
 impl Failure {
-    fn bad(message: impl Into<String>) -> Failure {
-        Failure {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
-        }
-    }
-
     fn answer(&self) -> Response {
         problem(self.status, &self.message)
-    }
-}
-
-impl From<StoreError> for Failure {
-    fn from(error: StoreError) -> Failure {
-        let status = match &error {
-            StoreError::NoNote(_) | StoreError::NoReview(_) => StatusCode::NOT_FOUND,
-            StoreError::Refused(_) => StatusCode::CONFLICT,
-            StoreError::File(_) | StoreError::Newer { .. } => StatusCode::SERVICE_UNAVAILABLE,
-        };
-        Failure {
-            status,
-            message: error.to_string(),
-        }
-    }
-}
-
-impl From<Problem> for Failure {
-    fn from(problem: Problem) -> Failure {
-        Failure {
-            status: if problem.missing {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            },
-            message: problem.message,
-        }
-    }
-}
-
-impl From<address::BadAddress> for Failure {
-    fn from(bad: address::BadAddress) -> Failure {
-        Failure::bad(bad.0)
     }
 }
 
@@ -237,28 +102,6 @@ fn checked_text(name: &str, text: &str) -> Result<(), Failure> {
 
 // ---- reading what the routes name ---------------------------------------------
 
-/// Escapes `%`, so text from JSON reads back as itself through the address
-/// rules, which decode `%XX`.
-const PERCENT: &AsciiSet = &CONTROLS.add(b'%');
-
-fn revision(text: &str) -> Result<Revision, Failure> {
-    Ok(address::revision(
-        &utf8_percent_encode(text, PERCENT).to_string(),
-    )?)
-}
-
-fn range(text: &str) -> Result<address::RangeAddress, Failure> {
-    Ok(address::range(
-        &utf8_percent_encode(text, PERCENT).to_string(),
-    )?)
-}
-
-fn document_path(text: &str) -> Result<RepoPath, Failure> {
-    Ok(address::document_path(
-        &utf8_percent_encode(text, PERCENT).to_string(),
-    )?)
-}
-
 /// The query of a request as name and value pairs, form-decoded.
 fn query(uri: &Uri) -> HashMap<String, String> {
     let mut out = HashMap::new();
@@ -274,211 +117,6 @@ fn query(uri: &Uri) -> HashMap<String, String> {
         }
     }
     out
-}
-
-/// One version of a document, parsed, with the id of its bytes.
-struct Version {
-    /// The commit, or `None` for the working tree.
-    commit: Option<ObjectId>,
-    /// The blob id of its bytes.
-    blob: String,
-    /// The parsed document.
-    document: Arc<Document>,
-}
-
-/// A document at a revision.
-fn version_at(repo: &Repo, revision: &Revision, path: &RepoPath) -> Result<Version, Failure> {
-    let found = repo.document_at(revision, path)?;
-    let document = match found.parsed.as_ref() {
-        Ok(document) => Arc::new(document.clone()),
-        Err(error) => {
-            return Err(Failure {
-                status: StatusCode::UNPROCESSABLE_ENTITY,
-                message: format!("`{}` cannot be read: {error}", path.to_lossy()),
-            });
-        }
-    };
-    let blob = found.blob.as_ref().map_or_else(
-        || notes::blob_id(document.source.as_bytes()),
-        |blob| blob.as_hex().to_owned(),
-    );
-    Ok(Version {
-        commit: found.commit,
-        blob,
-        document,
-    })
-}
-
-/// A document at one side of a range, or `None` when it is not there.
-fn version_on(repo: &Repo, side: &Snapshot, path: &RepoPath) -> Result<Option<Version>, Failure> {
-    let revision = match side {
-        Snapshot::Commit(commit) => Revision::Name(commit.as_hex().to_owned()),
-        Snapshot::Worktree => Revision::Worktree,
-    };
-    match version_at(repo, &revision, path) {
-        Ok(version) => Ok(Some(version)),
-        Err(failure) if failure.status == StatusCode::NOT_FOUND => Ok(None),
-        Err(failure) => Err(failure),
-    }
-}
-
-/// The rules for reading old versions: only their blocks matter.
-fn plain_rules() -> RulesAt {
-    RulesAt {
-        id: RulesId::Default,
-        rules: Rules::default(),
-    }
-}
-
-/// The version a note was made on, by its blob id: from git, or from the
-/// notes file when git never held it.
-fn old_version(repo: &Repo, store: &Store, blob: &str) -> Option<Arc<Document>> {
-    if let Some(id) = ObjectId::from_hex(blob) {
-        match compare::document(&repo.git, &repo.cache, &id, &plain_rules()) {
-            Ok(parsed) => return parsed.as_ref().as_ref().ok().map(|d| Arc::new(d.clone())),
-            Err(GitError::MissingObject { .. } | GitError::WrongKind { .. }) => {}
-            Err(_) => return None,
-        }
-    }
-    let bytes = store.version(blob).ok().flatten()?;
-    Document::parse(bytes).ok().map(Arc::new)
-}
-
-// ---- notes as JSON ---------------------------------------------------------------
-
-/// Where a note sits on the page that asked.
-#[derive(Serialize)]
-struct PlacedJson {
-    /// `reading`, `new` or `old`: the side of the page it sits on.
-    side: Side,
-    state: AnchorState,
-    start: Option<usize>,
-    end: Option<usize>,
-    score: f64,
-    block: Option<usize>,
-    /// The 1-based first and last line.
-    lines: Option<[usize; 2]>,
-    /// The source text there, when it is not the quote.
-    text: Option<String>,
-}
-
-impl PlacedJson {
-    fn new(side: Side, placement: &Placement, document: &Document, quote: &str) -> PlacedJson {
-        let range = placement.range.clone();
-        let text = range
-            .as_ref()
-            .map(|range| &document.source[range.clone()])
-            .filter(|text| *text != quote)
-            .map(str::to_owned);
-        PlacedJson {
-            side,
-            state: placement.state,
-            start: range.as_ref().map(|range| range.start),
-            end: range.as_ref().map(|range| range.end),
-            score: placement.score,
-            block: placement.block,
-            lines: range.as_ref().map(|range| {
-                let (first, last) = packet::lines(&document.source, range);
-                [first, last]
-            }),
-            text,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct NoteJson {
-    #[serde(flatten)]
-    note: Note,
-    /// Where it sits on this page; `null` when it is not looked for here,
-    /// such as a note on the old side of a change seen from a reading page.
-    placement: Option<PlacedJson>,
-}
-
-/// Places notes on one version and pairs each with its placement.
-fn placed(
-    repo: &Repo,
-    store: &Store,
-    cache: &Placements,
-    notes: &[Note],
-    version: &Version,
-    side: Side,
-) -> Vec<(Placement, PlacedJson)> {
-    let known: Vec<Option<Placement>> = notes
-        .iter()
-        .map(|note| cache.get(note.id, &version.blob))
-        .collect();
-    let missing: Vec<Note> = notes
-        .iter()
-        .zip(&known)
-        .filter(|(_, known)| known.is_none())
-        .map(|(note, _)| note.clone())
-        .collect();
-    let mut fresh = notes::place(&missing, &version.document, &version.blob, |blob| {
-        old_version(repo, store, blob)
-    })
-    .into_iter();
-    let placements: Vec<Placement> = notes
-        .iter()
-        .zip(known)
-        .map(|(note, known)| {
-            known.unwrap_or_else(|| {
-                let placement = fresh.next().unwrap_or_else(lost);
-                cache.put(note.id, &version.blob, placement.clone());
-                placement
-            })
-        })
-        .collect();
-    placements
-        .into_iter()
-        .zip(notes)
-        .map(|(placement, note)| {
-            let json = PlacedJson::new(
-                side,
-                &placement,
-                &version.document,
-                &note.target.anchor.quote.exact,
-            );
-            (placement, json)
-        })
-        .collect()
-}
-
-/// A placement that says the note was not found.
-fn lost() -> Placement {
-    Placement {
-        state: AnchorState::Orphaned,
-        range: None,
-        score: 0.0,
-        block: None,
-    }
-}
-
-/// Where notes were found before, by note and version. A note's target
-/// never changes, and neither do a version's bytes, so a page opened again
-/// re-anchors nothing.
-pub(crate) struct Placements(Mutex<HashMap<(u64, String), Placement>>);
-
-impl Placements {
-    /// The most placements kept; past it, the memory starts again empty.
-    const MOST: usize = 50_000;
-
-    fn new() -> Placements {
-        Placements(Mutex::new(HashMap::new()))
-    }
-
-    fn get(&self, note: u64, version: &str) -> Option<Placement> {
-        let kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        kept.get(&(note, version.to_owned())).cloned()
-    }
-
-    fn put(&self, note: u64, version: &str, placement: Placement) {
-        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if kept.len() >= Self::MOST {
-            kept.clear();
-        }
-        kept.insert((note, version.to_owned()), placement);
-    }
 }
 
 // ---- GET /api/notes ----------------------------------------------------------
@@ -551,10 +189,7 @@ fn list_of(app: &App, params: &HashMap<String, String>) -> Result<ListJson, Fail
         list.notes = store
             .notes_in(id)?
             .into_iter()
-            .map(|note| NoteJson {
-                note,
-                placement: None,
-            })
+            .map(|note| NoteJson::new(note, None))
             .collect();
         return Ok(list);
     }
@@ -634,14 +269,8 @@ fn on_document(
     let mut notes: Vec<NoteJson> = rest
         .into_iter()
         .zip(found)
-        .map(|(note, (_, json))| NoteJson {
-            note,
-            placement: Some(json),
-        })
-        .chain(old.into_iter().map(|note| NoteJson {
-            note,
-            placement: None,
-        }))
+        .map(|(note, (_, json))| NoteJson::new(note, Some(json)))
+        .chain(old.into_iter().map(|note| NoteJson::new(note, None)))
         .collect();
     notes.sort_by_key(|entry| entry.note.id);
     Ok(notes)
@@ -698,7 +327,7 @@ fn on_range(
             None => old_side.iter().map(|_| None).collect(),
         };
         for (note, placement) in old_side.into_iter().zip(on_base) {
-            out.push(NoteJson { note, placement });
+            out.push(NoteJson::new(note, placement));
         }
         let on_head: Vec<Option<(Placement, PlacedJson)>> = match &head {
             Some(head) => placed(repo, store, cache, &new_side, head, Side::New)
@@ -729,10 +358,15 @@ fn on_range(
                 None
             };
             let placement = from_base.or(fresh).map(|(_, json)| json);
-            out.push(NoteJson { note, placement });
+            out.push(NoteJson::new(note, placement));
         }
     }
     out.sort_by_key(|entry| entry.note.id);
+    let notes: Vec<Note> = out.iter().map(|entry| entry.note.clone()).collect();
+    let mut caused = caused_in(repo, &resolved, &notes);
+    for entry in &mut out {
+        entry.caused = Some(caused.remove(&entry.note.id).unwrap_or_default());
+    }
     Ok(out)
 }
 
@@ -844,7 +478,7 @@ fn make(app: &App, bytes: &[u8]) -> Result<NoteJson, Failure> {
         side,
     );
     let placement = found.pop().map(|(_, json)| json);
-    Ok(NoteJson { note, placement })
+    Ok(NoteJson::new(note, placement))
 }
 
 /// The review, the version and the side a new note belongs to: a reading
@@ -941,10 +575,7 @@ pub(crate) async fn one(State(app): State<Arc<App>>, Path(id): Path<String>) -> 
             StatusCode::OK,
             &OneJson {
                 schema_version: SCHEMA_VERSION,
-                note: NoteJson {
-                    note,
-                    placement: None,
-                },
+                note: NoteJson::new(note, None),
             },
         ),
         Err(failure) => failure.answer(),
@@ -1088,10 +719,7 @@ async fn act_on(app: Arc<App>, id: String, action: String, bytes: Bytes) -> Resp
             StatusCode::OK,
             &OneJson {
                 schema_version: SCHEMA_VERSION,
-                note: NoteJson {
-                    note,
-                    placement: None,
-                },
+                note: NoteJson::new(note, None),
             },
         ),
         Err(failure) => failure.answer(),
@@ -1200,40 +828,15 @@ fn hand_over(app: &App, id: &str, kind: &str, bytes: &[u8]) -> Result<HandOffJso
         }
     };
     let store = app.notes.existing()?.ok_or(StoreError::NoReview(id))?;
-    let review = store.review(id)?;
-    let notes: Vec<Note> = store
-        .notes_in(id)?
-        .into_iter()
-        .filter(|note| round.includes(note))
-        .collect();
-    let edited = edited_side(app, &review)?;
-    let at = match &edited {
-        Snapshot::Commit(commit) => commit.as_hex()[..7].to_owned(),
-        Snapshot::Worktree => address::WORKTREE.to_owned(),
-    };
-    let found = places(app, &store, &notes, &edited)?;
-    let items: Vec<Item<'_>> = notes
-        .iter()
-        .zip(&found)
-        .map(|(note, place)| Item {
-            note,
-            placement: place.placement.as_ref(),
-            lines: place.lines,
-            current: place.current.as_deref(),
-        })
-        .collect();
-    let packet_review = packet::Review {
-        id,
-        scope: review.scope.text(),
-        at: &at,
-    };
+    let packet = Packet::of(&app.repo, &store, &app.notes.placements, id, round)?;
     let (text, file) = if kind == "prompt" {
-        (packet::prompt(&packet_review, &items, round), None)
+        (packet.prompt(), None)
     } else {
-        let text = packet::review_file(&packet_review, &items, round, &page::utc(page::now()));
+        let text = packet.file(&page::utc(page::now()));
         let file = write_review(&app.notes.reviews, id, &text)?;
         (text, Some(file))
     };
+    let Packet { review, notes, .. } = packet;
     let mut sent = Vec::new();
     if round == Round::Discuss {
         for note in &notes {
@@ -1258,87 +861,6 @@ fn hand_over(app: &App, id: &str, kind: &str, bytes: &[u8]) -> Result<HandOffJso
         text,
         file,
     })
-}
-
-/// Where a note of a packet sits in the version an agent will edit.
-struct Place {
-    placement: Option<Placement>,
-    lines: Option<(usize, usize)>,
-    current: Option<String>,
-}
-
-/// The version an agent will edit for a review: the range's newer side, or
-/// the working tree (`HEAD` in a bare repository) for a document's review.
-fn edited_side(app: &App, review: &Review) -> Result<Snapshot, Failure> {
-    Ok(match &review.scope {
-        Scope::Range(label) => app.repo.resolve(&range(label)?)?.head,
-        Scope::Document(_) if app.repo.git.workdir().is_some() => Snapshot::Worktree,
-        Scope::Document(_) => {
-            Snapshot::Commit(app.repo.git.resolve("HEAD").map_err(Problem::from)?)
-        }
-    })
-}
-
-/// Each note found again in the edited version. A note on the old side of a
-/// change keeps its own lines, at the version it was made on.
-fn places(
-    app: &App,
-    store: &Store,
-    notes: &[Note],
-    edited: &Snapshot,
-) -> Result<Vec<Place>, Failure> {
-    let mut versions: HashMap<String, Option<Version>> = HashMap::new();
-    let mut found = Vec::new();
-    for note in notes {
-        if note.target.side == Side::Old {
-            let lines = old_version(&app.repo, store, &note.target.blob).map(|old| {
-                packet::lines(
-                    &old.source,
-                    &(note.target.anchor.start..note.target.anchor.end),
-                )
-            });
-            found.push(Place {
-                placement: None,
-                lines,
-                current: None,
-            });
-            continue;
-        }
-        let path = note.target.path.clone();
-        if !versions.contains_key(&path) {
-            let version = match RepoPath::new(path.as_bytes()) {
-                Some(repo_path) => version_on(&app.repo, edited, &repo_path)?,
-                None => None,
-            };
-            versions.insert(path.clone(), version);
-        }
-        let place = match versions.get(&path).and_then(Option::as_ref) {
-            Some(version) => {
-                let (placement, json) = placed(
-                    &app.repo,
-                    store,
-                    &app.notes.placements,
-                    std::slice::from_ref(note),
-                    version,
-                    Side::New,
-                )
-                .pop()
-                .ok_or_else(|| Failure::bad("a note could not be placed"))?;
-                Place {
-                    placement: Some(placement),
-                    lines: json.lines.map(|[first, last]| (first, last)),
-                    current: json.text,
-                }
-            }
-            None => Place {
-                placement: Some(lost()),
-                lines: None,
-                current: None,
-            },
-        };
-        found.push(place);
-    }
-    Ok(found)
 }
 
 /// Writes a review file as `r<number>.md` in `folder`, whole or not at all,

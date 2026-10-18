@@ -5,13 +5,13 @@ date: 2026-10-18
 
 # The MCP connector
 
-> Short version: `driftmark mcp` is the same program, started by an agent such as Claude Code, Codex or Cursor. It answers over MCP (the Model Context Protocol) on standard input and output. Five tools let the agent see what changed in the docs between two git points, read one document's changes, read a document or one section of it, search every document, and run the writing check. Every answer is JSON, holds at most 16,000 characters unless the call asks for up to 40,000, and says what it cut and how to ask for the rest. The connector reads only through git and the repository's files, never writes a document, and runs no program but git. `driftmark mcp install` adds it to a repository's `.mcp.json`.
+> Short version: `driftmark mcp` is the same program, started by an agent such as Claude Code, Codex or Cursor. It answers over MCP (the Model Context Protocol) on standard input and output. Five tools let the agent see what changed in the docs between two git points, read one document's changes, read a document or one section of it, search every document, and run the writing check. Six more close the notes loop: the agent lists and reads the reader's notes, answers them, proposes a decision, and records the commits that applied one; only the reader decides. Every answer is JSON, holds at most 16,000 characters unless the call asks for up to 40,000, and says what it cut and how to ask for the rest. The connector reads only through git and the repository's files, never writes a document, writes only to the notes file `driftmark serve` keeps, and runs no program but git. `driftmark mcp install` adds it to a repository's `.mcp.json`.
 
 ## Running it
 
 ```text
 driftmark mcp [--repo <path>] [--base <branch>]
-driftmark mcp install [--write]
+driftmark mcp install [--write] [--notes-line]
 ```
 
 | Option | Meaning |
@@ -64,6 +64,14 @@ Set `cache.size` in megabytes. The default keeps 500 pages.
 
 The branch `feature` accepts the decision, as change-list.md shows it after its change, and adds the note `docs/notes/cache-sizes.md`. `origin/main` points at `main`, so `main` is where `auto` compares from. The checkout is on `feature`, and one edit is not committed yet: a code block without a language at the end of the guide.
 
+The note tools' examples come after the reader, Ana, wrote three notes in `driftmark serve`:
+
+1. On the change page of `main...feature`, on the words "for 90 minutes" of the decision: disagree, change it, blocking. "Phones keep pages longer than that; ten minutes is enough." It starts review `r1`, the range's.
+2. On the guide's reading page, in the working tree, on "The default keeps 500 pages.": a question, explain it. "Is 500 enough for a phone?" It starts review `r2`, the guide's.
+3. On the same change page, on the whole block "Never cache a page with open notes.": a suggestion, change it. "Say when such a page may be cached again." Ana decided it: change it, "Cache the page again once all its notes are closed."
+
+Then an agent applied note 3 in one more commit on `feature`, `ade8121`, which adds "; cache it again once they are all closed" to that sentence.
+
 ## Tools
 
 Each tool takes its arguments as one JSON object. A call with an argument the tool does not take, a value of the wrong kind or a missing required argument is refused with a sentence that names the fix (see "Errors"). Every tool also takes `max_chars` (see "Size limits").
@@ -75,8 +83,14 @@ Each tool takes its arguments as one JSON object. A call with an argument the to
 | `document_read` | One document at a revision: metadata, outline and text, whole or for one section. |
 | `search` | The documents that hold every word of a query, best first, with snippets. |
 | `lint` | The writing check on given files and folders, or on the files changed since the last commit. |
+| `notes_list` | The reader's notes, filtered, each in a few fields. |
+| `note_get` | One note in full: where its words are now, the section around them, the thread and the decision. |
+| `review_get` | One round of a review as the prompt "Copy as prompt" gives. |
+| `note_reply` | The agent's reply to a note, with its stance. |
+| `note_propose_decision` | The agent's proposal for a note: change, modify or keep, with a summary. |
+| `note_mark_applied` | The commits that applied a decided note. |
 
-Every tool only reads. The tool list says so to the client: each tool carries `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true` and `openWorldHint: false`.
+The first eight tools only read. The last three write to the notes file, and to nothing else. The tool list says so to the client: a tool that only reads carries `readOnlyHint: true` and `idempotentHint: true`; the three that write carry `readOnlyHint: false` and `idempotentHint: false`, because each call adds a reply, a proposal or a commit. Every tool carries `destructiveHint: false` and `openWorldHint: false`.
 
 ### `changes_summary`
 
@@ -580,13 +594,469 @@ It answers:
 }
 ```
 
+### `notes_list`
+
+The reader's notes, oldest first. The notes live in the notes file of `driftmark serve` (`docs/features/notes.md`, "Where notes live"), so a note the reader saves on a page is in the list at once.
+
+| Argument | Meaning |
+|---|---|
+| `path` | Only the notes on this document, from the repository root. |
+| `review` | Only the notes of this review, as `3` or `"r3"`. |
+| `status` | Only notes with these statuses, one or a list: `open`, `sent`, `answered`, `discussing`, `decided`, `applied`, `closed`, `withdrawn`, or `"all"`. The default is the five still in the loop: `open` to `decided`. |
+| `stance` | Only notes whose reader's stance is one of these: `agree`, `disagree`, `question`, `suggestion`. |
+| `blocking` | `true` for only the notes that block the work, `false` for only those that do not. |
+| `offset` | How many notes to skip. The default is 0. |
+| `limit` | The most notes to list, from 1 to 500. The default is 50: each costs about 200 tokens. |
+
+The answer, with `schema_version` 1, holds the `statuses` it listed, the number of notes that match (`total`), the `notes`, the `reviews` they belong to, `page`, and `cut` when cut. Each note has:
+
+| Field | Meaning |
+|---|---|
+| `id`, `review` | The note's number and its review's, shown elsewhere as `n12` and `r3`. |
+| `path`, `under`, `side` | The document, the headings above the quote, and where the note was made: `reading`, or `old` or `new` on a change page. |
+| `status`, `stance`, `ask`, `blocking` | As in the notes model (`docs/features/engine/notes-model.md`). |
+| `quote`, `body` | The quoted source and the reader's point, cut to 160 and 240 characters with `…`. |
+| `replies` | How many replies the thread holds. |
+| `proposal`, `decision` | The outcome an agent proposed and the one the reader decided, or `null`. |
+| `applied` | How many commits applied it. |
+| `author`, `updated_at` | Who wrote it, and when it last changed, in seconds since 1970 UTC. |
+
+A repository without a notes file answers with no notes, and the call makes no file.
+
+Call `notes_list` with:
+
+```json
+{}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "statuses": ["open", "sent", "answered", "discussing", "decided"],
+  "total": 3,
+  "notes": [
+    {
+      "id": 1,
+      "review": 1,
+      "path": "docs/decisions/0002-cache-rendered-pages.md",
+      "under": ["Cache rendered pages", "Decision"],
+      "side": "new",
+      "status": "open",
+      "stance": "disagree",
+      "ask": "change",
+      "blocking": true,
+      "quote": "for 90 minutes",
+      "body": "Phones keep pages longer than that; ten minutes is enough.",
+      "replies": 0,
+      "proposal": null,
+      "decision": null,
+      "applied": 0,
+      "author": "Ana",
+      "updated_at": 1792357491
+    },
+    {
+      "id": 2,
+      "review": 2,
+      "path": "docs/guide.md",
+      "under": ["Cache guide", "Configure"],
+      "side": "reading",
+      "status": "open",
+      "stance": "question",
+      "ask": "explain",
+      "blocking": false,
+      "quote": "The default keeps 500 pages.",
+      "body": "Is 500 enough for a phone?",
+      "replies": 0,
+      "proposal": null,
+      "decision": null,
+      "applied": 0,
+      "author": "Ana",
+      "updated_at": 1792357491
+    },
+    {
+      "id": 3,
+      "review": 1,
+      "path": "docs/decisions/0002-cache-rendered-pages.md",
+      "under": ["Cache rendered pages", "Decision"],
+      "side": "new",
+      "status": "decided",
+      "stance": "suggestion",
+      "ask": "change",
+      "blocking": false,
+      "quote": "Never cache a page with open notes.",
+      "body": "Say when such a page may be cached again.",
+      "replies": 0,
+      "proposal": null,
+      "decision": "change",
+      "applied": 0,
+      "author": "Ana",
+      "updated_at": 1792357491
+    }
+  ],
+  "reviews": [
+    {"id": 1, "kind": "range", "scope": "main...feature"},
+    {"id": 2, "kind": "document", "scope": "docs/guide.md"}
+  ],
+  "page": {"offset": 0, "shown": 3, "total": 3}
+}
+```
+
+### `note_get`
+
+One note in full.
+
+| Argument | Meaning |
+|---|---|
+| `note` | The note, as `12` or `"n12"`. Required. |
+
+The answer, with `schema_version` 1:
+
+| Field | Meaning |
+|---|---|
+| `note` | The whole note, in the JSON of the notes model: its target with the quote and its context, the reader's point, the thread, the proposal, the decision and the commits. |
+| `review` | Its review: `id`, `kind` (`range` or `document`) and `scope`. |
+| `made_on` | The version it was made on: the commit, or `worktree`, and the quote's first and last line there. `lines` is `null` when that version can no longer be read. |
+| `now` | Where its words are in the version an agent edits: the range's newer side for a range's review, the working tree for a document's (`HEAD` in a bare repository). `revision` names that version; `state` is `exact`, `moved`, `fuzzy`, `outdated` or `orphaned`; then the bytes, the lines, the `score`, and `text` when the words there are not the quote. A note on the old side of a change stays on the version it was made on. |
+| `section` | The section around the words now, from the document's outline, or around where the note was made when the words are gone: its heading path, anchor, lines, the `revision` it was read at, and its text. Left out for words before the first heading. |
+| `cut` | When the thread or the section's text was cut. |
+
+The note, its point and its quote are never cut. The thread loses its oldest replies first, then the section's text is cut after a whole line, and `cut.reason` says how to read the rest: a larger `max_chars`, or `document_read` with the section's arguments.
+
+Call `note_get` with:
+
+```json
+{"note": "n1"}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "note": {
+    "id": 1,
+    "review": 1,
+    "target": {
+      "path": "docs/decisions/0002-cache-rendered-pages.md",
+      "commit": "59f1a26ed292405ee4ef67182b681d68723d2726",
+      "blob": "19785f875d9853a6e8f6d139a449a450a3fc792e",
+      "side": "new",
+      "start": 100,
+      "end": 114,
+      "quote": {
+        "exact": "for 90 minutes",
+        "prefix": "each rendered page in the cache ",
+        "suffix": ".\n\nNever cache a page with open "
+      },
+      "heading_path": ["Cache rendered pages", "Decision"],
+      "block": 3,
+      "block_hash": "70d4eebe423e1f3a"
+    },
+    "stance": "disagree",
+    "ask": "change",
+    "blocking": true,
+    "body": "Phones keep pages longer than that; ten minutes is enough.",
+    "status": "open",
+    "thread": [],
+    "proposal": null,
+    "decision": null,
+    "applied": [],
+    "author": "Ana",
+    "created_at": 1792357491,
+    "updated_at": 1792357491
+  },
+  "review": {"id": 1, "kind": "range", "scope": "main...feature"},
+  "made_on": {"revision": "59f1a26ed292405ee4ef67182b681d68723d2726", "lines": [9, 9]},
+  "now": {
+    "revision": "ade8121417a03fc26c0fe008fd79476a4bdfc35e",
+    "state": "exact",
+    "start": 100,
+    "end": 114,
+    "lines": [9, 9],
+    "score": 1.0
+  },
+  "section": {
+    "path": ["Cache rendered pages", "Decision"],
+    "anchor": "decision",
+    "lines": [7, 11],
+    "revision": "ade8121417a03fc26c0fe008fd79476a4bdfc35e",
+    "text": "## Decision\n\nKeep each rendered page in the cache for 90 minutes.\n\nNever cache a page with open notes; cache it again once they are all closed."
+  }
+}
+```
+
+### `review_get`
+
+One round of a review, exactly as the reader's "Copy as prompt" button gives it: the prompt packet of the notes model, with every note placed in the version an agent edits. It changes nothing. The notes stay as they are until the agent answers them, while "Copy as prompt" marks open notes sent.
+
+| Argument | Meaning |
+|---|---|
+| `review` | The review, as `1` or `"r1"`. Required. |
+| `round` | `1` (the default): the notes under discussion, to answer. `2`: the decided notes, to apply. |
+| `offset` | The byte of the prompt to read on from, as a cut answer's `cut.next` gives it. |
+
+The answer, with `schema_version` 1, holds the `review`, the `round`, the `notes` the prompt holds, its size in `bytes`, the `text_range` it shows, the `text`, and `cut` when cut. A long prompt is cut after a whole line; its parts join into the whole prompt.
+
+Call `review_get` with:
+
+```json
+{"review": "r1"}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "review": {"id": 1, "kind": "range", "scope": "main...feature"},
+  "round": 1,
+  "notes": [1],
+  "bytes": 509,
+  "text_range": {"start": 0, "end": 509},
+  "text": "Review r1 · main...feature · 1 note · at ade8121\nRound 1: discuss only. For each note, say whether you agree, disagree or have a question, and why.\nDo not edit the documents yet. Answer each note with the note_reply tool, or write your answer on its \"Agent:\" line.\n\n## 1 · n1 · disagree · blocking · ask: change\nFile: docs/decisions/0002-cache-rendered-pages.md, line 9, under Cache rendered pages › Decision\n> for 90 minutes\nReader: Phones keep pages longer than that; ten minutes is enough.\nAgent:\n"
+}
+```
+
+### `note_reply`
+
+The agent's reply, added to the note's thread. The reader sees it on the note's card.
+
+| Argument | Meaning |
+|---|---|
+| `note` | The note. Required. |
+| `body` | The reply, at most 20,000 bytes. Required. |
+| `stance` | `agree` (the reader is right), `counter` (the text should stay, or something else is better), `question` (the agent asks back) or `proposal` (the agent says what to do). Required. |
+
+The note becomes `answered`; a decided note stays `decided`. The reply's `by` is the name the client gives itself in the MCP handshake, such as `claude-code`, or `agent` when it gives none. The answer holds the note in the short form of `notes_list`, the `reply`, and a `message` that says what happens next.
+
+Call `note_reply` with:
+
+```json
+{
+  "note": "n1",
+  "stance": "counter",
+  "body": "Ninety minutes matches the old server, so pages do not change under a reader."
+}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "note": {
+    "id": 1,
+    "review": 1,
+    "path": "docs/decisions/0002-cache-rendered-pages.md",
+    "under": ["Cache rendered pages", "Decision"],
+    "side": "new",
+    "status": "answered",
+    "stance": "disagree",
+    "ask": "change",
+    "blocking": true,
+    "quote": "for 90 minutes",
+    "body": "Phones keep pages longer than that; ten minutes is enough.",
+    "replies": 1,
+    "proposal": null,
+    "decision": null,
+    "applied": 0,
+    "author": "Ana",
+    "updated_at": 1792357491
+  },
+  "reply": {
+    "role": "agent",
+    "by": "claude-code",
+    "at": 1792357491,
+    "stance": "counter",
+    "body": "Ninety minutes matches the old server, so pages do not change under a reader."
+  },
+  "message": "Your reply is on n1, which is now answered. The reader sees it on the note's page and replies or decides there."
+}
+```
+
+### `note_propose_decision`
+
+The agent's proposal: what to do about the note. Only the reader decides, on the note's page, where the proposal fills in the decision form.
+
+| Argument | Meaning |
+|---|---|
+| `note` | The note. Required. |
+| `outcome` | `change` (change the text as the note asks), `modify` (change it another way) or `keep` (keep the text). Required. |
+| `summary` | Exactly what to do, at most 20,000 bytes, so it can be applied as written. Required. |
+
+The note becomes `answered`. A later proposal replaces an earlier one. A decided note takes no proposal.
+
+Call `note_propose_decision` with:
+
+```json
+{"note": "n1", "outcome": "modify", "summary": "Keep each rendered page in the cache for 30 minutes."}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "note": {
+    "id": 1,
+    "review": 1,
+    "path": "docs/decisions/0002-cache-rendered-pages.md",
+    "under": ["Cache rendered pages", "Decision"],
+    "side": "new",
+    "status": "answered",
+    "stance": "disagree",
+    "ask": "change",
+    "blocking": true,
+    "quote": "for 90 minutes",
+    "body": "Phones keep pages longer than that; ten minutes is enough.",
+    "replies": 1,
+    "proposal": "modify",
+    "decision": null,
+    "applied": 0,
+    "author": "Ana",
+    "updated_at": 1792357491
+  },
+  "proposal": {
+    "outcome": "modify",
+    "summary": "Keep each rendered page in the cache for 30 minutes.",
+    "by": "claude-code",
+    "at": 1792357491
+  },
+  "message": "Proposed for n1. Only the reader decides, on the note's page, where your proposal fills in the form; until then the note is answered. Apply it only once its status is decided."
+}
+```
+
+### `note_mark_applied`
+
+The commits that applied a decided note, after the agent edited the document as the decision says and committed.
+
+| Argument | Meaning |
+|---|---|
+| `note` | The note. Required. |
+| `commits` | The commit ids, 7 to 64 hex digits each, one or a list. Required. |
+
+The note must be `decided`. Each commit must name a commit in the repository, and must change the note's document compared with its first parent; the first commit of a history counts when it holds the document. The full ids are recorded, each once. The note becomes `applied`, and the change page of a range that holds the commits marks the changes they made as "Changed because of note n3" (`docs/features/pages.md`).
+
+Round 2 of review `r1` holds note 3 with its decision. The agent's commit is on `feature` already, so the prompt shows how the sentence reads now:
+
+Call `review_get` with:
+
+```json
+{"review": 1, "round": 2}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "review": {"id": 1, "kind": "range", "scope": "main...feature"},
+  "round": 2,
+  "notes": [3],
+  "bytes": 627,
+  "text_range": {"start": 0, "end": 627},
+  "text": "Review r1 · main...feature · 1 decided note · at ade8121\nRound 2: apply the decided notes. Change each document as its decision says, and nothing else.\nThen record each commit with the note_mark_applied tool, or write it on the note's \"Commit:\" line.\n\n## 1 · n3 · decided: change\nFile: docs/decisions/0002-cache-rendered-pages.md, line 11, under Cache rendered pages › Decision\n> Never cache a page with open notes.\nThe text changed after the note. It now reads:\n> Never cache a page with open notes\nReader: Say when such a page may be cached again.\nDecision: Cache the page again once all its notes are closed.\nCommit:\n"
+}
+```
+
+The agent applied it in `ade8121`:
+
+Call `note_mark_applied` with:
+
+```json
+{"note": 3, "commits": ["ade8121"]}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "note": {
+    "id": 3,
+    "review": 1,
+    "path": "docs/decisions/0002-cache-rendered-pages.md",
+    "under": ["Cache rendered pages", "Decision"],
+    "side": "new",
+    "status": "applied",
+    "stance": "suggestion",
+    "ask": "change",
+    "blocking": false,
+    "quote": "Never cache a page with open notes.",
+    "body": "Say when such a page may be cached again.",
+    "replies": 0,
+    "proposal": null,
+    "decision": "change",
+    "applied": 1,
+    "author": "Ana",
+    "updated_at": 1792357491
+  },
+  "applied": [
+    {
+      "commit": "ade8121417a03fc26c0fe008fd79476a4bdfc35e",
+      "by": "claude-code",
+      "at": 1792357491
+    }
+  ],
+  "message": "Recorded 1 commit on n3, which is now applied. The change page of its range marks the changes they made as \"changed because of n3\"."
+}
+```
+
+### What an agent may not do
+
+Only the reader decides a note, edits it or withdraws it, because the notes are the reader's own words and judgement (decision 0004). The connector has no tool for those three. A call to a tool whose name starts with `note` or `review` and that does not exist, such as `note_decide`, is answered with the protocol error of an unknown tool, and its sentence lists what an agent can do instead:
+
+```text
+driftmark has no tool `note_decide`. An agent lists and reads notes (notes_list, note_get, review_get), answers them (note_reply), suggests a decision (note_propose_decision) and records the commits that applied one (note_mark_applied). Deciding, editing and withdrawing a note are the reader's, on the note's page, because the notes are the reader's own words and judgement
+```
+
+No tool takes the reader's fields, a status or a decision as an argument, so an unknown argument such as `status` is refused as for any tool. The other refusals come from the loop's rules (`notes::next_status`), each in a sentence that says why and what to do instead:
+
+| The agent tries | The connector says |
+|---|---|
+| A proposal whose outcome is not change, modify or keep | `` `outcome` must be change, modify or keep; a proposal never decides, the reader does `` |
+| A proposal on a decided note | `n1 is decided already, so it takes no new proposal; apply the decision (review_get round 2), commit, then record the commits with note_mark_applied` |
+| Commits on a note that is not decided | `n1 is answered, not decided, so no commit can be recorded on it yet; only the reader decides, on the note's page. …` |
+| A commit that did not change the note's document | `` `…` did not change `docs/guide.md`, the document of the note: the file is the same as in its parent 1a2b3c4. Record only the commits that edited the document as the decision says `` |
+| Anything on an applied, closed or withdrawn note | `n3 is applied: its commits are recorded and its loop is over, so it cannot change`, and the same for `closed` and `withdrawn` with their reason |
+
+Call `note_mark_applied` with:
+
+```json
+{"note": "n1", "commits": ["ade8121"]}
+```
+
+It refuses:
+
+```text
+n1 is answered, not decided, so no commit can be recorded on it yet; only the reader decides, on the note's page. Suggest a decision with note_propose_decision and wait for the reader
+```
+
+Call `note_propose_decision` with:
+
+```json
+{"note": 3, "outcome": "keep", "summary": "Keep the sentence as it is."}
+```
+
+It refuses:
+
+```text
+n3 is applied: its commits are recorded and its loop is over, so it cannot change
+```
+
+The connector itself acts as the agent in every call. The store under it checks the role again: an agent's decision, edit, withdrawal or hand-over is refused there with "only the reader can do this", whatever path reaches it.
+
 ## Size limits
 
 Claude Code shows a warning when one tool answer passes 10,000 tokens. It saves a text answer longer than 50,000 characters to a file, and the agent sees only the file's name (code.claude.com/docs/en/mcp, "MCP output limits and warnings", read on 2026-10-18). So every answer has a limit.
 
 - **The limit** is 16,000 characters. The answers measured 2.0 to 2.7 characters a token with Claude's tokenizer (see below), so that is about 6,000 to 8,000 tokens, under the warning. A call may ask for another limit with `max_chars`, from 2,000 to 40,000. Characters are counted as Claude Code counts them, in UTF-16 units, so an emoji outside the basic plane counts two.
-- **Lists are cut.** `changes_summary`, `changes_document`, `search` and `lint` list as many items as fit, from `offset` on, and at most `limit`. Counts such as `totals`, `total` and `errors` always cover the whole list.
+- **Lists are cut.** `changes_summary`, `changes_document`, `search`, `lint` and `notes_list` list as many items as fit, from `offset` on, and at most `limit`. Counts such as `totals`, `total` and `errors` always cover the whole list.
 - **Text is cut after a whole line.** `document_read` keeps the outline to at most 40% of the limit, leaving out the deepest headings first, and gives the rest to the text. The text ends after the last whole line that fits. Only a single line longer than the room left is cut inside, at a character.
+- **A prompt is cut after a whole line.** `review_get` gives as much of the prompt as fits, and `cut.next` reads on from the byte where it stopped.
+- **A note keeps its own words.** `note_get` never cuts the note, its point or its quote. It leaves out the thread's oldest replies first, then cuts the section's text after a whole line, and says how to read the rest.
 - **One change too large to show** is shown without its texts: its blocks' `text`, its `edit` and a whole document's `source` are left out, and its kind, level, signals and places stay. The agent reads the lines with `document_read`.
 - **An answer that does not fit even so**, such as one whose range notes alone are longer than a small `max_chars`, is refused, with the size it needs.
 
@@ -687,6 +1157,8 @@ Run `driftmark mcp install --write` to add it, or add the same with Claude Code:
   claude mcp add --transport stdio --scope project driftmark -- driftmark mcp
 
 Claude Code asks once whether to start the servers in .mcp.json.
+
+Agents learn about the reader's notes from the `notes_list` tool. `driftmark mcp install --notes-line` shows a line that tells them to call it, for AGENTS.md or CLAUDE.md.
 ```
 
 `driftmark mcp install --write` adds it.
@@ -695,6 +1167,7 @@ Claude Code asks once whether to start the servers in .mcp.json.
 - **Other servers and keys stay**, in their order. The file is written back with its own indentation and line endings, and with a final line ending only if it had one, as `driftmark hook install` writes `.claude/settings.json` (`docs/features/lint.md`). The new file is written beside the old one and then moved over it.
 - **Running it twice adds nothing.** The second run says ``.mcp.json already starts `driftmark mcp` as the server `driftmark`; nothing to add``. Any server whose command is `driftmark`, by any path, with `mcp` as its first argument counts.
 - **It refuses**, with exit code 1, leaving the file as it was, when the file is not valid JSON, its top level or its `mcpServers` is not an object, or another server is already named `driftmark`. A dry run refuses the same files.
+- **`--notes-line`** also shows, or with `--write` adds, the line of "Telling an agent there are notes" below.
 
 Claude Code asks once, in an interactive session, before it starts the servers of a project's `.mcp.json`. `claude -p` runs start them without asking. `driftmark` must be on the `PATH` that Claude Code sees. On Windows, an npm install puts a `driftmark.cmd` there, which a client may need to start as `cmd /c driftmark mcp`.
 
@@ -712,7 +1185,8 @@ Read on 2026-10-18 from each tool's documentation:
 - **It reads only through git and the repository's files.** Every document is read through the same git reader as `driftmark serve`: from the commit's tree, or, for the working tree, among the files git tracks or lists as not ignored, reached through real folders only. A symbolic link is never followed, so a link inside the repository cannot make the connector read a file outside it.
 - **No argument is a raw path outside the repository.** A path runs from the repository root, and must be a path git could store: no empty, `.` or `..` part. A path written from the root of the file system is accepted only when it lies inside the working tree, because agents often hold such paths; it is then read as the path from the repository root. Any other path is refused.
 - **The writing check reads no heading through a link.** Its link check sees file names in real folders. It counts a link that leads through a linked folder as there, without looking, and reads the headings of a linked file only when it is a regular file reached through real folders.
-- **It never writes a document**, and writes nothing at all to the repository. `driftmark mcp install --write` writes `.mcp.json`, and only when a person runs it.
+- **It never writes a document.** The three note tools that write add a reply, a proposal or commit ids to the notes file, `driftmark/notes.db` in the git common directory, which git never commits; nothing else. The tools that read never make that file. `driftmark mcp install --write` writes `.mcp.json`, and with `--notes-line` one line of `AGENTS.md` or `CLAUDE.md`, only when a person runs it.
+- **It acts as an agent, never as the reader.** Every note tool acts with the agent's role, so the loop's rules refuse a decision, an edit, a withdrawal or a hand-over (`docs/features/engine/notes-model.md`, "Statuses"). The name on its replies is the one the client gives in the MCP handshake.
 - **It runs no program but git.** gix reads the repository in the process; the `git` command is the fallback of `docs/features/engine/git-ranges.md`. The connector draws no diagram, so it never starts `d2`.
 - **It reaches nothing beyond the repository**: no network, and no file outside it.
 - **Standard output carries only protocol messages.** Messages for people, such as the git reader saying it switched to the `git` command, go to standard error, which Claude Code keeps in its log.
@@ -743,15 +1217,29 @@ It refuses:
 `docs/guide.md` has no heading with the anchor `usage`; its sections' anchors are: cache-guide, install, configure
 ```
 
-A tool name that does not exist is a protocol error, JSON-RPC code `-32602`: ``driftmark has no tool `nope` ``.
+A tool name that does not exist is a protocol error, JSON-RPC code `-32602`: ``driftmark has no tool `nope` ``. A name that starts with `note` or `review` gets the longer sentence of "What an agent may not do".
 
-## Notes, in wave 2
+## Telling an agent there are notes
 
-The note tools come once the notes store lands: `notes_list`, `note_get`, `review_get`, `note_reply`, `note_propose_decision` and `note_mark_applied`. Each is one more entry in the tool list of `crates/driftmark/src/mcp/tools.rs`, and the notes store joins the tools' shared context. The tools that write, such as `note_reply`, say so to the client: they are listed without `readOnlyHint`.
+An agent learns that notes wait for it in three ways:
+
+1. **The connector's instructions.** Every client shows the agent the server's instructions when the session starts. They say that the reader writes notes, that `notes_list` shows the open ones, and that only the reader decides.
+2. **`notes_list` itself.** Called with no arguments, it lists every note still in the loop, with the blocking ones marked. An agent that calls it before editing a document sees what the reader asked.
+3. **A line in the agent instruction file.** `driftmark mcp install --notes-line --write` adds one line at the end of `AGENTS.md`, or of `CLAUDE.md` when there is no `AGENTS.md`:
+
+   ```text
+   Reader's notes: the reader leaves notes on these documents with driftmark. Before you edit a document, call the driftmark tool `notes_list`; answer open notes with `note_reply`, change a document only for a note the reader decided, and record each commit with `note_mark_applied`.
+   ```
+
+   Without `--write` it only shows the line and the file. A file that already names `notes_list` gets nothing. A file that is a symbolic link is left alone, so nothing outside the repository is written; the line is shown to add by hand. The file keeps every byte it had and its own line endings, and the line comes after a blank line.
+
+A Claude Code `SessionStart` hook could tell the agent without any call, and is not built. Such a hook runs a command when a session starts, resumes, is cleared, compacted or forked, and Claude Code adds the command's plain standard output to the agent's context, up to 10,000 characters (code.claude.com/docs/en/hooks, read on 2026-10-18). A command such as `driftmark notes --hook claude-code` could print one factual line, as that documentation advises: how many notes are open, how many block the work, and in which reviews, such as "2 notes from the reader are open in review r1, 1 of them blocking; notes_list lists them." It would read the notes file only, print nothing when no note is open, and be installed the way `driftmark hook install` installs the lint hook.
 
 ## Not covered
 
-- **The notes loop** (wave 2, above).
 - **Other transports.** Only standard input and output; no HTTP.
 - **Resources and prompts.** The connector offers tools only.
 - **Paths that are not UTF-8.** A change list and the writing check name files as text, so such a file can be read but not always named back.
+- **Making a note.** An agent answers notes; it does not make them. A note sits on words the reader selected.
+- **An agent's own name.** Replies carry the client's name, such as `claude-code`, so two sessions of one client look alike on the page.
+- **The `SessionStart` hook** of "Telling an agent there are notes".

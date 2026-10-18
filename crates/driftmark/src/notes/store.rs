@@ -12,10 +12,10 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use driftmark_core::notes::{
-    Action, Anchor, Applied, Ask, Decision, Note, Outcome, Quote, Reply, ReplyStance, Role, Side,
-    Stance, Status, Target, next_status,
+    Action, Anchor, Applied, Ask, Decision, Note, Outcome, Quote, Refusal, Reply, ReplyStance,
+    Role, Side, Stance, Status, Target, next_status,
 };
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::Serialize;
 
 /// The schema version this program writes.
@@ -109,8 +109,8 @@ pub enum StoreError {
     NoNote(u64),
     /// No review has this number.
     NoReview(u64),
-    /// The loop does not allow the action.
-    Refused(String),
+    /// The loop does not allow the action, for this reason.
+    Refused(Refusal),
 }
 
 impl std::fmt::Display for StoreError {
@@ -123,7 +123,7 @@ impl std::fmt::Display for StoreError {
             ),
             StoreError::NoNote(id) => write!(f, "there is no note n{id}"),
             StoreError::NoReview(id) => write!(f, "there is no review r{id}"),
-            StoreError::Refused(message) => f.write_str(message),
+            StoreError::Refused(refusal) => write!(f, "{refusal}"),
         }
     }
 }
@@ -574,6 +574,15 @@ impl Store {
         found.pop().ok_or(StoreError::NoNote(id))
     }
 
+    /// Every note, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be read.
+    pub fn notes(&self) -> Result<Vec<Note>, StoreError> {
+        self.select("ORDER BY id", &[])
+    }
+
     /// The notes on one document, oldest first.
     ///
     /// # Errors
@@ -592,7 +601,7 @@ impl Store {
         if paths.is_empty() {
             return Ok(Vec::new());
         }
-        let all = self.select("ORDER BY id", &[])?;
+        let all = self.notes()?;
         Ok(all
             .into_iter()
             .filter(|note| paths.contains(&note.target.path))
@@ -695,6 +704,12 @@ impl Store {
     /// after it. The loop's rules decide whether it may
     /// (`driftmark_core::notes::next_status`).
     ///
+    /// The status is read and written in one transaction that holds the
+    /// file's write lock from its start. `serve` and `mcp` write the same
+    /// file, so a reader's decision and an agent's proposal can arrive at
+    /// once; each then sees the status the other left, and neither writes
+    /// over it.
+    ///
     /// # Errors
     ///
     /// [`StoreError::NoNote`], or [`StoreError::Refused`] with the reason.
@@ -706,22 +721,31 @@ impl Store {
         act: &Act,
         now: i64,
     ) -> Result<Note, StoreError> {
-        let note = self.note(id)?;
-        let status = next_status(note.status, who, act.action())
-            .map_err(|refusal| StoreError::Refused(refusal.to_string()))?;
         self.with(|connection| {
-            let transaction = connection.transaction()?;
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let key = number(id);
+            let current = transaction
+                .query_row(
+                    "SELECT status FROM notes WHERE id = ?1",
+                    params![key],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .ok_or(StoreError::NoNote(id))?;
+            let current = Status::from_name(&current)
+                .ok_or_else(|| StoreError::File(format!("unknown status `{current}`")))?;
+            let status = next_status(current, who, act.action()).map_err(StoreError::Refused)?;
             match act {
                 Act::Edit(edit) => {
                     transaction.execute(
-                        "UPDATE notes SET stance = ?2, ask = ?3, blocking = ?4, body = ?5 WHERE id = ?1",
+                        "UPDATE notes SET stance = COALESCE(?2, stance), ask = COALESCE(?3, ask), blocking = COALESCE(?4, blocking), body = COALESCE(?5, body) WHERE id = ?1",
                         params![
                             key,
-                            text_of(&edit.stance.unwrap_or(note.stance)),
-                            text_of(&edit.ask.unwrap_or(note.ask)),
-                            i64::from(edit.blocking.unwrap_or(note.blocking)),
-                            edit.body.as_deref().unwrap_or(&note.body),
+                            edit.stance.as_ref().map(text_of),
+                            edit.ask.as_ref().map(text_of),
+                            edit.blocking.map(i64::from),
+                            edit.body.as_deref(),
                         ],
                     )?;
                 }

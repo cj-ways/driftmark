@@ -517,6 +517,12 @@ dialog.dm-dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 .dm-thread li[data-role="agent"] strong::before { content: "↳ "; }
 .dm-proposal, .dm-decision, .dm-applied { padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--surface-2); }
 .dm-decision { border: 1px solid var(--accent); }
+.dm-caused-head { margin-top: 0.5rem; }
+.dm-caused { margin: 0 0 0.5rem; padding-left: 1.2rem; }
+.dm-caused li { margin: 0.15rem 0; }
+.dm-because { margin: 0.35rem 0 0.5rem; padding: 0.3rem 0.6rem; border-left: 4px solid var(--note-line); background: var(--note-bg); font-size: 0.9375rem; font-weight: 600; color: var(--text); }
+.dm-because::before { content: "↳ "; }
+li.change.is-caused { border-left-color: var(--note-line); }
 .dm-inline { margin-top: 0.6rem; }
 .dm-inline label { font-weight: 600; }
 

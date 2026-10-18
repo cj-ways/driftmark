@@ -36,6 +36,7 @@ pub(crate) const LINT: Tool = Tool {
     description: "Checks Markdown files against driftmark's writing rules (one # title, a summary, no skipped heading levels, closed code blocks with a language, Mermaid that draws, valid front matter, links and anchors that exist, and more) and the rules file's [lint] table. Without `paths`, it checks the Markdown files changed in the working tree since the last commit, new files included. Each finding has the file, line, column, severity, rule and a message that names the fix.",
     arguments,
     required: &[],
+    read_only: true,
     run,
 };
 

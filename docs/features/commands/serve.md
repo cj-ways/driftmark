@@ -391,7 +391,7 @@ The reader's notes and "Seen" marks (decision 0004; `docs/features/notes.md` say
 
 - **Where.** `driftmark/notes.db` in the git common directory, the folder `git rev-parse --git-common-dir` names: `.git` at the top of a clone, and the same folder for every linked worktree of it. Git never commits it. Deleting the clone deletes it.
 - **When.** The server opens it on the first note or seen mark, and makes it and its folder then. A page that only reads never makes it: until then the notes routes answer with no notes.
-- **Two programs at once.** It is SQLite in WAL mode, so `driftmark serve` and `driftmark mcp` can use it together; a writer waits up to five seconds for the other.
+- **Two programs at once.** It is SQLite in WAL mode, so `driftmark serve` and `driftmark mcp` use it together; a writer waits up to five seconds for the other. A change to a note reads its status and writes the new one in one transaction that holds the write lock from its start, so a reader's decision and an agent's proposal sent at the same moment never overwrite each other.
 - **Versions.** Its schema has a version, in SQLite's `user_version`, now 1. A newer driftmark adds a migration; an older one refuses a file it does not know, rather than change it, and the routes answer `503`.
 - **Review files** go to the `reviews` folder next to it, or to `--review-dir`.
 
@@ -465,6 +465,15 @@ The answer, for a made-up repository whose `main` holds `docs/cache.md` and whos
 | `range` | For a range: the range as written. |
 | `notes` | The notes, by number, each with its `placement`. |
 
+On a range's list, each note also has `caused`: the changes of the range that its applied commits made in its document, for the change page's "Changed because of note n12" (`docs/features/notes.md`). Each entry has the document's `path`, the change's `key` (its entry in its section's `data-keys`), its index in the document's change list (`change`) and the full `commit` that made it. A commit counts when the range's newer side holds it and its older side does not; for a range that ends in the working tree, `HEAD` holds it. The list is empty for a note without such commits, and the field is left out of a document's list and a review's.
+
+```json
+"caused": [
+  {"path": "docs/cache.md", "key": "3758a7f23af1f932", "change": 0,
+   "commit": "002e49be924b8b0c80a82294984befe1a2e09781"}
+]
+```
+
 The server keeps each note's placement per version in memory, up to 50,000 of them, so a page opened again re-anchors nothing. `placement` says where the note sits on this page, or is `null` when it is not looked for here: a note on the old side of a change, seen from a reading page, and every note listed by review.
 
 | Field | Meaning |
@@ -525,7 +534,7 @@ The note joins the review of its page: the document's, or the range's. A note on
 | `POST /api/notes/<n>/applied` | `{"commits": ["<id>", …]}` | The commits that applied a decided note, 7 to 64 hex digits each. |
 | `POST /api/notes/<n>/withdraw` | `{}` | The reader takes the note back. |
 
-`<n>` is the note's number, as `12` or `n12`. Each answers `{"schema_version": 1, "note": {…}}`. The loop's rules are the core's (`notes::next_status`): a change they refuse answers `409` with the reason, such as `the note is applied, so it cannot change`. An unknown note or action answers `404`. The server acts as the reader; an agent acts through the MCP connector.
+`<n>` is the note's number, as `12` or `n12`. Each answers `{"schema_version": 1, "note": {…}}`. The loop's rules are the core's (`notes::next_status`): a change they refuse answers `409` with the reason, such as `the note is applied, so it cannot change`. An unknown note or action answers `404`. The server acts as the reader; an agent acts through the MCP connector (`docs/features/commands/mcp.md`), whose `review_get` gives the same prompt as `POST /api/reviews/<r>/prompt`.
 
 ### Handing a review over
 

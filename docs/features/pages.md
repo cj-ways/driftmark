@@ -84,6 +84,8 @@ Every change is a card. Its first line says:
 - why it ranks there, in words, such as "in a decision section · a number or a name changed";
 - "Seen" and "Add a note", which work when the notes file can be read (`docs/features/notes.md`). "Seen" turns the card pale and dashed and counts it in the rail; "Add a note" notes the words selected in the card, or the whole changed block.
 
+When a note's applied commits made the change, a line under the first line says so: "↳ Changed because of note n12", with the note's number as a link to its card, on the note colour with a bar beside it. Several notes are joined: "note n3 and note n7". The note's own card lists "Changes it caused on this page", each a link back to its card. The words carry the meaning, so the mark never relies on its colour (`docs/features/notes.md`, "Changed because of a note").
+
 Under it: the headings above the changed block ("in Decision › Not in version 1"), then the change itself:
 
 | Change | What the card shows |
@@ -165,7 +167,7 @@ On this repository's own documents and history, at 1440 px, in KB:
 | A branch's changes, 126 changes in 14 documents | 39.1 | 17.8 | 0 | 21.4 |
 | One document's changes, 45 changes | 27.5 | 17.8 | 0 | 9.8 |
 
-- Notes add to reading and change pages, measured after gzip on 2026-10-18: `notes.js`, 9.0 KB, once per device, and 1.3 KB more style sheet and script. `anchor.js` (4.8 KB) and the position tables (a median of 1.9 KB on the private corpus, `docs/features/engine/html.md`) load only when the reader starts a note or the page has notes to show. The largest page above stays near 50 KB.
+- Notes add to reading and change pages, measured after gzip on 2026-10-18: `notes.js`, 9.8 KB, once per device, and 1.4 KB more style sheet and script. The "Changed because of" marks added 0.8 KB of the script and 0.1 KB of the style sheet. `anchor.js` (4.8 KB) and the position tables (a median of 1.9 KB on the private corpus, `docs/features/engine/html.md`) load only when the reader starts a note or the page has notes to show. The largest page above stays near 50 KB.
 - A page with code also loads Prism: 4.7 KB for TOML and Rust, 6.5 KB with Bash added.
 - A page with a diagram the server could not draw also loads mermaid.js, 1,531 KB, once per device.
 - A drawn diagram travels inside the page's HTML: the private corpus's drawings take a median of 7 KB each after compression (`docs/working/version-1/spikes/mermaid.md`).

@@ -4,13 +4,15 @@
 //! A note sits on an exact stretch of a document's Markdown source at the
 //! commit where it was made. [`anchor`] finds that stretch again in a later
 //! version. [`packet`] writes a review's notes as a prompt or a review file
-//! for an agent. This module holds the note itself and the rules of its
+//! for an agent. [`caused`] finds the changes of a range that a commit
+//! recorded on a note made, for "changed because of note n12". This module holds the note itself and the rules of its
 //! loop: who may move a note to which status. The program keeps notes in its
 //! notes file; nothing here reads or writes it.
 //!
 //! `docs/features/engine/notes-model.md` states the contract in full.
 
 pub mod anchor;
+pub mod caused;
 mod fuzzy;
 pub mod packet;
 
@@ -21,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::diff::{Change, Subject};
 
 pub use anchor::{Anchor, AnchorState, Origin, Placement, Quote, locate_text, reanchor};
+pub use caused::{Around, Ends, caused};
 
 /// Where a note was made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

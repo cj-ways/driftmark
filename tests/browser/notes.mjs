@@ -14,13 +14,19 @@
 //   4. rewords the sentence slightly, reloads, and finds it fuzzy, with the
 //      new words shown; then deletes it, and finds it in "Unanchored";
 //   5. on the change page of a branch: selects words in a card, notes them,
-//      marks the card seen, reloads, and finds both kept.
+//      marks the card seen, reloads, and finds both kept;
+//   6. an agent in a linked worktree answers that note through
+//      `driftmark mcp`, the reader decides it on the page, the agent commits
+//      the change and records the commit; the card then says "Changed
+//      because of note n2", its link leads to the note, and the note lists
+//      the change.
 //
 // Screenshots of each step go to <out-dir> when given. CHROMIUM names the
 // browser binary; the default is the cached headless shell that Playwright
 // 1.64.1 runs with (see the anchoring spike).
 import { chromium } from 'playwright';
 import { spawn, execFileSync } from 'node:child_process';
+import readline from 'node:readline';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,7 +57,7 @@ const SENTENCE = 'Freeze the branch two days before the release';
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'driftmark-notes-browser-'));
 const repo = path.join(work, 'repo');
-const git = (...args) => execFileSync('git', ['-C', repo, ...args], {
+const gitIn = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], {
   env: {
     ...process.env,
     GIT_CONFIG_NOSYSTEM: '1',
@@ -60,6 +66,7 @@ const git = (...args) => execFileSync('git', ['-C', repo, ...args], {
     GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com',
   },
 }).toString().trim();
+const git = (...args) => gitIn(repo, ...args);
 fs.writeFileSync(path.join(work, 'gitconfig'), '');
 fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
 execFileSync('git', ['init', '-q', '-b', 'main', repo]);
@@ -211,6 +218,64 @@ try {
   }));
   check('a note on a card and its seen mark survive a reload', change.note === 'exact' && change.seen === 'true' && change.count.includes('1 of 1 seen'), JSON.stringify(change));
   await shot('5-change-page');
+
+  // 6. An agent answers the card's note over MCP, the reader decides, the
+  //    agent applies it, and the card says which note changed it.
+  const agentDir = path.join(work, 'agent');
+  git('worktree', 'add', '-q', agentDir, 'feature');
+  const agent = spawn(program, ['mcp'], { cwd: agentDir, stdio: ['pipe', 'pipe', 'inherit'] });
+  const waiting = new Map();
+  readline.createInterface({ input: agent.stdout }).on('line', (line) => {
+    const message = JSON.parse(line);
+    if (waiting.has(message.id)) {
+      waiting.get(message.id)(message);
+      waiting.delete(message.id);
+    }
+  });
+  let next = 0;
+  const rpc = (method, params) => new Promise((resolve) => {
+    next += 1;
+    waiting.set(next, resolve);
+    agent.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: next, method, params })}\n`);
+  });
+  const tool = async (name, args) => {
+    const answer = (await rpc('tools/call', { name, arguments: args })).result;
+    if (answer.isError) throw new Error(`${name}: ${answer.content[0].text}`);
+    return JSON.parse(answer.content[0].text);
+  };
+  try {
+    await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '1' } });
+    agent.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    const open = await tool('notes_list', { review: 'r2' });
+    const id = open.notes[0].id;
+    await tool('note_reply', { note: id, stance: 'agree', body: 'Once is enough; the second run finds nothing new.' });
+    await tool('note_propose_decision', { note: id, outcome: 'modify', summary: 'Run the full test suite once on the frozen branch.' });
+    // The reader decides on the page; the proposal fills the form in.
+    await page.reload();
+    await page.locator(`#Note${id}`).waitFor();
+    await page.locator(`#Note${id} button`, { hasText: 'Decide' }).click();
+    await page.locator(`#Note${id} form.dm-inline button[type=submit]`).click();
+    await page.waitForFunction((id) => (document.querySelector(`#Note${id}`) || {}).dataset?.status === 'decided', id);
+    fs.writeFileSync(path.join(agentDir, 'docs/release.md'), DOC.replace('Run the full test suite', 'Run the full test suite once'));
+    gitIn(agentDir, 'commit', '-q', '-am', 'apply the note');
+    const commit = gitIn(agentDir, 'rev-parse', 'HEAD');
+    const applied = await tool('note_mark_applied', { note: id, commits: [commit.slice(0, 7)] });
+    check('the agent records the commit over MCP', applied.note.status === 'applied', JSON.stringify(applied.note));
+    await page.reload();
+    await page.locator('.dm-because').first().waitFor();
+    const because = await page.evaluate((id) => ({
+      marks: [...document.querySelectorAll('li.change .dm-because')].map((line) => line.textContent),
+      link: (document.querySelector('.dm-because a') || {}).getAttribute?.('href'),
+      listed: [...document.querySelectorAll(`#Note${id} .dm-caused a`)].map((a) => a.getAttribute('href')),
+    }), id);
+    check('the changed card says which note changed it', because.marks.length === 1 && because.marks[0] === `Changed because of note n${id}` && because.link === `#Note${id}`, JSON.stringify(because));
+    check('the note lists the change it caused', because.listed.length === 1 && because.listed[0].startsWith('#C'), JSON.stringify(because));
+    await page.locator('.dm-because a').first().click();
+    check('the mark leads to the note', (await page.evaluate(() => location.hash)) === `#Note${id}`);
+    await shot('6-changed-because');
+  } finally {
+    agent.kill();
+  }
   check('no script errors', errors.length === 0, errors.join(' | '));
 } catch (error) {
   check('the run finished', false, error.message);

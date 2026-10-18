@@ -40,6 +40,7 @@ pub(crate) const SEARCH: Tool = Tool {
     description: "Finds the Markdown documents that hold every word of a query, best first: a match in the title ranks above one in a heading, and a heading above the body. Each result names the block that matches best, the headings above it, the section's anchor (for document_read's `section`) and a snippet with the matched words between ** marks. Words may be \"quoted phrases\"; the last word also finds longer words it starts. Filter by folder with `path` and by document type with `types`.",
     arguments,
     required: &["query"],
+    read_only: true,
     run,
 };
 

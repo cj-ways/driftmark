@@ -2,10 +2,10 @@
 //! checked against its size limit.
 //!
 //! Each tool is one entry of [`TOOLS`]: its name, its description, the JSON
-//! Schema of its arguments and the function that answers. The note tools of
-//! wave 2 (`notes_list`, `note_get`, `review_get`, `note_reply`,
-//! `note_propose_decision`, `note_mark_applied`) are added as entries of the
-//! same list, with the notes store in [`Context`].
+//! Schema of its arguments, whether it only reads, and the function that
+//! answers. The note tools (`notes_list`, `note_get`, `review_get`,
+//! `note_reply`, `note_propose_decision`, `note_mark_applied`) read and
+//! write the notes file in [`Context`].
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,9 +14,10 @@ use driftmark_core::git::RepoPath;
 use serde_json::{Map, Value, json};
 
 use super::fit::{self, DEFAULT_CHARS, MAX_CHARS, MIN_CHARS};
-use super::protocol::{Connector, Reply, ToolInfo};
+use super::protocol::{Connector, Reply, ToolInfo, UNNAMED_CLIENT};
 use super::search::WorktreeSearch;
 use crate::serve::address;
+use crate::serve::placing::NotesFile;
 use crate::serve::repo::{Problem, Repo};
 
 /// What every tool reads from.
@@ -28,6 +29,9 @@ pub(crate) struct Context {
     pub workdir: Option<PathBuf>,
     /// The working tree's search index, built again when its files change.
     pub worktree_search: WorktreeSearch,
+    /// The notes file `driftmark serve` writes, opened on first use. A tool
+    /// that only reads never makes it.
+    pub notes: NotesFile,
 }
 
 /// One tool.
@@ -43,6 +47,9 @@ pub(crate) struct Tool {
     pub arguments: fn() -> Value,
     /// The arguments a call must give.
     pub required: &'static [&'static str],
+    /// Whether it only reads. Only the note tools that reply, propose or
+    /// record commits write, and only to the notes file.
+    pub read_only: bool,
     /// The answer: a JSON object, or why there is none.
     pub run: fn(&Context, &Args) -> Result<Value, String>,
 }
@@ -54,13 +61,21 @@ pub(crate) const TOOLS: &[Tool] = &[
     super::document::READ,
     super::search::SEARCH,
     super::lint::LINT,
+    super::notes::LIST,
+    super::notes::GET,
+    super::notes::REVIEW,
+    super::notes::REPLY,
+    super::notes::PROPOSE,
+    super::notes::MARK_APPLIED,
 ];
 
 /// The text a client shows the agent about the whole server.
 const INSTRUCTIONS: &str = "\
-driftmark reads this git repository's Markdown documents. Use it to see what changed in the docs between two git points, ranked by meaning (decision, rule, fact, wording, formatting), to read a document or one section of it at any revision, to search every document, and to check documents against the writing rules.
+driftmark reads this git repository's Markdown documents. Use it to see what changed in the docs between two git points, ranked by meaning (decision, rule, fact, wording, formatting), to read a document or one section of it at any revision, to search every document, to check documents against the writing rules, and to answer the reader's notes on the documents.
 
-Start with changes_summary (range \"auto\" is this branch's work, committed or not), then changes_document for one document, document_read for the text, search to find a topic, and lint after editing. Paths run from the repository root, such as docs/guide.md. A revision is a branch, a tag, a commit or \"worktree\" for the files on disk. Every answer is JSON. When an answer is cut to fit, its \"cut\" object says what was left out, and \"cut.next\" holds the arguments of the call that continues.";
+Start with changes_summary (range \"auto\" is this branch's work, committed or not), then changes_document for one document, document_read for the text, search to find a topic, and lint after editing. Paths run from the repository root, such as docs/guide.md. A revision is a branch, a tag, a commit or \"worktree\" for the files on disk. Every answer is JSON. When an answer is cut to fit, its \"cut\" object says what was left out, and \"cut.next\" holds the arguments of the call that continues.
+
+The reader writes notes on sentences of these documents, on driftmark's pages. notes_list shows the notes still open; note_get reads one with where its words are now and the section around them; review_get gives a review's notes as one prompt. Discuss first: answer each note with note_reply, and suggest what to do with note_propose_decision. Edit a document only for a note the reader decided (status \"decided\", review_get round 2); commit the edit, then record each commit with note_mark_applied. Only the reader decides, edits or withdraws a note.";
 
 /// The schema of `max_chars`, which every tool takes.
 fn max_chars_schema() -> Value {
@@ -92,7 +107,7 @@ impl Tool {
             title: self.title,
             description: self.description,
             schema,
-            read_only: true,
+            read_only: self.read_only,
         }
     }
 
@@ -118,11 +133,18 @@ impl Driftmark {
         Driftmark { context }
     }
 
-    /// Runs one tool: reads its arguments, answers, and checks the answer's
-    /// size. `None` when no tool has this name.
-    pub(crate) fn answer(&self, name: &str, arguments: Map<String, Value>) -> Option<Reply> {
+    /// Runs one tool for the client named `client`: reads its arguments,
+    /// answers, and checks the answer's size. `None` when no tool has this
+    /// name.
+    pub(crate) fn answer(
+        &self,
+        name: &str,
+        arguments: Map<String, Value>,
+        client: &str,
+    ) -> Option<Reply> {
         let tool = TOOLS.iter().find(|tool| tool.name == name)?;
         let reply = Args::read(tool, arguments)
+            .map(|args| args.called_by(client))
             .and_then(|args| {
                 let limit = args.max_chars()?;
                 let answer = (tool.run)(&self.context, &args)?;
@@ -149,8 +171,25 @@ impl Connector for Driftmark {
         TOOLS.iter().map(Tool::info).collect()
     }
 
-    fn call(&self, name: &str, arguments: Map<String, Value>) -> Option<Reply> {
-        self.answer(name, arguments)
+    fn call(&self, name: &str, arguments: Map<String, Value>, client: &str) -> Option<Reply> {
+        self.answer(name, arguments, client)
+    }
+
+    fn missing(&self, name: &str) -> String {
+        missing(name)
+    }
+}
+
+/// Why no tool has this name. A name about notes gets the reason an agent
+/// most likely needs: the note tools there are, and what only the reader
+/// does.
+pub(crate) fn missing(name: &str) -> String {
+    if name.starts_with("note") || name.starts_with("review") {
+        format!(
+            "driftmark has no tool `{name}`. An agent lists and reads notes (notes_list, note_get, review_get), answers them (note_reply), suggests a decision (note_propose_decision) and records the commits that applied one (note_mark_applied). Deciding, editing and withdrawing a note are the reader's, on the note's page, because the notes are the reader's own words and judgement"
+        )
+    } else {
+        format!("driftmark has no tool `{name}`")
     }
 }
 
@@ -161,6 +200,8 @@ impl Connector for Driftmark {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Args {
     map: Map<String, Value>,
+    /// The client that called, as its handshake names itself.
+    client: String,
 }
 
 impl Args {
@@ -186,15 +227,35 @@ impl Args {
         {
             return Err(format!("`{}` needs the argument `{missing}`", tool.name));
         }
-        Ok(Args { map })
+        Ok(Args {
+            map,
+            client: UNNAMED_CLIENT.to_owned(),
+        })
+    }
+
+    /// These arguments, called by the client named `client`.
+    #[must_use]
+    pub(crate) fn called_by(mut self, client: &str) -> Args {
+        client.clone_into(&mut self.client);
+        self
+    }
+
+    /// The client that called, such as `claude-code`: the name an agent's
+    /// replies and records carry.
+    pub(crate) fn client(&self) -> &str {
+        &self.client
     }
 
     /// Arguments read as they were given, for tests.
     #[cfg(test)]
     pub(crate) fn of(value: Value) -> Args {
-        match value {
-            Value::Object(map) => Args { map },
-            _ => Args { map: Map::new() },
+        let map = match value {
+            Value::Object(map) => map,
+            _ => Map::new(),
+        };
+        Args {
+            map,
+            client: UNNAMED_CLIENT.to_owned(),
         }
     }
 
@@ -234,6 +295,33 @@ impl Args {
             Some(Value::String(text)) if text == "false" => Ok(false),
             Some(_) => Err(format!("`{name}` must be true or false")),
         }
+    }
+
+    /// A true-or-false argument, or `None` when it is not given.
+    pub(crate) fn given_flag(&self, name: &str) -> Result<Option<bool>, String> {
+        self.given(name).map(|_| self.flag(name, false)).transpose()
+    }
+
+    /// A note or review number, written `12`, `"12"` or with its letter, as
+    /// `"n12"` for a note; `None` when it is not given.
+    pub(crate) fn number_of(&self, name: &str, letter: char) -> Result<Option<u64>, String> {
+        let wrong = || format!("`{name}` must be a number such as {letter}12 or 12");
+        let number = match self.given(name) {
+            None => return Ok(None),
+            Some(Value::Number(number)) => number.as_u64(),
+            Some(Value::String(text)) => {
+                let text = text.trim();
+                text.strip_prefix(letter)
+                    .unwrap_or(text)
+                    .parse::<u64>()
+                    .ok()
+            }
+            Some(_) => None,
+        };
+        number
+            .filter(|&number| number > 0)
+            .map(Some)
+            .ok_or_else(wrong)
     }
 
     /// A whole number from `min` to `max`, or `default` when it is not
@@ -418,7 +506,13 @@ mod tests {
                 "changes_document",
                 "document_read",
                 "search",
-                "lint"
+                "lint",
+                "notes_list",
+                "note_get",
+                "review_get",
+                "note_reply",
+                "note_propose_decision",
+                "note_mark_applied"
             ]
         );
         for tool in TOOLS {

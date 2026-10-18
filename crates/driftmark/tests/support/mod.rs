@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use driftmark::git::{CommandReader, Git, GixReader};
 use driftmark_core::git::{GitError, GitRead};
+use serde_json::Value;
 
 /// 2026-01-01 00:00 UTC. Test commits are dated from here, one day apart.
 pub const T0: i64 = 1_767_225_600;
@@ -245,4 +246,112 @@ fn comparable<T: PartialEq + std::fmt::Debug>(
         }),
         Err(error) => Err(error.clone()),
     }
+}
+
+// ---- the documented examples of `docs/features/commands/mcp.md` ------------
+
+/// The decision record of `docs/features/engine/change-list.md`, before and
+/// after its change.
+const RECORD_BEFORE: &str = "---\nstatus: proposed\n---\n\n# Cache rendered pages\n\n## Decision\n\nKeep each rendered page in the cache for 60 minutes.\n\n## Notes\n\nThe cache lives in memory.\n";
+const RECORD_AFTER: &str = "---\nstatus: accepted\n---\n\n# Cache rendered pages\n\n## Decision\n\nKeep each rendered page in the cache for 90 minutes.\n\nNever cache a page with open notes.\n";
+const DOC_GUIDE: &str = "# Cache guide\n\n> Short version: how to turn the page cache on and size it.\n\n## Install\n\nRun `cache install` once on each server.\n\n## Configure\n\nSet `cache.size` in megabytes. The default keeps 500 pages.\n";
+
+/// The repository of the examples in `docs/features/commands/mcp.md`.
+pub fn documented_repo() -> TestRepo {
+    let repo = TestRepo::new("mcp-doc");
+    repo.write(
+        "driftmark.toml",
+        "[[type]]\nname = \"decision\"\npaths = [\"docs/decisions/*.md\"]\nstatus = { front-matter = \"status\" }\ncurrent = [\"accepted\"]\nother-statuses = [\"proposed\"]\ndecision-headings = [\"Decision\"]\n",
+    );
+    repo.write("docs/decisions/0002-cache-rendered-pages.md", RECORD_BEFORE);
+    repo.write("docs/guide.md", DOC_GUIDE);
+    let base = repo.commit("first", T0);
+    repo.git(&["update-ref", "refs/remotes/origin/main", &base]);
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("docs/decisions/0002-cache-rendered-pages.md", RECORD_AFTER);
+    repo.write(
+        "docs/notes/cache-sizes.md",
+        "# Cache sizes\n\n> Short version: the size limit of the page cache.\n\nIt holds 500 pages.\n",
+    );
+    repo.commit("feature", T0 + DAY);
+    repo.write(
+        "docs/guide.md",
+        format!("{DOC_GUIDE}\n```\ncache status\n```\n"),
+    );
+    repo
+}
+
+/// The connector's note tools, whose examples need a notes file.
+pub const NOTE_TOOLS: [&str; 6] = [
+    "notes_list",
+    "note_get",
+    "review_get",
+    "note_reply",
+    "note_propose_decision",
+    "note_mark_applied",
+];
+
+/// What a documented call must give back: an answer, or a refusal.
+pub enum Expected {
+    Answer(Value),
+    Refusal(String),
+}
+
+/// The fenced block that starts on the first line after `at` that is not
+/// blank, with its language and its text.
+fn block_after(lines: &[&str], at: usize) -> (String, String, usize) {
+    let mut line = at + 1;
+    while lines[line].trim().is_empty() {
+        line += 1;
+    }
+    let language = lines[line]
+        .strip_prefix("```")
+        .expect("a fenced block")
+        .to_owned();
+    let mut text = String::new();
+    line += 1;
+    while lines[line] != "```" {
+        text.push_str(lines[line]);
+        text.push('\n');
+        line += 1;
+    }
+    (language, text, line)
+}
+
+/// Every example of a document: each "Call `tool` with:" block, and the
+/// "It answers:" or "It refuses:" block after it.
+pub fn examples(document: &str) -> Vec<(String, Value, Expected)> {
+    let lines: Vec<&str> = document.lines().collect();
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < lines.len() {
+        let Some(tool) = lines[at]
+            .strip_prefix("Call `")
+            .and_then(|rest| rest.strip_suffix("` with:"))
+        else {
+            at += 1;
+            continue;
+        };
+        let (language, arguments, end) = block_after(&lines, at);
+        assert_eq!(language, "json", "{tool}");
+        let mut next = end + 1;
+        while !lines[next].starts_with("It answers:") && !lines[next].starts_with("It refuses:") {
+            next += 1;
+        }
+        let (language, text, end) = block_after(&lines, next);
+        let expected = if lines[next].starts_with("It answers:") {
+            assert_eq!(language, "json", "{tool}");
+            Expected::Answer(serde_json::from_str(&text).expect("an answer in JSON"))
+        } else {
+            assert_eq!(language, "text", "{tool}");
+            Expected::Refusal(text.trim_end().to_owned())
+        };
+        found.push((
+            tool.to_owned(),
+            serde_json::from_str(&arguments).expect("arguments in JSON"),
+            expected,
+        ));
+        at = end + 1;
+    }
+    found
 }

@@ -35,6 +35,7 @@ pub(crate) const SUMMARY: Tool = Tool {
     description: "Lists the Markdown documents that changed between two git points, ranked by meaning: each document's highest level (decision, rule, fact, wording, formatting) and its counts of changes per level and kind, highest level first. The default range \"auto\" is this branch's work, committed or not, against the default branch. Call changes_document for one document's changes. The answer is the JSON of `driftmark diff --json=summary`, plus `skipped`, `page`, and `cut` when cut.",
     arguments: summary_arguments,
     required: &[],
+    read_only: true,
     run: summary,
 };
 
@@ -45,6 +46,7 @@ pub(crate) const DOCUMENT: Tool = Tool {
     description: "Shows how one Markdown document changed between two git points: every change with its kind, level, signals, where it is in both versions, the plain text of the blocks, and the changed words marked. A new or deleted document is one change with its title, summary, size and full text; set full_text false to leave the text out. The answer is the change-list JSON of `driftmark diff --json` for that document, without `unchanged`, plus `skipped`, `page`, and `cut` when cut.",
     arguments: document_arguments,
     required: &["path"],
+    read_only: true,
     run: document,
 };
 

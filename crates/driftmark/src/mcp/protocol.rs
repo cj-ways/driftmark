@@ -28,8 +28,8 @@ pub(crate) struct ToolInfo {
     pub description: &'static str,
     /// The JSON Schema of its arguments: an object schema.
     pub schema: Map<String, Value>,
-    /// Whether it only reads. Every wave-1 tool does; the note tools that
-    /// reply or record a decision write to the notes file.
+    /// Whether it only reads. The note tools that reply, propose or record
+    /// commits write to the notes file; every other tool only reads.
     pub read_only: bool,
 }
 
@@ -50,9 +50,15 @@ pub(crate) trait Connector: Send + Sync + 'static {
     fn instructions(&self) -> String;
     /// The tools, in the order a client lists them.
     fn tools(&self) -> Vec<ToolInfo>;
-    /// Runs one tool. `None` when no tool has this name.
-    fn call(&self, name: &str, arguments: Map<String, Value>) -> Option<Reply>;
+    /// Runs one tool for the client named `client`, as its handshake names
+    /// itself, such as `claude-code`. `None` when no tool has this name.
+    fn call(&self, name: &str, arguments: Map<String, Value>, client: &str) -> Option<Reply>;
+    /// Why no tool has this name, as the sentence of the protocol error.
+    fn missing(&self, name: &str) -> String;
 }
+
+/// The name a client goes by when its handshake names none.
+pub(crate) const UNNAMED_CLIENT: &str = "agent";
 
 /// Serves `connector` over standard input and output until the client
 /// closes standard input.
@@ -97,13 +103,27 @@ impl<C: Connector> ServerHandler for Server<C> {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let connector = Arc::clone(&self.0);
         let name = request.name.to_string();
         let arguments = request.arguments.unwrap_or_default();
+        // MCP 2026-07-28 names the client on every request; earlier versions
+        // name it once, in the `initialize` handshake.
+        let client = context
+            .meta
+            .client_info()
+            .or_else(|| {
+                context
+                    .peer
+                    .peer_info()
+                    .map(|info| info.client_info.clone())
+            })
+            .map(|info| info.name)
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| UNNAMED_CLIENT.to_owned());
         let asked = name.clone();
-        let reply = tokio::task::spawn_blocking(move || connector.call(&asked, arguments))
+        let reply = tokio::task::spawn_blocking(move || connector.call(&asked, arguments, &client))
             .await
             .map_err(|_| {
                 ErrorData::internal_error(
@@ -112,10 +132,7 @@ impl<C: Connector> ServerHandler for Server<C> {
                 )
             })?;
         match reply {
-            None => Err(ErrorData::invalid_params(
-                format!("driftmark has no tool `{name}`"),
-                None,
-            )),
+            None => Err(ErrorData::invalid_params(self.0.missing(&name), None)),
             Some(Reply::Answer(text)) => {
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into())
             }
@@ -128,7 +145,8 @@ impl<C: Connector> ServerHandler for Server<C> {
 
 /// A tool in rmcp's terms. No tool deletes anything or reaches beyond the
 /// repository, and a tool that only reads gives the same answer when called
-/// twice on the same files.
+/// twice on the same files. A tool that writes a note reply, proposal or
+/// commit adds one each time it is called, so it is not idempotent.
 fn tool(info: ToolInfo) -> Tool {
     Tool::new(info.name, info.description, Arc::new(info.schema))
         .with_title(info.title)
