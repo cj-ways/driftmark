@@ -8,8 +8,10 @@ edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/cj-ways/driftmark"
-keywords = ["markdown", "docs", "diff", "review", "ai-agents"]
-categories = ["command-line-utilities", "text-processing"]
+# The `driftmark` program's search words on crates.io. `driftmark-core` sets
+# its own, because a library is found by other words than a command is.
+keywords = ["markdown", "diff", "documentation", "mcp", "ai-agents"]
+categories = ["command-line-utilities", "development-tools", "text-processing"]
 
 [workspace.lints.rust]
 # `deny`, not `forbid`: one block may allow it, the `malloc_trim` declaration

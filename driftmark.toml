@@ -1,7 +1,13 @@
 # driftmark's rules file for its own repository.
 #
+# The docs folder uses the starter layout that `driftmark init` sets up
+# (decision 0006), so the starter preset gives each document its type, its
+# status and its lifecycle on the pages and the status page.
+#
 # The fixtures break the writing rules on purpose, and CLAUDE.md is an import
 # line for Claude Code, not a document, so `driftmark lint` leaves them out.
+
+presets = ["starter"]
 
 [lint]
 exclude = ["fixtures/**", "CLAUDE.md"]

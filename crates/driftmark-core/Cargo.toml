@@ -1,13 +1,14 @@
 [package]
 name = "driftmark-core"
-description = "The rules of driftmark: document blocks, change detection and ranking, note anchoring and lint rules. No file, git or network access"
+description = "The engine of driftmark: Markdown blocks, ranked change detection, note anchoring, search and lint rules, with no file, git or network access"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-keywords.workspace = true
-categories.workspace = true
+keywords = ["markdown", "diff", "lint", "annotation", "documentation"]
+categories = ["text-processing", "development-tools"]
 
 [dependencies]
 comrak = { version = "0.56.0", default-features = false }
