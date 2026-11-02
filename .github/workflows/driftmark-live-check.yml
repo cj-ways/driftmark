@@ -1,0 +1,35 @@
+# Throwaway: the M5 live check of the driftmark action. Lives only on the
+# branches m5/mr-live-base and m5/mr-live; never merged.
+name: driftmark live check
+
+on:
+  pull_request:
+    branches: [m5/mr-live-base]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  driftmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: driftmark
+        uses: cj-ways/driftmark/.github/actions/driftmark@m5/mr-live-base
+        with:
+          folders: docs/working/mr-live-check
+      - name: Show the action's outputs
+        run: |
+          echo "documents: $DOCUMENTS"
+          echo "export: $EXPORT"
+          echo "artifact: $ARTIFACT"
+          echo "comment: $COMMENT"
+        env:
+          DOCUMENTS: ${{ steps.driftmark.outputs.documents }}
+          EXPORT: ${{ steps.driftmark.outputs.export }}
+          ARTIFACT: ${{ steps.driftmark.outputs.artifact-url }}
+          COMMENT: ${{ steps.driftmark.outputs.comment-url }}

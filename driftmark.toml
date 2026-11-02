@@ -5,3 +5,13 @@
 
 [lint]
 exclude = ["fixtures/**", "CLAUDE.md"]
+
+# Throwaway, for the M5 live check only: the made-up decision records of the
+# live check's folder, so their changes rank as decisions.
+[[type]]
+name = "decision"
+paths = ["docs/working/mr-live-check/decisions/*.md"]
+status = { front-matter = "status" }
+current = ["accepted"]
+other-statuses = ["proposed"]
+decision-headings = ["Decision"]
