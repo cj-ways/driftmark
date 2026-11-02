@@ -6,6 +6,7 @@
 //! once to a folder of the user's cache, named by a hash of their bytes.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use merman::svg::RenderResourcePolicy;
@@ -42,6 +43,10 @@ pub(super) const MAX_MEASUREMENTS: usize = 1 << 20;
 /// about 10 ms and the largest in under a second; a diagram that takes
 /// longer is left to the browser.
 const DEADLINE: Duration = Duration::from_secs(10);
+
+/// Numbers each temporary font file, so writers on different threads of one
+/// program never write the same one.
+static WRITES: AtomicU64 = AtomicU64::new(0);
 
 /// merman with its fonts loaded.
 pub(super) struct Mermaid {
@@ -149,19 +154,28 @@ fn write_fonts(folder: &Path) -> Result<PathBuf, String> {
     })?;
     for (name, bytes) in FONTS {
         let path = folder.join(name);
-        if std::fs::read(&path).is_ok_and(|found| found == bytes) {
+        let written = || std::fs::read(&path).is_ok_and(|found| found == bytes);
+        if written() {
             continue;
         }
-        let temporary = folder.join(format!("{name}.{}.part", std::process::id()));
-        std::fs::write(&temporary, bytes)
-            .and_then(|()| std::fs::rename(&temporary, &path))
-            .map_err(|error| {
-                let _ = std::fs::remove_file(&temporary);
-                format!(
+        let temporary = folder.join(format!(
+            "{name}.{}.{}.part",
+            std::process::id(),
+            WRITES.fetch_add(1, Ordering::Relaxed)
+        ));
+        let moved =
+            std::fs::write(&temporary, bytes).and_then(|()| std::fs::rename(&temporary, &path));
+        if let Err(error) = moved {
+            let _ = std::fs::remove_file(&temporary);
+            // Another writer may have put the font there first; on Windows,
+            // a font file another program has open cannot be replaced.
+            if !written() {
+                return Err(format!(
                     "the diagram font {} could not be written: {error}",
                     path.display()
-                )
-            })?;
+                ));
+            }
+        }
     }
     Ok(folder.to_path_buf())
 }
@@ -182,6 +196,35 @@ mod tests {
         std::fs::write(folder.join(FONTS[0].0), b"broken").unwrap();
         write_fonts(&folder).unwrap();
         assert_eq!(std::fs::read(folder.join(FONTS[0].0)).unwrap(), FONTS[0].1);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn writers_that_start_together_all_find_the_fonts() {
+        let folder =
+            std::env::temp_dir().join(format!("driftmark-fonts-together-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let start = std::sync::Barrier::new(8);
+        let written: Vec<Result<PathBuf, String>> = std::thread::scope(|scope| {
+            let writers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        write_fonts(&folder)
+                    })
+                })
+                .collect();
+            writers
+                .into_iter()
+                .map(|writer| writer.join().unwrap())
+                .collect()
+        });
+        for result in written {
+            assert_eq!(result, Ok(folder.clone()));
+        }
+        for (name, bytes) in FONTS {
+            assert_eq!(std::fs::read(folder.join(name)).unwrap(), bytes);
+        }
         let _ = std::fs::remove_dir_all(&folder);
     }
 
