@@ -13,6 +13,9 @@
 //! again into a small second index that replaces their old versions. When
 //! too many files changed, or the rules file did, the whole working tree is
 //! indexed again. Searches keep using the last index while an update runs.
+//! An index built before the watcher's first listing ended is built again by
+//! the next search after it: that listing records each file as it finds it,
+//! so it never reports an edit made between the build and the listing.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -121,6 +124,8 @@ pub(crate) struct Layers {
     /// The files in `changes`: every file the watcher reported since `base`
     /// was built.
     changed: BTreeSet<RepoPath>,
+    /// Whether the watcher had listed the working tree when `base` was built.
+    listed: bool,
 }
 
 impl Layers {
@@ -216,17 +221,24 @@ impl WorktreeIndex {
     ///
     /// When the working tree or the rules file cannot be read.
     pub(crate) fn layers(&self) -> Result<Arc<Layers>, Problem> {
-        if let Some(layers) = self.current() {
+        if let Some(layers) = self.usable() {
             return Ok(layers);
         }
         let _one = self.building.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(layers) = self.current() {
+        if let Some(layers) = self.usable() {
             return Ok(layers);
         }
         let layers = Arc::new(self.build_all()?);
         crate::memory::give_back(&self.repo.git);
         self.set(Some(Arc::clone(&layers)));
         Ok(layers)
+    }
+
+    /// The index, unless it was built before the watcher's first listing
+    /// ended and that listing has ended since.
+    fn usable(&self) -> Option<Arc<Layers>> {
+        let (_, _, listed) = self.watch.state();
+        self.current().filter(|layers| layers.listed || !listed)
     }
 
     /// Takes in files the watcher reported, or `None` when it may have
@@ -264,7 +276,9 @@ impl WorktreeIndex {
     /// Indexes every Markdown file of the working tree.
     fn build_all(&self) -> Result<Layers, Problem> {
         let rules = self.repo.rules_at(&Snapshot::Worktree)?;
-        let paths = match self.watch.listed() {
+        let watched = self.watch.listed();
+        let listed = watched.is_some();
+        let paths = match watched {
             Some(paths) => paths,
             None => self
                 .repo
@@ -288,6 +302,7 @@ impl WorktreeIndex {
             base: Arc::new(base),
             changes,
             changed: BTreeSet::new(),
+            listed,
         })
     }
 
@@ -323,6 +338,7 @@ impl WorktreeIndex {
             base: Arc::clone(&current.base),
             changes: fresh,
             changed,
+            listed: current.listed,
         })
     }
 
@@ -553,5 +569,38 @@ mod tests {
             url("worktree", &path, Some("ჯგუფი-1_a")),
             "/doc/worktree/-/docs/a%20b.md#%E1%83%AF%E1%83%92%E1%83%A3%E1%83%A4%E1%83%98-1_a"
         );
+    }
+
+    #[test]
+    fn an_index_built_before_the_first_listing_is_built_again_after_it() {
+        let scratch = crate::memory::tests::Scratch::new("search-listing");
+        let repo = Arc::new(scratch.repo());
+        let (events, _) = broadcast::channel(8);
+        let watch = Arc::new(Watch::new(Arc::clone(&repo), scratch.dir.clone(), events));
+        let index = WorktreeIndex::new(Arc::clone(&repo), Arc::clone(&watch));
+        let total = |text: &str| {
+            let params = read(&format!("q={text}")).unwrap();
+            answer(&repo, Some(&index), &params).unwrap().total
+        };
+        // The watcher has not started, so this search builds before it lists.
+        assert_eq!(total("lantern"), 0);
+        // Edited before the first listing, which then records the edited file
+        // and never reports it.
+        std::fs::write(
+            scratch.dir.join("doc-0.md"),
+            "# Document 0\n\nA lantern by the door.\n",
+        )
+        .unwrap();
+        watch.start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !watch.state().2 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the watcher never listed the working tree"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(total("lantern"), 1);
+        watch.stop();
     }
 }

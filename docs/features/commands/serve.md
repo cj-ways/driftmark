@@ -382,7 +382,7 @@ Each result:
 A page writes each piece as text, never as HTML: a snippet holds the document's own words, which may contain `<` or `&`.
 
 - **A revision's index** is built the first time it is searched, from every Markdown file of the commit, on all cores, and kept in the cache (see "The cache"). Requests that arrive while it is built wait for that one build.
-- **The working tree's index** is built on the first search of `worktree`, then kept up to date from the change signal that reloads open pages (see "Live reload"): the files that changed are read again, and the next search finds their new text. When more than 256 files changed since the last full build, or `driftmark.toml` changed, the whole working tree is indexed again in the background. Searches meanwhile use the last index.
+- **The working tree's index** is built on the first search of `worktree`, then kept up to date from the change signal that reloads open pages (see "Live reload"): the files that changed are read again, and the next search finds their new text. When more than 256 files changed since the last full build, or `driftmark.toml` changed, the whole working tree is indexed again in the background. Searches meanwhile use the last index. An index built before the watcher's first listing ended is built again by the next search after it: that listing records each file as it finds it, so it never reports an edit made between the build and the listing.
 - A query with more than 32 words, a `limit` outside 1 to 100, or a parameter that is not valid text answers `400`.
 
 ### The status page
