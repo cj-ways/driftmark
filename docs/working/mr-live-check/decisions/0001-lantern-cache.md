@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-02
 ---
 
@@ -9,8 +9,6 @@ date: 2026-11-02
 
 ## Decision
 
-Keep each rendered lantern page in the cache for 60 minutes.
+Keep each rendered lantern page in the cache for 90 minutes.
 
-## Notes
-
-The cache lives in memory.
+Never cache a page while a reviewer has it open.
