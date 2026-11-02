@@ -215,7 +215,7 @@ The rules live in `driftmark_core::status`; the core reads no files, no git and 
 
 ## Speed on the private corpus
 
-Measured on 2026-11-02 with the release build serving the maintainer's private corpus (a company repository of 3,724 Markdown files and 3,254 first-parent commits) on `127.0.0.1`, with `--base` set to its working branch and the ADR preset found by its markers. "Cold" is the first request to a fresh server: once right after the greeting, while the watcher's own startup count runs, and once after it ended. "Warm" is the median of 7 requests after it. Each figure is the median of 3 servers, with the range in brackets; the load average was 4 to 5 on 12 cores.
+Measured on 2026-11-02 with the release build serving the maintainer's private corpus (a private repository of 3,724 Markdown files and 3,254 first-parent commits) on `127.0.0.1`, with `--base` set to its working branch and the ADR preset found by its markers. "Cold" is the first request to a fresh server: once right after the greeting, while the watcher's own startup count runs, and once after it ended. "Warm" is the median of 7 requests after it. Each figure is the median of 3 servers, with the range in brackets; the load average was 4 to 5 on 12 cores.
 
 | Request | Cold, at start | Cold, after the startup count | Warm |
 |---|---|---|---|

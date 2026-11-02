@@ -184,7 +184,7 @@ On this repository's own documents and history, at 1440 px, in KB:
 
 ### On the private corpus
 
-Measured on 2026-10-18 with the release build serving the maintainer's private corpus (a company repository of about 3,400 documents) on `127.0.0.1`, at a load of 30 to 50 on 12 cores, 6 requests at a time.
+Measured on 2026-10-18 with the release build serving the maintainer's private corpus (a private repository of about 3,400 documents) on `127.0.0.1`, at a load of 30 to 50 on 12 cores, 6 requests at a time.
 
 | What | Result |
 |---|---|

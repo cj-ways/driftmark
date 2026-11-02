@@ -217,7 +217,7 @@ Measured on 2026-11-02 with the release build. "gzip" is `gzip -6` of the whole 
 | `folder feature docs`, 3 documents | 298.6 KB | 178.2 KB | 12.5 KB | 1.5 KB (0.6 KB gzip) |
 | `changes main...feature`, 4 documents, 5 changes | 305.6 KB | 179.5 KB | 19.0 KB | 1.9 KB (0.7 KB gzip) |
 
-**On the private corpus** (a company repository of 3,725 Markdown documents), read-only at its working branch, on the maintainer's server with 12 cores at a load of 5.6 to 7.6. Only numbers are recorded here.
+**On the private corpus** (a private repository of 3,725 Markdown documents), read-only at its working branch, on the maintainer's server with 12 cores at a load of 5.6 to 7.6. Only numbers are recorded here.
 
 | Export | Size | gzip | Search index (gzip) | Time | Memory |
 |---|---|---|---|---|---|
