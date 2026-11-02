@@ -509,13 +509,16 @@ fn get(port: u16, target: &str) -> String {
 fn reading_pages_show_a_status_from_spec_json() {
     use std::io::BufRead;
     let (repo, _) = repo_of("kiro");
-    let mut server = Command::new(env!("CARGO_BIN_EXE_driftmark"))
-        .args(["serve", "--addr", "127.0.0.1:0", "--repo"])
-        .arg(&repo.dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("the server starts");
+    // Held in `Running`, so a failing assertion below still stops the server.
+    let mut server = support::Running(
+        Command::new(env!("CARGO_BIN_EXE_driftmark"))
+            .args(["serve", "--addr", "127.0.0.1:0", "--repo"])
+            .arg(&repo.dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("the server starts"),
+    );
     let mut lines = std::io::BufReader::new(server.stdout.take().expect("standard output"));
     let mut port = None;
     let mut line = String::new();
@@ -549,8 +552,7 @@ fn reading_pages_show_a_status_from_spec_json() {
         page.contains("data-pill=\"date\">Dated 2026-02-03T16:30:00Z<"),
         "{page}"
     );
-    let _ = server.kill();
-    let _ = server.wait();
+    drop(server);
 }
 
 /// Each Markdown file of the working tree with what the rules say about it.
