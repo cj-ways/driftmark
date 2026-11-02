@@ -14,6 +14,7 @@ date: 2026-10-18
 | Call | What it returns |
 |---|---|
 | `reading(&document, &setup)` | A `Reading`: the page HTML, the position tables and the outline. |
+| `reading_prefixed(&document, &setup, prefix)` | The same, for a page that holds several documents, such as a one-file export: every id starts with `prefix` (see "Ids"). |
 | `changes(&document_changes, id_prefix)` | One document's change list as an `<ol class="changes">`. |
 | `ANCHOR_SCRIPT` | The page script, `crates/driftmark-core/web/anchor.js`, as text. |
 | `words` | The words a reader sees for a level (`Decision`), a kind (`Moved and edited`, `New document`), a view (`Sentence by sentence`) and a signal (`in a decision section`). The change HTML and the program's own pages use the same words. |
@@ -114,6 +115,7 @@ Elements with `data-k` never nest, and the elements of one block always sit next
 
 - A heading's id is its anchor by GitHub's rules, the same function the lint's `anchor` rule uses (`Anchors::by_block`): lower case, punctuation dropped, spaces as `-`, and `-1`, `-2` for repeats. So a link the lint accepts always finds its heading.
 - Every id the page itself adds contains a character no heading anchor has: `fn:name`, `fnref:name`, and the change list's `prefix.n`. A page that adds its own element ids must do the same, for example with a capital letter such as `id="Tables"`. Otherwise a heading named "Tables" could take the id first.
+- `reading_prefixed` puts its prefix in front of every id the document's HTML carries: each heading's, which the outline repeats, and each footnote's (`R3-fn:name`, `R3-fnref:name`). It puts it after the `#` of every link to a place on the same page too, from Markdown (`[x](#install)`) and from raw HTML (`<a href="#install">`), so the link still finds this document's own heading. With the prefix `R3-`, two documents with an `## Install` section get `R3-install` and `R4-install`. A drawn diagram keeps the ids its drawer gave it. The position tables do not change. `reading` is `reading_prefixed` with an empty prefix.
 
 ### `data-gen`
 

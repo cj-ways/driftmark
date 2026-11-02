@@ -150,7 +150,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
 }
 
 /// The `--since` range, with the branch from the words before `--`.
-fn since_range(date: &str, words: &[String]) -> Result<(RangeSpec, String), String> {
+pub(crate) fn since_range(date: &str, words: &[String]) -> Result<(RangeSpec, String), String> {
     let branch = match words {
         [] => None,
         [branch] if branch.contains("..") => {

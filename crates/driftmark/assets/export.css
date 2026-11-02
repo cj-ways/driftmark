@@ -1,0 +1,51 @@
+/* driftmark export: what a one-file export adds to page.css.
+
+   An exported file holds several pages, such as a change list and the
+   documents it changed, under one <main>. The server's pages style their
+   own <main> (main.read, main.review); here the same rules sit on the
+   page wrappers. Without its script the file shows every page one after
+   another; with it, one page at a time. */
+
+main.export { display: block; }
+.xabout { max-width: 64rem; margin: 0 auto; padding: 0.6rem 1.5rem 0; font-size: 0.8125rem; color: var(--text-faint); }
+.xpage + .xpage { border-top: 1px solid var(--rule); }
+.xread, .xindex { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1.5rem 5rem; }
+.reviewwrap > .review { padding: 1.5rem 2rem 6rem; max-width: 56rem; min-width: 0; }
+.review .page-head h1 { font-size: 1.75rem; font-family: var(--font-mono); font-weight: 700; letter-spacing: -0.02em; margin: 0 0 1rem; overflow-wrap: anywhere; }
+
+/* What the file left out, said where the reader looks first. */
+.xcut { background: var(--warn-bg); border: 1px solid var(--rule); border-left: 4px solid var(--warn-line); border-radius: var(--radius); padding: 0.75rem 1rem; margin: 0 0 1.5rem; }
+.xcut p { margin: 0; }
+.xcut p + p { margin-top: 0.35rem; }
+
+/* A link to a document or a file that is not in this file. */
+.doc-body .link-off::after, .doc-body .image-off::after { content: " (not exported)"; font-size: 0.8125em; color: var(--text-faint); }
+.doc-body .image-off::before { content: "Image: "; font-size: 0.8125em; color: var(--text-faint); }
+
+/* The folder's index. */
+.xindex h2 { font-size: 1.15rem; margin: 2rem 0 0.6rem; overflow-wrap: anywhere; }
+.xlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.xlist > li { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem 1rem; }
+.xlist .x-title { font-weight: 700; }
+.xlist .x-path { display: block; font-size: 0.8125rem; color: var(--text-faint); overflow-wrap: anywhere; }
+.xlist .x-path code { background: none; border: 0; padding: 0; }
+.xlist .x-summary { margin: 0.35rem 0 0; color: var(--text-soft); }
+.xlist .pills { margin: 0.45rem 0 0; }
+.xlist .x-out { font-size: 0.8125rem; color: var(--text-faint); }
+
+/* A diagram nobody can draw here: the file has no browser fallback. */
+.doc-body pre[data-undrawn]::before { content: "Diagram, not drawn"; }
+
+@media (max-width: 47.5em) {
+  .xread, .xindex { padding: 1rem 1rem 4rem; }
+  .xabout { padding: 0.5rem 1rem 0; }
+  .reviewwrap > .review { padding: 1rem 0.75rem 4rem; }
+  .review .page-head h1 { font-size: 1.35rem; }
+}
+
+/* Printed, the file shows every page, as it does without its script. */
+@media print {
+  .xpage[hidden] { display: block !important; }
+  .xpage { break-before: page; }
+  .xpage:first-of-type { break-before: auto; }
+}

@@ -2,7 +2,8 @@
 //! script can read.
 //!
 //! [`reading`] turns a parsed document into reading HTML, the position tables
-//! notes need, and the outline of its sections. [`changes`] turns one
+//! notes need, and the outline of its sections; [`reading_prefixed`] does the
+//! same for a page that holds several documents. [`changes`] turns one
 //! document's change list into HTML. Both decide the structure only: the
 //! elements, classes and attributes that the page script and the style sheet
 //! rely on. `docs/features/engine/html.md` states that contract in full.
@@ -21,7 +22,7 @@ pub mod words;
 use serde::Serialize;
 
 pub use changes::changes;
-pub use reading::reading;
+pub use reading::{reading, reading_prefixed};
 
 use crate::document::DiagramLanguage;
 

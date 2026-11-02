@@ -1,4 +1,5 @@
-//! The `driftmark` program. Version 1 adds `export` to the commands here.
+//! The `driftmark` program: one command per word, each in its own module of
+//! the `driftmark` library.
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
@@ -13,6 +14,7 @@ usage: driftmark <command> [<arguments>]
 
 Commands:
   diff           show what changed between two git points, ranked by meaning
+  export         write a document, a folder or a range's changes as one HTML file
   lint           check Markdown files against the writing rules
   serve          serve the documents and their changes as pages
   mcp            answer an agent over MCP: changes, documents, search, lint
@@ -62,6 +64,7 @@ fn main() -> ExitCode {
             &mut stdout,
             &mut stderr,
         ),
+        Some("export") => driftmark::export::run(&args[1..], &mut stdout, &mut stderr),
         Some("hook") => driftmark::hook::run(&args[1..], &mut stdout, &mut stderr),
         Some("init") => driftmark::init::run(&args[1..], &mut stdout, &mut stderr),
         Some("new") => driftmark::new::run(&args[1..], &mut stdout, &mut stderr),

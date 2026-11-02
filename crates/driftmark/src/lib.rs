@@ -8,6 +8,7 @@
 
 pub mod diagram;
 pub mod diff;
+pub mod export;
 pub mod git;
 pub mod hook;
 pub mod init;

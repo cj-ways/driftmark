@@ -40,7 +40,7 @@ fn render_tree(root: Node<'_>, document: &Document) -> (String, PositionTables) 
     };
     let mut out = String::new();
     let ids = Anchors::by_block(document);
-    let tables = render(root, &mut out, document, &setup, ids);
+    let tables = render(root, &mut out, document, &setup, ids, "");
     (out, tables)
 }
 
@@ -81,6 +81,38 @@ fn the_outline_holds_only_headings_outside_containers() {
         outline,
         [(1, "title", "Title", 0), (2, "section", "Section", 4)]
     );
+}
+
+#[test]
+fn a_prefix_starts_every_id_and_every_link_on_the_page() {
+    let source = "# Guide\n\n## Install\n\nSee [install](#install), <a href=\" #install\">this</a>, [a](a.md#x), [web](https://example.com/#y) and a note[^n] twice[^n].\n\n[^n]: The note.\n";
+    let document = Document::parse(source.as_bytes().to_vec()).expect("parses");
+    let allowed = vec!["a".to_owned()];
+    let setup = Setup {
+        links: &AsWritten,
+        diagrams: &NoDiagrams,
+        allowed_html: &allowed,
+    };
+    let page = reading_prefixed(&document, &setup, "R7-");
+    let ids: Vec<&str> = page
+        .outline
+        .iter()
+        .map(|section| section.id.as_str())
+        .collect();
+    assert_eq!(ids, ["R7-guide", "R7-install"]);
+    assert_eq!(
+        page.html,
+        "<h1 id=\"R7-guide\" data-k=\"0\">Guide<a class=\"anchor\" href=\"#R7-guide\" aria-label=\"Link to this section\"></a></h1>\n\
+         <h2 id=\"R7-install\" data-k=\"1\">Install<a class=\"anchor\" href=\"#R7-install\" aria-label=\"Link to this section\"></a></h2>\n\
+         <p data-k=\"2\">See <a href=\"#R7-install\">install</a>, <a href=\"%20#R7-install\">this</a>, <a href=\"a.md#x\">a</a>, <a href=\"https://example.com/#y\">web</a> and a note<sup class=\"footnote-ref\"><a href=\"#R7-fn:n\" id=\"R7-fnref:n\">1</a></sup> twice<sup class=\"footnote-ref\"><a href=\"#R7-fn:n\" id=\"R7-fnref:n:2\">1</a></sup>.</p>\n\
+         <section class=\"footnotes\">\n<ol>\n<li id=\"R7-fn:n\">\n<p data-k=\"3\">The note.<span class=\"footnote-back\" data-gen> <a href=\"#R7-fnref:n\" aria-label=\"Back to reference 1\">↩</a> <a href=\"#R7-fnref:n:2\" aria-label=\"Back to reference 1\">↩<sup>2</sup></a></span></p>\n</li>\n</ol>\n</section>\n"
+    );
+    // The same document without a prefix is the plain reading page, whose
+    // position tables the prefix never changes.
+    let plain = reading(&document, &setup);
+    assert_eq!(plain, reading_prefixed(&document, &setup, ""));
+    assert_eq!(page.positions, plain.positions);
+    assert_eq!(page.html.replace("R7-", ""), plain.html);
 }
 
 #[test]
@@ -155,6 +187,7 @@ fn nodes_with_bad_positions_are_shown_without_a_table_place() {
         &document,
         &setup,
         Anchors::by_block(&document),
+        "",
     );
     assert!(out.contains("<p data-k=\"0\">Some text, <code>code</code>, <img src=\"a.png\" alt=\"alt\"> and <img src=\"b.png\"> here.</p>"), "{out}");
     // Only rendered gaps: no piece maps, the images included.

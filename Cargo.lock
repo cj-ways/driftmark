@@ -565,6 +565,7 @@ name = "driftmark"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "driftmark-core",
  "flate2",
  "futures-util",
@@ -579,6 +580,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tower-http",
 ]

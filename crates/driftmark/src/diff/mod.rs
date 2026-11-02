@@ -7,7 +7,8 @@
 //! only each document's counts.
 //! `docs/features/commands/diff.md` is the user's guide.
 
-mod args;
+// `export changes` reads its range as `diff` does.
+pub(crate) mod args;
 pub(crate) mod rules_file;
 pub(crate) mod text;
 mod work;

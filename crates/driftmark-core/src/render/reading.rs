@@ -35,13 +35,33 @@ type Node<'a> = &'a AstNode<'a>;
 /// read is still shown, only without a place in the position table.
 #[must_use]
 pub fn reading(document: &Document, setup: &Setup<'_>) -> Reading {
+    reading_prefixed(document, setup, "")
+}
+
+/// Renders one document as reading HTML for a page that holds several
+/// documents, such as a one-file export.
+///
+/// Every id the document's HTML carries starts with `prefix`: its headings'
+/// ids, which the outline repeats, and its footnotes'. So does every link to
+/// a place on the same page, `#install` as much as a footnote's number, so
+/// it still leads to this document's own heading. Two documents with a
+/// `## Install` section can then sit on one page without taking each other's
+/// ids. A drawn diagram keeps the ids its [`super::DiagramRender`] gave it.
+///
+/// The prefix is written as it is, so it should be letters, digits and `-`,
+/// and hold a character no heading anchor has, such as a capital letter.
+#[must_use]
+pub fn reading_prefixed(document: &Document, setup: &Setup<'_>, prefix: &str) -> Reading {
     let arena = Arena::new();
     let options = options();
     let root = parse_document(&arena, &document.source, &options);
-    let ids = Anchors::by_block(document);
+    let ids: Vec<Option<String>> = Anchors::by_block(document)
+        .into_iter()
+        .map(|id| id.map(|id| format!("{prefix}{id}")))
+        .collect();
     let outline = outline(document, &ids);
     let mut html = String::with_capacity(document.source.len() * 2);
-    let positions = render(root, &mut html, document, setup, ids);
+    let positions = render(root, &mut html, document, setup, ids, prefix);
     Reading {
         html,
         positions,
@@ -50,18 +70,22 @@ pub fn reading(document: &Document, setup: &Setup<'_>) -> Reading {
 }
 
 /// Writes the tree under `root` into `html` and returns the position tables.
+/// `ids` already carry `prefix`; footnotes and links on the same page get it
+/// as they are written.
 fn render(
     root: Node<'_>,
     html: &mut String,
     document: &Document,
     setup: &Setup<'_>,
     ids: Vec<Option<String>>,
+    prefix: &str,
 ) -> PositionTables {
     let state = State {
         document,
         setup,
         mapper: Mapper::new(&document.source),
         allowed: Allowed::new(setup.allowed_html),
+        prefix,
         ids,
         tables: vec![Vec::new(); document.blocks.len()],
         cursor: None,
@@ -139,7 +163,9 @@ struct State<'r> {
     setup: &'r Setup<'r>,
     mapper: Mapper<'r>,
     allowed: Allowed,
-    /// Heading ids by block.
+    /// What every id on the page starts with (`reading_prefixed`).
+    prefix: &'r str,
+    /// Heading ids by block, with the prefix.
     ids: Vec<Option<String>>,
     /// The position table of each block.
     tables: Vec<Vec<i64>>,
@@ -242,7 +268,13 @@ impl State<'_> {
     /// Where a link or image leads, or `None` when it is shown as text.
     fn resolve(&self, address: &str, kind: LinkKind) -> Option<String> {
         match classify(address) {
-            Address::Fragment | Address::Web => Some(address.to_owned()),
+            Address::Fragment => {
+                // A place on the same page carries the page's prefix, as the
+                // ids it may point at do. A fragment always holds its `#`.
+                let (before, place) = address.split_once('#').unwrap_or((address, ""));
+                Some(format!("{before}#{}{place}", self.prefix))
+            }
+            Address::Web => Some(address.to_owned()),
             Address::Refused => None,
             Address::Relative => match self.setup.links.resolve(address, kind) {
                 Resolved::Url(url) => (classify(&url) != Address::Refused).then_some(url),
@@ -635,9 +667,14 @@ fn footnote_reference(
     entering: bool,
 ) -> ChildRendering {
     if entering {
-        put(context, "<sup class=\"footnote-ref\"><a href=\"#fn:");
+        let prefix = context.user.prefix;
+        put(context, "<sup class=\"footnote-ref\"><a href=\"#");
+        put_href(context, prefix);
+        put(context, "fn:");
         put_href(context, &reference.name);
-        put(context, "\" id=\"fnref:");
+        put(context, "\" id=\"");
+        put_href(context, prefix);
+        put(context, "fnref:");
         put_href(context, &reference.name);
         if reference.ref_num > 1 {
             let _ = write!(context, ":{}", reference.ref_num);
@@ -665,7 +702,10 @@ fn footnote_definition(
             put(context, "<section class=\"footnotes\">\n<ol>\n");
         }
         context.user.footnotes += 1;
-        put(context, "<li id=\"fn:");
+        let prefix = context.user.prefix;
+        put(context, "<li id=\"");
+        put_href(context, prefix);
+        put(context, "fn:");
         put_href(context, &definition.name);
         put(context, "\">\n");
         context.user.backref = Some(Backref {
@@ -686,9 +726,12 @@ fn footnote_definition(
 /// them.
 fn write_backref(context: &mut Writer<'_, '_, '_>) {
     if let Some(backref) = context.user.backref.take() {
+        let prefix = context.user.prefix;
         put(context, "<span class=\"footnote-back\" data-gen>");
         for reference in 1..=backref.references {
-            put(context, " <a href=\"#fnref:");
+            put(context, " <a href=\"#");
+            put_href(context, prefix);
+            put(context, "fnref:");
             put_href(context, &backref.name);
             if reference > 1 {
                 let _ = write!(context, ":{reference}");

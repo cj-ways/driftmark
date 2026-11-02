@@ -267,7 +267,7 @@ pub(crate) fn short(id: &str) -> &str {
     id.get(..12).unwrap_or(id)
 }
 
-fn plural(n: usize, word: &str) -> String {
+pub(crate) fn plural(n: usize, word: &str) -> String {
     if n == 1 {
         format!("1 {word}")
     } else if word.ends_with("ch") {
@@ -279,7 +279,7 @@ fn plural(n: usize, word: &str) -> String {
 
 /// A level badge: its sign comes from the style sheet, its word is here, so
 /// the level never shows by colour alone.
-fn badge(level: Level) -> String {
+pub(crate) fn badge(level: Level) -> String {
     format!(
         "<span class=\"lvl\" data-level=\"{}\">{}</span>",
         level_name(level),
@@ -610,7 +610,7 @@ fn field<'f>(fields: &'f [Field], key: &str) -> Option<&'f str> {
 /// The status pills of a reading page: type, status, lifecycle and date.
 /// The status and the date come from the rules file's type, or, when it
 /// names no place for them, from the document's `status` and `date` fields.
-fn pills(classification: Option<&Classification>, fields: &[Field]) -> String {
+pub(crate) fn pills(classification: Option<&Classification>, fields: &[Field]) -> String {
     let Some(class) = classification else {
         return String::new();
     };
@@ -675,7 +675,7 @@ fn capitalized(text: &str) -> String {
 
 /// Puts `extra` into the document HTML right after the title's heading, or
 /// returns it in front when the document has no such heading.
-fn after_title(body: &str, title: Option<&Section>, extra: &str) -> String {
+pub(crate) fn after_title(body: &str, title: Option<&Section>, extra: &str) -> String {
     let at = title.and_then(|title| {
         let opening = format!("<h1 id=\"{}\"", escape(&title.id));
         let start = body.find(&opening)?;
@@ -853,7 +853,7 @@ pub(crate) struct Review<'a> {
 }
 
 /// The first words of a change's text, for the rail.
-fn rail_label(change: &Change) -> String {
+pub(crate) fn rail_label(change: &Change) -> String {
     let text = match &change.subject {
         Subject::Document { document } => document
             .title
@@ -1007,7 +1007,7 @@ fn attention(out: &mut String, page: &Review<'_>) {
 
 /// The counts of a document's changes, as `14 changes: 7 decision, 1
 /// wording, 6 formatting`.
-fn document_counts(summary: &Summary) -> String {
+pub(crate) fn document_counts(summary: &Summary) -> String {
     let levels = level_counts(summary).replace(" · ", ", ");
     if levels.is_empty() {
         plural(summary.changes, "change")

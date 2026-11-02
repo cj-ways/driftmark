@@ -15,16 +15,18 @@
 
 // `address`, `compare`, `placing`, `repo` and `search` are shared with the
 // MCP connector, which answers the same questions over another channel.
+// `assets`, `page` and `repo` are shared with `driftmark export`, which
+// writes the same pages into one file.
 pub(crate) mod address;
 mod app;
 mod args;
-mod assets;
+pub(crate) mod assets;
 mod cache;
 pub(crate) mod compare;
 mod guard;
 mod marker;
 mod notes;
-mod page;
+pub(crate) mod page;
 pub(crate) mod placing;
 pub(crate) mod repo;
 pub(crate) mod search;
