@@ -1,5 +1,10 @@
-# Expected-output files are compared byte for byte by the tests, so git must
-# keep their line endings as written on every system (Git for Windows would
-# otherwise check them out with CRLF). Fixtures have their own rule in
-# fixtures/.gitattributes.
+# Every text file is stored and checked out with LF line endings on every
+# system. The program embeds some of them (presets, templates, page assets)
+# and the tests compare others byte for byte, so Git for Windows must not turn
+# them into CRLF. Fixtures keep their exact bytes, CRLF cases included,
+# through their own rule in fixtures/.gitattributes.
+* text=auto eol=lf
+
+# Expected-output files are compared byte for byte by the tests: no
+# conversion at all.
 *.expected.txt -text

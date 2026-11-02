@@ -11,6 +11,12 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # A hosted runner has about 14 GB free. The workspace's test builds with
+  # debug info filled it on 2026-10-18 (merman, gix, tokio), so CI builds
+  # without debug info or incremental files; test failures still name the
+  # file and line.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   lint:
