@@ -3,12 +3,13 @@
 //! The rules live in `driftmark_core`: ranges, documents, the rules file and
 //! the comparison. This module reads the command line, opens the repository,
 //! runs the comparison on several threads and prints the result, as a short
-//! summary for a person, or in JSON for tools: the whole change list, or
-//! only each document's counts.
+//! summary for a person, in JSON for tools (the whole change list, or only
+//! each document's counts), or as a Markdown comment for a merge request.
 //! `docs/features/commands/diff.md` is the user's guide.
 
 // `export changes` reads its range as `diff` does.
 pub(crate) mod args;
+mod markdown;
 pub(crate) mod rules_file;
 pub(crate) mod text;
 mod work;
@@ -22,7 +23,7 @@ use driftmark_core::diff::{ChangeList, RangeInfo};
 use driftmark_core::git::{BaseBranch, RangeSpec, Snapshot};
 
 use crate::git::Git;
-use args::{Args, Json, Request};
+use args::{Args, Format, Request};
 pub use text::Terminal;
 
 /// Exit code when the comparison ran, whether or not anything changed.
@@ -58,6 +59,12 @@ Options:
                      origin/main, main, origin/master, master, origin/dev, dev)
   --json             print the whole change list as JSON
   --json=summary     print one JSON entry per document with its counts
+  --format <format>  what to print: text (the default), json, json-summary,
+                     or markdown-summary, a short comment for a merge
+                     request with the counts and the ten highest-ranked
+                     changes
+  --link <url>       with markdown-summary: where the full rendered
+                     changes are, such as the CI job's export
   --timings          print the time of each step on standard error
   --threads <n>      read and compare on n threads (default: one per core)
 
@@ -191,16 +198,25 @@ fn write_output(
     terminal: Terminal,
 ) -> std::io::Result<()> {
     let mut out = BufWriter::with_capacity(1 << 16, stdout);
-    match args.json {
-        Some(Json::Full) => {
+    match args.format {
+        Format::Json => {
             serde_json::to_writer(&mut out, list)?;
             out.write_all(b"\n")?;
         }
-        Some(Json::Summary) => {
+        Format::JsonSummary => {
             serde_json::to_writer(&mut out, &list.summary_list())?;
             out.write_all(b"\n")?;
         }
-        None => {
+        Format::MarkdownSummary => {
+            let context = markdown::Context {
+                label: &args.label,
+                roots: &args.roots,
+                skipped,
+                link: args.link.as_deref(),
+            };
+            out.write_all(markdown::summary(list, &context).as_bytes())?;
+        }
+        Format::Text => {
             let context = text::Context {
                 label: &args.label,
                 roots: &args.roots,
@@ -290,13 +306,14 @@ mod tests {
         }
     }
 
-    fn args(json: Option<Json>) -> Args {
+    fn args(format: Format) -> Args {
         Args {
             label: "a..b".to_owned(),
             range: driftmark_core::git::RangeSpec::parse("a..b").unwrap(),
             roots: driftmark_core::git::Roots::all(),
             repo: ".".into(),
-            json,
+            format,
+            link: None,
             timings: false,
             threads: None,
             base: None,
@@ -306,9 +323,15 @@ mod tests {
     #[test]
     fn output_errors_reach_the_caller() {
         let list = ChangeList::new(None, Vec::new());
-        for json in [None, Some(Json::Full), Some(Json::Summary)] {
+        for format in [
+            Format::Text,
+            Format::Json,
+            Format::JsonSummary,
+            Format::MarkdownSummary,
+        ] {
             let mut full = Failing(ErrorKind::StorageFull);
-            let error = write_output(&args(json), &list, 0, &mut full, Terminal::NONE).unwrap_err();
+            let error =
+                write_output(&args(format), &list, 0, &mut full, Terminal::NONE).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::StorageFull);
         }
     }

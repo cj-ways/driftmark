@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Writing check
 
-> Short version: `driftmark lint` checks that Markdown files keep the shape driftmark renders well (decision 0002). It reports each problem with its file, line, column, rule and a message that names the fix. A `[lint]` table in `driftmark.toml` changes how serious a rule is, turns rules off, sets four size limits and names files to leave out. `driftmark hook install` adds the check to Claude Code, so an agent sees the findings right after each edit.
+> Short version: `driftmark lint` checks that Markdown files keep the shape driftmark renders well (decision 0002). It reports each problem with its file, line, column, rule and a message that names the fix. A `[lint]` table in `driftmark.toml` changes how serious a rule is, turns rules off, sets four size limits and names files to leave out. `driftmark hook install` adds the check to Claude Code, so an agent sees the findings right after each edit. In CI, `--changed` checks only the files a merge request changed, and `--format github` or `--format gitlab` prints them in the form the host shows next to the lines.
 
 ## Running it
 
@@ -15,6 +15,8 @@ date: 2026-10-18
 | `driftmark lint docs specs` | Every Markdown file in those folders. |
 | `driftmark lint docs/cache.md` | That one file. |
 | `driftmark lint --json docs` | The same, written as JSON. |
+| `driftmark lint --changed main...feature` | Only the Markdown files that `feature` added or changed since it left `main`. See "Only what a range changed". |
+| `driftmark lint --format github --changed main...feature docs` | The same files under `docs`, as GitHub Actions annotations. See "Output for CI". |
 | `driftmark lint --hook claude-code` | The file in a Claude Code event read from standard input. See "The Claude Code hook". |
 
 - **Which files.** A Markdown file is one whose name ends in `.md` or `.markdown`, in any case. "Every Markdown file in the repository" means the files git tracks and the new files it would offer to track, as `docs/features/engine/git-ranges.md` says for the working tree. Ignored files are left out, and so are the files the `[lint]` table's `exclude` names.
@@ -66,13 +68,63 @@ driftmark lint: 2 files checked, 2 errors and 2 warnings in 1 file
 
 `files` counts the files checked. `findings` is one flat list in the order of the text output.
 
+`--format json` is the same as `--json`. `--format text` is the default. When several are given, the last one counts.
+
+### Output for CI
+
+Two more formats print the same findings in the form a CI host reads. `docs/features/ci.md` says how the GitHub Action and the GitLab template use them.
+
+**`--format github`** prints one GitHub Actions workflow command per finding, then the summary line of the text output:
+
+```text
+::error file=docs/cache.md,line=13,col=5,title=driftmark lint%3A anchor::`#install` is not a heading in `docs/setup.md`; link to a heading that exists; its anchor is its text in lower case, with spaces as `-` and punctuation left out
+::warning file=docs/cache.md,line=9,col=1,title=driftmark lint%3A code-language::this code block names no language; write it after the opening fence, such as ```sh, or ```text for plain text
+driftmark lint: 2 files checked, 1 error and 1 warning in 1 file
+```
+
+- GitHub turns each `::error` and `::warning` line into an annotation on that file and line. A pull request shows it in "Files changed", beside the line.
+- Every value is escaped as GitHub's own toolkit (`@actions/core`) escapes it: `%`, a carriage return and a line feed in the message, and also `:` and `,` in the path and the title. So a line break inside a message cannot end the command and start another one.
+- GitHub shows at most 10 error and 10 warning annotations per step, and 50 per job. The rest stay in the job's log. This is why the CI job checks only the changed files.
+
+**`--format gitlab`** prints a GitLab Code Quality report: one JSON array, with one issue per finding.
+
+```json
+[
+  {
+    "description": "anchor: `#install` is not a heading in `docs/setup.md`; …",
+    "check_name": "anchor",
+    "fingerprint": "6c7f0a4e9b1d2c3f5a8e7d6c4b2a1f0e",
+    "severity": "major",
+    "location": {"path": "docs/cache.md", "lines": {"begin": 13}}
+  }
+]
+```
+
+- These are the fields GitLab requires. An error is `major` and a warning `minor`, from GitLab's scale `info`, `minor`, `major`, `critical`, `blocker`.
+- **The fingerprint** is the first 32 hexadecimal digits of the SHA-256 of the path, the rule, the message, and how many equal findings came before it in the file, each followed by a zero byte. The line is left out on purpose: GitLab marks a finding as new or fixed by comparing fingerprints with the target branch's report, and a finding that only moved down because lines were added above it is still the same finding. The fingerprint in the example above is made up.
+- With no findings it prints `[]`.
+
+Neither format changes the exit codes.
+
+### Only what a range changed
+
+`--changed <range>` checks only the Markdown files that the range added or changed, as they are on disk now.
+
+- The range takes the forms of `driftmark diff`: `a..b`, `a...b` and `auto` (`docs/features/commands/diff.md`). `auto` compares with the branch the rules file's `[compare] default-branch` names, or the first default branch found, as `diff` does. `--since` is not taken.
+- A file the range removed is left out: there is nothing to check.
+- The files are read from disk, so the range's head should be what is checked out. In CI that is the merge request's head commit.
+- **Paths narrow the list.** A folder keeps the changed files inside it, and a file keeps itself if the range changed it. Without paths, every changed file counts.
+- **`exclude` applies to every file**, even one named on its own. Without `--changed`, a file named on the command line is always checked. With it, the paths only narrow the range's files, so a CI job that names its docs folder never checks a fixture the rules file leaves out.
+
+GitHub's own advice for its annotation limit is to filter the findings "by PR touched files" ([actions/toolkit, problem matchers](https://github.com/actions/toolkit/blob/main/docs/problem-matchers.md)). On a large repository a whole-repository check would also report every old problem in files the merge request never touched.
+
 ### Exit codes
 
 | Code | When |
 |---|---|
 | 0 | No finding is an error. Warnings alone exit 0. |
 | 1 | At least one finding is an error. |
-| 2 | The check could not run: an unknown option, a path that does not exist or lies outside the repository, no git repository, or a rules file that is not valid. The reason goes to standard error. |
+| 2 | The check could not run: an unknown option, a path that does not exist or lies outside the repository, no git repository, a rules file that is not valid, or a `--changed` range that is not a range or names no commit. The reason goes to standard error. |
 
 ## The rules
 
@@ -647,7 +699,8 @@ The hook runs after every edit, so one document must be checked in under 50 mill
 - **Anchors from HTML.** An `id` or `name` set in raw HTML does not count as an anchor, and links inside raw HTML are not checked.
 - **Ignored files.** A link to a file git ignores counts as existing, because the check looks at the disk.
 - **Required keys in a masthead.** `required` reads front matter only.
-- **Fixing findings** automatically, and a CI mode, come later in M4.
+- **Fixing findings** automatically.
+- **SARIF output** for GitHub code scanning. The annotations need no extra permission and no upload step.
 - **Hooks for other agents.**
   - Codex has a `PostToolUse` hook that also reports back through exit code 2 and standard error. Its edits arrive as a patch in `tool_input.command`, so a hook must read the file paths out of the patch. Project hooks need the user's trust review.
   - Cursor's `afterFileEdit` hook gets `file_path`, but its reference documents no output the agent sees. Its `postToolUse` hook can return `additional_context`, which reaches the conversation.

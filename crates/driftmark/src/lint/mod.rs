@@ -4,6 +4,7 @@
 //! reads them and the rules file, answers the core's questions about link
 //! targets and diagrams, and prints the findings.
 
+mod ci;
 mod mermaid;
 mod targets;
 
@@ -14,13 +15,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use driftmark_core::git::{GitRead, Roots, Snapshot};
+use driftmark_core::git::{BaseBranch, GitRead, RangeSpec, Roots, Snapshot};
 use driftmark_core::lint::{Finding, LintSettings, Linter, Severity};
 use driftmark_core::rules::Rules;
 use serde_json::json;
 
 use crate::git::Git;
 
+pub use ci::{to_github, to_gitlab};
 pub use mermaid::MermaidCheck;
 pub use targets::FileTargets;
 
@@ -42,7 +44,7 @@ const HOOK_FINDINGS: usize = 50;
 
 /// How `driftmark lint` is called.
 const USAGE: &str = "\
-usage: driftmark lint [--json] [<path>...]
+usage: driftmark lint [--format <format>] [--changed <range>] [<path>...]
        driftmark lint --hook claude-code
 
 Checks Markdown files against driftmark's writing rules. With no path, it
@@ -51,11 +53,130 @@ file in it. Both skip the files that `exclude` in the rules file's [lint]
 table names; a file named on its own is always checked. The rules file is
 driftmark.toml at the repository root.
 
-  --json               print the findings as JSON
+  --format <format>    how to print the findings:
+                         text    one line per finding (the default)
+                         json    one JSON object
+                         github  GitHub Actions annotations
+                         gitlab  a GitLab Code Quality report
+  --json               the same as --format json
+  --changed <range>    check only the Markdown files that <range> added or
+                       changed, such as main...feature, as they are on disk;
+                       paths then narrow the list, and `exclude` applies to
+                       every file
   --hook claude-code   read a Claude Code PostToolUse event on standard input
                        and check the file it edited
 
 Exit codes: 0 no errors, 1 errors found, 2 the check could not run.";
+
+/// How `driftmark lint` prints its findings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// One `path:line:column: severity rule: message` line per finding.
+    Text,
+    /// One JSON object with the counts and every finding.
+    Json,
+    /// GitHub Actions workflow commands, which GitHub shows as annotations.
+    Github,
+    /// A GitLab Code Quality report.
+    Gitlab,
+}
+
+impl Format {
+    /// The format a `--format` value names.
+    fn parse(name: &str) -> Option<Format> {
+        match name {
+            "text" => Some(Format::Text),
+            "json" => Some(Format::Json),
+            "github" => Some(Format::Github),
+            "gitlab" => Some(Format::Gitlab),
+            _ => None,
+        }
+    }
+}
+
+/// The command line of `driftmark lint`.
+#[derive(Debug, PartialEq)]
+struct Options {
+    format: Format,
+    hook: Option<OsString>,
+    changed: Option<RangeSpec>,
+    paths: Vec<PathBuf>,
+}
+
+/// What the command line asks for.
+#[derive(Debug, PartialEq)]
+enum Request {
+    Help,
+    Lint(Options),
+}
+
+/// Reads the arguments after `lint`. Options take their value as the next
+/// argument or after `=`; after `--` every argument is a path.
+///
+/// # Errors
+///
+/// A sentence for the user when the command line is wrong.
+fn parse(args: &[OsString]) -> Result<Request, String> {
+    let mut options = Options {
+        format: Format::Text,
+        hook: None,
+        changed: None,
+        paths: Vec::new(),
+    };
+    let mut args = args.iter();
+    let mut only_paths = false;
+    while let Some(arg) = args.next() {
+        let text = arg.to_str();
+        let (name, inline) = match text.and_then(|text| text.split_once('=')) {
+            Some((name, value)) if name.starts_with("--") && !only_paths => {
+                (Some(name), Some(value))
+            }
+            _ => (text, None),
+        };
+        let mut value = || -> Result<String, String> {
+            let name = name.unwrap_or_default();
+            match inline {
+                Some(value) => Ok(value.to_owned()),
+                None => args
+                    .next()
+                    .ok_or_else(|| format!("`{name}` needs a value"))?
+                    .to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| format!("the value of `{name}` is not valid text")),
+            }
+        };
+        match name {
+            _ if only_paths => options.paths.push(PathBuf::from(arg)),
+            Some("--json") if inline.is_none() => options.format = Format::Json,
+            Some("--format") => {
+                let value = value()?;
+                options.format = Format::parse(&value).ok_or_else(|| {
+                    format!("`--format` takes `text`, `json`, `github` or `gitlab`, not `{value}`")
+                })?;
+            }
+            Some("--changed") => {
+                let value = value()?;
+                options.changed = Some(RangeSpec::parse(&value).map_err(|error| {
+                    format!("`--changed` takes a range such as `main...feature`: {error}")
+                })?);
+            }
+            Some("--hook") => {
+                options.hook = Some(match inline {
+                    Some(agent) => agent.into(),
+                    None => args.next().cloned().unwrap_or_default(),
+                });
+            }
+            Some("--json") => return Err("`--json` takes no value".to_owned()),
+            Some("--help" | "-h") => return Ok(Request::Help),
+            Some("--") => only_paths = true,
+            Some(flag) if flag.starts_with('-') => {
+                return Err(format!("unknown option `{flag}`"));
+            }
+            _ => options.paths.push(PathBuf::from(arg)),
+        }
+    }
+    Ok(Request::Lint(options))
+}
 
 /// One file's findings, with its path from the repository root.
 pub struct FileReport {
@@ -194,36 +315,36 @@ pub fn run(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> u8 {
-    let mut json = false;
-    let mut hook = None;
-    let mut paths = Vec::new();
-    let mut args = args.iter();
-    let mut only_paths = false;
-    while let Some(arg) = args.next() {
-        match arg.to_str() {
-            _ if only_paths => paths.push(PathBuf::from(arg)),
-            Some("--json") => json = true,
-            Some("--hook") => hook = Some(args.next().cloned().unwrap_or_default()),
-            Some("--help" | "-h") => {
-                let _ = writeln!(stdout, "{USAGE}");
-                return EXIT_CLEAN;
-            }
-            Some("--") => only_paths = true,
-            Some(flag) if flag.starts_with('-') => {
-                let _ = writeln!(stderr, "driftmark lint: unknown option `{flag}`\n\n{USAGE}");
-                return EXIT_USAGE;
-            }
-            _ => paths.push(PathBuf::from(arg)),
+    let options = match parse(args) {
+        Ok(Request::Lint(options)) => options,
+        Ok(Request::Help) => {
+            let _ = writeln!(stdout, "{USAGE}");
+            return EXIT_CLEAN;
         }
-    }
+        Err(message) => {
+            let _ = writeln!(stderr, "driftmark lint: {message}\n\n{USAGE}");
+            return EXIT_USAGE;
+        }
+    };
+    let Options {
+        format,
+        hook,
+        changed,
+        paths,
+    } = options;
     match hook {
-        Some(agent) if agent == "claude-code" && !json && paths.is_empty() => {
+        Some(agent)
+            if agent == "claude-code"
+                && format == Format::Text
+                && changed.is_none()
+                && paths.is_empty() =>
+        {
             run_hook(stdin, stderr)
         }
         Some(agent) if agent == "claude-code" => {
             let _ = writeln!(
                 stderr,
-                "driftmark lint: `--hook` reads its file from standard input, so it takes no path and no `--json`\n\n{USAGE}"
+                "driftmark lint: `--hook` reads its file from standard input, so it takes no path and no `--json`, `--format` or `--changed`\n\n{USAGE}"
             );
             EXIT_USAGE
         }
@@ -235,11 +356,17 @@ pub fn run(
             );
             EXIT_USAGE
         }
-        None => run_paths(&paths, json, stdout, stderr),
+        None => run_paths(&paths, format, changed.as_ref(), stdout, stderr),
     }
 }
 
-fn run_paths(paths: &[PathBuf], json: bool, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
+fn run_paths(
+    paths: &[PathBuf],
+    format: Format,
+    changed: Option<&RangeSpec>,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> u8 {
     let fail = |stderr: &mut dyn Write, message: &str| {
         let _ = writeln!(stderr, "driftmark lint: {message}");
         EXIT_USAGE
@@ -261,16 +388,22 @@ fn run_paths(paths: &[PathBuf], json: bool, stdout: &mut dyn Write, stderr: &mut
         Ok(workspace) => workspace,
         Err(message) => return fail(stderr, &message),
     };
-    let files = match select(&root, &cwd, paths, workspace.rules.lint()) {
+    let selected = match changed {
+        None => select(&root, &cwd, paths, workspace.rules.lint()),
+        Some(range) => changed_files(&root, range, &workspace.rules)
+            .and_then(|changed| narrow(&root, &cwd, paths, changed, workspace.rules.lint())),
+    };
+    let files = match selected {
         Ok(files) => files,
         Err(message) => return fail(stderr, &message),
     };
     let reports = workspace.lint(&files);
-    if json {
-        let _ = writeln!(stdout, "{}", to_json(&reports));
-    } else {
-        let _ = write!(stdout, "{}", to_text(&reports));
-    }
+    let _ = match format {
+        Format::Text => write!(stdout, "{}", to_text(&reports)),
+        Format::Json => writeln!(stdout, "{}", to_json(&reports)),
+        Format::Github => write!(stdout, "{}", to_github(&reports)),
+        Format::Gitlab => writeln!(stdout, "{}", to_gitlab(&reports)),
+    };
     let errors = reports
         .iter()
         .flat_map(|report| &report.findings)
@@ -339,6 +472,74 @@ fn select(
     Ok(wanted)
 }
 
+/// The Markdown files that `range` added or changed, relative to the root
+/// and sorted: the files whose newer side exists. A removed file has nothing
+/// left to check. `auto` compares with the branch the rules file names, as
+/// `driftmark diff auto` does.
+fn changed_files(root: &Path, range: &RangeSpec, rules: &Rules) -> Result<Vec<String>, String> {
+    let git =
+        Git::open(root).map_err(|error| format!("the repository could not be read: {error}"))?;
+    let base = rules.default_branch().map_or(BaseBranch::Search, |name| {
+        BaseBranch::Named(name.to_owned())
+    });
+    let resolved = range
+        .resolve_with(&git, &base)
+        .map_err(|error| error.to_string())?;
+    let changes = resolved
+        .changes(&git, &Roots::all())
+        .map_err(|error| format!("the changed files could not be listed: {error}"))?;
+    Ok(changes
+        .iter()
+        .filter(|change| change.new_blob().is_some())
+        .filter_map(|change| std::str::from_utf8(change.path().as_bytes()).ok())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The changed files that the paths keep, without the ones `exclude`
+/// names. A folder keeps the files inside it and a file keeps itself; no
+/// path keeps them all. Unlike a plain run, a file named on its own is still
+/// left out when `exclude` names it: with `--changed` the paths only narrow
+/// the range's files, so a CI job that names its docs folder never checks a
+/// fixture the rules file leaves out.
+fn narrow(
+    root: &Path,
+    cwd: &Path,
+    paths: &[PathBuf],
+    changed: Vec<String>,
+    settings: &LintSettings,
+) -> Result<Vec<String>, String> {
+    let mut keep = Vec::new();
+    for path in paths {
+        let full = cwd
+            .join(path)
+            .canonicalize()
+            .map_err(|_| format!("there is no file or folder `{}`", path.display()))?;
+        let inside = relative(root, &full).ok_or_else(|| {
+            format!(
+                "`{}` is outside the repository at {}",
+                path.display(),
+                root.display()
+            )
+        })?;
+        keep.push(inside);
+    }
+    Ok(changed
+        .into_iter()
+        .filter(|file| {
+            keep.is_empty()
+                || keep.iter().any(|kept| {
+                    kept.is_empty()
+                        || file == kept
+                        || file
+                            .strip_prefix(kept.as_str())
+                            .is_some_and(|rest| rest.starts_with('/'))
+                })
+        })
+        .filter(|file| !settings.excludes(file))
+        .collect())
+}
+
 /// `n thing` or `n things`.
 fn count(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
@@ -370,7 +571,7 @@ pub fn finding_line(path: &str, finding: &Finding) -> String {
 }
 
 /// The last line of the text output.
-fn summary(reports: &[FileReport]) -> String {
+pub(crate) fn summary(reports: &[FileReport]) -> String {
     let all = || reports.iter().flat_map(|report| &report.findings);
     let errors = all()
         .filter(|finding| finding.severity == Severity::Error)
@@ -510,4 +711,109 @@ fn run_hook(stdin: &mut dyn Read, stderr: &mut dyn Write) -> u8 {
     }
     let _ = write!(stderr, "{text}");
     2
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_words(words: &[&str]) -> Result<Request, String> {
+        let args: Vec<OsString> = words.iter().map(OsString::from).collect();
+        parse(&args)
+    }
+
+    fn options(words: &[&str]) -> Options {
+        match parse_words(words) {
+            Ok(Request::Lint(options)) => options,
+            other => panic!("{words:?}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn format_takes_four_names_and_json_is_one_of_them() {
+        assert_eq!(options(&[]).format, Format::Text);
+        assert_eq!(options(&["--json"]).format, Format::Json);
+        assert_eq!(options(&["--format", "github"]).format, Format::Github);
+        assert_eq!(options(&["--format=gitlab"]).format, Format::Gitlab);
+        assert_eq!(options(&["--format=json"]).format, Format::Json);
+        assert_eq!(
+            options(&["--json", "--format", "text"]).format,
+            Format::Text,
+            "the last one counts"
+        );
+    }
+
+    #[test]
+    fn changed_takes_a_range_and_paths_stay_paths() {
+        let options = options(&["--changed", "main...feature", "docs", "--", "--odd.md"]);
+        assert_eq!(
+            options.changed,
+            Some(RangeSpec::parse("main...feature").unwrap())
+        );
+        assert_eq!(
+            options.paths,
+            [PathBuf::from("docs"), PathBuf::from("--odd.md")]
+        );
+        assert_eq!(
+            self::options(&["--changed=auto"]).changed,
+            Some(RangeSpec::Auto)
+        );
+        assert_eq!(
+            self::options(&["--", "--format=github"]).format,
+            Format::Text,
+            "after `--`, everything is a path"
+        );
+    }
+
+    #[test]
+    fn hook_keeps_its_value_whichever_way_it_is_written() {
+        assert_eq!(
+            options(&["--hook", "claude-code"]).hook,
+            Some("claude-code".into())
+        );
+        assert_eq!(
+            options(&["--hook=claude-code"]).hook,
+            Some("claude-code".into())
+        );
+        assert_eq!(options(&["--hook"]).hook, Some(OsString::new()));
+    }
+
+    #[test]
+    fn mistakes_are_named() {
+        let cases: [(&[&str], &str); 7] = [
+            (
+                &["--format", "sarif"],
+                "`--format` takes `text`, `json`, `github` or `gitlab`, not `sarif`",
+            ),
+            (&["--format"], "`--format` needs a value"),
+            (&["--changed"], "`--changed` needs a value"),
+            (
+                &["--changed", "main"],
+                "`--changed` takes a range such as `main...feature`: `main` is not a range",
+            ),
+            (&["--json=yes"], "`--json` takes no value"),
+            (&["--nope"], "unknown option `--nope`"),
+            (&["--nope=1"], "unknown option `--nope`"),
+        ];
+        for (words, wanted) in cases {
+            match parse_words(words) {
+                Err(message) => assert!(message.starts_with(wanted), "{words:?}: {message}"),
+                other => panic!("{words:?} was accepted: {other:?}"),
+            }
+        }
+        assert_eq!(parse_words(&["docs", "-h"]), Ok(Request::Help));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_value_that_is_not_text_is_refused() {
+        use std::os::unix::ffi::OsStringExt;
+        let odd = OsString::from_vec(b"caf\xe9".to_vec());
+        let message = parse(&["--changed".into(), odd.clone()]).unwrap_err();
+        assert_eq!(message, "the value of `--changed` is not valid text");
+        let Ok(Request::Lint(options)) = parse(std::slice::from_ref(&odd)) else {
+            panic!("a path need not be text");
+        };
+        assert_eq!(options.paths, [PathBuf::from(odd)]);
+    }
 }

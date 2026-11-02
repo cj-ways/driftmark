@@ -575,3 +575,75 @@ fn base_or_the_rules_file_names_the_branch_auto_compares_with() {
         "{err}"
     );
 }
+
+#[test]
+fn markdown_summary_is_one_comment_with_a_marker_and_a_link() {
+    let r = repo();
+    let (code, out, err) = driftmark(
+        &r.repo.dir,
+        &[
+            "diff",
+            "main...feature",
+            "--format",
+            "markdown-summary",
+            "--link",
+            "https://example.com/runs/1/artifacts/2",
+        ],
+    );
+    assert_eq!(err, "");
+    assert_eq!(code, 0);
+    assert_eq!(
+        out,
+        format!(
+            "\
+<!-- driftmark:changes -->
+### Documentation changes
+
+**6 documents changed, 10 changes**: 3 decision, 5 fact, 2 wording.
+
+Highest ranked first:
+
+1. **decision**, edited · `docs/decisions/cache.md`: `status: accepted`
+2. **decision**, edited · `docs/decisions/cache.md` › `Cache rendered pages › Decision`: `Keep each rendered page in the cache for 90 minutes.`
+3. **decision**, added · `docs/decisions/cache.md` › `Cache rendered pages › Decision`: `Never cache a page with open notes.`
+4. **fact**, removed · `docs/decisions/cache.md` › `Cache rendered pages`: `Notes`
+5. **fact**, deleted document · `README.md`: `Readme`
+6. **fact**, new document · `docs/new.md`: `New`
+7. **fact**, deleted document · `docs/old.md`: `Old`
+8. **fact**, new document · `docs/readme.md`: `Readme`
+9. **wording**, removed · `docs/decisions/cache.md` › `Cache rendered pages › Notes`: `The cache lives in memory.`
+10. **wording**, edited · `docs/guide.md` › `Guide`: `Read the whole setup first.`
+
+**[Every change, rendered](<https://example.com/runs/1/artifacts/2>)**: one HTML file that opens offline in any browser, with each changed document in full.
+
+<sub>driftmark {} compared `{}` with `{}`.</sub>
+",
+            driftmark_core::version(),
+            short(&r.main),
+            short(&r.feature)
+        )
+    );
+    // The same list in the other forms: the counts agree.
+    let (_, json, _) = driftmark(&r.repo.dir, &["diff", "main...feature", "--json=summary"]);
+    let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(json["totals"]["changes"], 10);
+    // Without a link, the comment says how to make the file.
+    let (_, out, _) = driftmark(
+        &r.repo.dir,
+        &[
+            "diff",
+            "main...feature",
+            "--format=markdown-summary",
+            "--",
+            "docs",
+        ],
+    );
+    assert!(
+        out.contains(
+            "\nEvery change, rendered: run `driftmark export changes main...feature` for one HTML file that opens offline.\n"
+        ),
+        "{out}"
+    );
+    assert!(out.contains(", only in `docs`.</sub>\n"), "{out}");
+    assert!(out.contains("**5 documents changed, 9 changes**"), "{out}");
+}

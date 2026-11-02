@@ -1,0 +1,125 @@
+name: driftmark
+description: >-
+  Render a pull request's documentation changes as driftmark sees them, attach
+  them as one HTML file, post or update one short comment with the ranked
+  summary, and show the writing check's findings next to the lines.
+author: cj-ways
+
+# docs/features/ci.md is the guide. Every input reaches the script through
+# the environment, never pasted into a command, so a branch name or a folder
+# cannot run as shell code.
+
+inputs:
+  base:
+    description: >-
+      The commit to compare with. The pull request's base commit by default;
+      driftmark compares the head with where it left the base, as the pull
+      request's own diff does.
+    default: ${{ github.event.pull_request.base.sha }}
+  head:
+    description: The commit to review. The pull request's head commit by default.
+    default: ${{ github.event.pull_request.head.sha }}
+  folders:
+    description: >-
+      The folders to read, from the repository root, separated by spaces or
+      lines, such as `docs specs`. Empty means every Markdown file.
+    default: ""
+  comment:
+    description: >-
+      `true` posts one comment on the pull request and updates it on every
+      later push; `false` only writes the job summary.
+    default: "true"
+  lint:
+    description: >-
+      `report` shows the writing check's findings in the changed files as
+      annotations, `fail` also fails the job on an error, `off` skips it.
+    default: report
+  version:
+    description: >-
+      `source` builds driftmark from this action's own repository at the
+      action's ref, cached by its sources. A version such as `0.1.0`, or
+      `latest`, downloads that release instead, once releases exist.
+      `installed` uses the driftmark already on PATH.
+    default: source
+
+outputs:
+  documents:
+    description: How many Markdown documents the range changed.
+    value: ${{ steps.check.outputs.documents }}
+  export:
+    description: The path of the HTML file with every change, when one was written.
+    value: ${{ steps.check.outputs.export }}
+  artifact-url:
+    description: The address of the uploaded HTML file.
+    value: ${{ steps.upload.outputs.artifact-url }}
+  comment-url:
+    description: The address of the comment posted or updated.
+    value: ${{ steps.comment.outputs.comment-url }}
+
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/driftmark.sh" key
+      env:
+        DRIFTMARK_VERSION: ${{ inputs.version }}
+
+    - id: restore
+      if: inputs.version == 'source'
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}
+
+    - shell: bash
+      run: bash "$GITHUB_ACTION_PATH/driftmark.sh" install
+      env:
+        DRIFTMARK_VERSION: ${{ inputs.version }}
+        DRIFTMARK_DIR: ${{ steps.key.outputs.dir }}
+        DRIFTMARK_REPOSITORY: ${{ github.action_repository }}
+
+    # Saved right after the build, so a later failing step does not lose it.
+    - if: inputs.version == 'source' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}
+
+    - id: check
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/driftmark.sh" check
+      env:
+        DRIFTMARK_BASE: ${{ inputs.base }}
+        DRIFTMARK_HEAD: ${{ inputs.head }}
+        DRIFTMARK_FOLDERS: ${{ inputs.folders }}
+        DRIFTMARK_LINT: ${{ inputs.lint }}
+
+    # The file itself, not a zip: a reviewer downloads it and opens it.
+    - id: upload
+      if: steps.check.outputs.export != ''
+      uses: actions/upload-artifact@v7
+      with:
+        path: ${{ steps.check.outputs.export }}
+        archive: false
+        overwrite: true
+        if-no-files-found: error
+
+    - id: comment
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/driftmark.sh" comment
+      env:
+        DRIFTMARK_BASE: ${{ inputs.base }}
+        DRIFTMARK_HEAD: ${{ inputs.head }}
+        DRIFTMARK_FOLDERS: ${{ inputs.folders }}
+        DRIFTMARK_COMMENT: ${{ inputs.comment }}
+        DRIFTMARK_DOCUMENTS: ${{ steps.check.outputs.documents }}
+        DRIFTMARK_LINK: ${{ steps.upload.outputs.artifact-url }}
+        DRIFTMARK_PR: ${{ github.event.pull_request.number }}
+        GITHUB_TOKEN: ${{ github.token }}
+
+    - shell: bash
+      run: bash "$GITHUB_ACTION_PATH/driftmark.sh" finish
+      env:
+        DRIFTMARK_LINT: ${{ inputs.lint }}
+        DRIFTMARK_LINT_ERRORS: ${{ steps.check.outputs.lint-errors }}

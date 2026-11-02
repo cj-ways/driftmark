@@ -160,7 +160,7 @@ pub(crate) fn summary(list: &ChangeList, context: &Context<'_>) -> String {
 /// The path in at most `room` characters. A longer path loses its first
 /// folders, written `.../`, so the file name and its nearest folders stay.
 /// When even the file name does not fit, it keeps its last characters.
-fn shorten(path: &str, room: usize) -> String {
+pub(crate) fn shorten(path: &str, room: usize) -> String {
     if path.chars().count() <= room {
         return path.to_owned();
     }
@@ -315,12 +315,12 @@ fn paint(text: &str, level: Option<Level>, colour: bool) -> String {
 }
 
 /// `1 thing` or `2 things`, with thousands separated.
-fn plural(n: usize, one: &str, many: &str) -> String {
+pub(crate) fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{} {}", number(n), if n == 1 { one } else { many })
 }
 
 /// A whole number with a comma between thousands: `161,799`.
-fn number(n: usize) -> String {
+pub(crate) fn number(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, digit) in digits.chars().enumerate() {
@@ -333,7 +333,7 @@ fn number(n: usize) -> String {
 }
 
 /// The first 12 characters of a commit id.
-fn short(id: &str) -> String {
+pub(crate) fn short(id: &str) -> String {
     id.chars().take(12).collect()
 }
 

@@ -1,0 +1,219 @@
+# driftmark for GitLab merge requests.
+#
+# On every merge request pipeline, the `driftmark` job:
+#   - renders the merge request's documentation changes into one HTML file,
+#     kept as an artifact and linked from the merge request ("driftmark
+#     changes");
+#   - posts one short note with the ranked summary and a link, and updates
+#     that same note on every later push;
+#   - checks the changed Markdown files and exposes the findings as a Code
+#     Quality report.
+#
+# Use it with `include:` and set the token variable; docs/features/ci.md in
+# github.com/cj-ways/driftmark says how, and which token scope it needs.
+#
+# Variables (override them in your own `driftmark:` job):
+#   DRIFTMARK_FOLDERS   folders to read, from the repository root, separated
+#                       by spaces, such as "docs specs"; empty reads every
+#                       Markdown file
+#   DRIFTMARK_COMMENT   "true" posts and updates the note; "false" does not
+#   DRIFTMARK_LINT      "report" keeps the Code Quality report, "fail" also
+#                       fails the job on an error, "off" skips the check
+#   DRIFTMARK_VERSION   "source" builds driftmark with cargo from
+#                       DRIFTMARK_SOURCE at DRIFTMARK_REF, cached; a version
+#                       such as "0.1.0", or "latest", downloads that release
+#                       from DRIFTMARK_RELEASES; "installed" uses the
+#                       driftmark on the image's PATH
+#   DRIFTMARK_GITLAB_TOKEN  set it in the project's CI/CD variables, masked:
+#                       a project access token with the `api` scope and the
+#                       Reporter role, which posts the note
+
+driftmark:
+  stage: test
+  # Rust for `source`. With a release or `installed`, any image with bash,
+  # git and curl will do; jq is installed when it is missing.
+  image: rust:1
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    # Both ends of the merge request must be in the clone.
+    GIT_DEPTH: "0"
+    DRIFTMARK_FOLDERS: ""
+    DRIFTMARK_COMMENT: "true"
+    DRIFTMARK_LINT: "report"
+    DRIFTMARK_VERSION: "source"
+    DRIFTMARK_SOURCE: "https://github.com/cj-ways/driftmark.git"
+    DRIFTMARK_REF: "main"
+    DRIFTMARK_RELEASES: "https://github.com/cj-ways/driftmark/releases"
+  # The script checks the cached build's commit, so one key serves every ref.
+  cache:
+    key: driftmark-build
+    paths:
+      - .driftmark-ci/
+  script:
+    - |
+      # --- driftmark script begins ---
+      set -eo pipefail
+      dm_die() { echo "driftmark: $*" >&2; exit 1; }
+      dm_tmp=$(mktemp -d)
+
+      # Tools: git and curl from the image; jq when it is missing.
+      for tool in git curl; do
+        command -v "$tool" >/dev/null || dm_die "$tool is not installed in this image"
+      done
+      if ! command -v jq >/dev/null; then
+        if command -v apt-get >/dev/null; then
+          apt-get update -qq && apt-get install -qq -y jq >/dev/null
+        elif command -v apk >/dev/null; then
+          apk add --quiet jq
+        else
+          dm_die "jq is not installed in this image"
+        fi
+      fi
+      dm_sha256() {
+        if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi
+      }
+
+      # driftmark itself: built from source, downloaded, or already there.
+      dm_bin="$CI_PROJECT_DIR/.driftmark-ci/bin"
+      case "$DRIFTMARK_VERSION" in
+        installed)
+          command -v driftmark >/dev/null || dm_die "DRIFTMARK_VERSION is installed, but driftmark is not on PATH"
+          dm_bin=$(dirname "$(command -v driftmark)")
+          ;;
+        source)
+          if [[ "$DRIFTMARK_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            dm_rev=$DRIFTMARK_REF
+          else
+            dm_rev=$(git ls-remote "$DRIFTMARK_SOURCE" "$DRIFTMARK_REF" | head -n 1 | cut -f 1)
+            [ -n "$dm_rev" ] || dm_die "no $DRIFTMARK_REF in $DRIFTMARK_SOURCE"
+          fi
+          if [ -x "$dm_bin/driftmark" ] && [ "$(cat "$CI_PROJECT_DIR/.driftmark-ci/rev" 2>/dev/null)" = "$dm_rev" ]; then
+            echo "driftmark $dm_rev is cached."
+          else
+            command -v cargo >/dev/null || dm_die "cargo is not installed; use a Rust image or a release"
+            echo "Building driftmark $dm_rev; the next pipeline takes it from the cache."
+            # A dev build, as driftmark's own CI makes: no debug info and no
+            # incremental files, to fit small runners, and three times faster
+            # to compile than a release. Stripped, and without debug
+            # assertions or overflow checks, so it behaves as a release does.
+            CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_STRIP=symbols \
+              CARGO_PROFILE_DEV_DEBUG_ASSERTIONS=false CARGO_PROFILE_DEV_OVERFLOW_CHECKS=false \
+              CARGO_TARGET_DIR="$dm_tmp/target" \
+              cargo install --debug --locked --force --git "$DRIFTMARK_SOURCE" --rev "$dm_rev" \
+              --root "$CI_PROJECT_DIR/.driftmark-ci" driftmark
+            echo "$dm_rev" >"$CI_PROJECT_DIR/.driftmark-ci/rev"
+          fi
+          ;;
+        *)
+          case "$(uname -m)" in
+            x86_64 | amd64) dm_file=driftmark-x86_64-unknown-linux-gnu.tar.gz ;;
+            aarch64 | arm64) dm_file=driftmark-aarch64-unknown-linux-gnu.tar.gz ;;
+            *) dm_die "no driftmark release for the processor $(uname -m)" ;;
+          esac
+          if [ "$DRIFTMARK_VERSION" = latest ]; then
+            dm_url="$DRIFTMARK_RELEASES/latest/download"
+          else
+            dm_url="$DRIFTMARK_RELEASES/download/v${DRIFTMARK_VERSION#v}"
+          fi
+          dm_bin="$dm_tmp/release"
+          mkdir -p "$dm_bin"
+          curl -fsSL --retry 3 -o "$dm_bin/$dm_file" "$dm_url/$dm_file" || dm_die "could not download $dm_url/$dm_file"
+          curl -fsSL --retry 3 -o "$dm_bin/SHA256SUMS" "$dm_url/SHA256SUMS" || dm_die "could not download $dm_url/SHA256SUMS"
+          dm_sum=$(grep -E "^[0-9a-f]{64}  \*?$dm_file\$" "$dm_bin/SHA256SUMS" | cut -c1-64) || dm_die "SHA256SUMS names no $dm_file"
+          [ "$(dm_sha256 "$dm_bin/$dm_file" | cut -c1-64)" = "$dm_sum" ] || dm_die "$dm_file does not match its SHA256SUMS line"
+          tar -xzf "$dm_bin/$dm_file" -C "$dm_bin"
+          ;;
+      esac
+      export PATH="$dm_bin:$PATH"
+      driftmark --version
+
+      # The range: what the source branch added since it left the target.
+      dm_base=${CI_MERGE_REQUEST_DIFF_BASE_SHA:?run this job in a merge request pipeline}
+      dm_head=${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-$CI_COMMIT_SHA}
+      dm_range="$dm_base...$dm_head"
+      for dm_commit in "$dm_base" "$dm_head"; do
+        git cat-file -e "$dm_commit^{commit}" 2>/dev/null || dm_die "commit $dm_commit is not in this clone; set GIT_DEPTH to 0"
+      done
+      dm_folders=()
+      set -f
+      for dm_word in $DRIFTMARK_FOLDERS; do dm_folders+=("$dm_word"); done
+      set +f
+      dm_documents=$(driftmark diff "$dm_range" --json=summary -- ${dm_folders[@]+"${dm_folders[@]}"} | jq '.documents | length')
+      echo "driftmark: Markdown documents changed in $dm_range: $dm_documents."
+
+      # The writing check, as a Code Quality report.
+      dm_lint=0
+      case "$DRIFTMARK_LINT" in
+        off) echo "[]" >driftmark-code-quality.json ;;
+        report | fail)
+          driftmark lint --format gitlab --changed "$dm_range" ${dm_folders[@]+"${dm_folders[@]}"} >driftmark-code-quality.json || dm_lint=$?
+          [ "$dm_lint" -le 1 ] || dm_die "driftmark lint could not run (exit code $dm_lint)"
+          echo "driftmark lint: findings in the changed documents: $(jq length driftmark-code-quality.json)."
+          ;;
+        *) dm_die "DRIFTMARK_LINT takes report, fail or off, not $DRIFTMARK_LINT" ;;
+      esac
+
+      # Every change, rendered as one HTML file.
+      dm_link=()
+      if [ "$dm_documents" -gt 0 ]; then
+        driftmark export changes "$dm_range" -o driftmark-changes.html -- ${dm_folders[@]+"${dm_folders[@]}"}
+        dm_link=(--link "$CI_JOB_URL/artifacts/file/driftmark-changes.html")
+      fi
+
+      # The note: posted once, then updated on every later push.
+      driftmark diff "$dm_range" --format markdown-summary ${dm_link[@]+"${dm_link[@]}"} -- ${dm_folders[@]+"${dm_folders[@]}"} >"$dm_tmp/note.md"
+      cat "$dm_tmp/note.md"
+      dm_api() {
+        local args=(-sS -X "$1" -o "$dm_tmp/response" -w '%{http_code}' -H "PRIVATE-TOKEN: $DRIFTMARK_GITLAB_TOKEN")
+        if [ -n "${3:-}" ]; then args+=(--data-urlencode "body@$3"); fi
+        curl "${args[@]}" "$CI_API_V4_URL$2" || true
+      }
+      dm_cannot() {
+        echo "driftmark: could not write the note (HTTP $1: $(jq -r '.message // .error // empty' "$dm_tmp/response" 2>/dev/null || true)); DRIFTMARK_GITLAB_TOKEN needs the api scope and a role that can comment"
+      }
+      dm_notes="/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+      if [ "$DRIFTMARK_COMMENT" != true ]; then
+        echo "driftmark: DRIFTMARK_COMMENT is $DRIFTMARK_COMMENT, so no note."
+      elif [ -z "${DRIFTMARK_GITLAB_TOKEN:-}" ]; then
+        echo "driftmark: no DRIFTMARK_GITLAB_TOKEN variable, so no note; docs/features/ci.md says how to make one."
+      elif dm_status=$(dm_api GET /user) && [ "$dm_status" != 200 ]; then
+        dm_cannot "$dm_status"
+      else
+        dm_me=$(jq -r .id "$dm_tmp/response")
+        dm_marker=$(head -n 1 "$dm_tmp/note.md")
+        dm_found=""
+        dm_page=1
+        while :; do
+          dm_status=$(dm_api GET "$dm_notes?sort=asc&order_by=created_at&per_page=100&page=$dm_page")
+          [ "$dm_status" = 200 ] || break
+          dm_found=$(jq -r --arg marker "$dm_marker" --argjson me "$dm_me" \
+            'map(select(.system == false and .author.id == $me and (.body | startswith($marker)))) | .[0].id // empty' "$dm_tmp/response")
+          [ -z "$dm_found" ] && [ "$(jq length "$dm_tmp/response")" -eq 100 ] || break
+          dm_page=$((dm_page + 1))
+        done
+        if [ "$dm_status" != 200 ]; then
+          dm_cannot "$dm_status"
+        elif [ -n "$dm_found" ]; then
+          dm_status=$(dm_api PUT "$dm_notes/$dm_found" "$dm_tmp/note.md")
+          if [ "$dm_status" = 200 ]; then echo "driftmark: updated note $dm_found."; else dm_cannot "$dm_status"; fi
+        elif [ "$dm_documents" -gt 0 ]; then
+          dm_status=$(dm_api POST "$dm_notes" "$dm_tmp/note.md")
+          if [ "$dm_status" = 201 ]; then echo "driftmark: posted note $(jq -r .id "$dm_tmp/response")."; else dm_cannot "$dm_status"; fi
+        else
+          echo "driftmark: no Markdown document changed and no note to update."
+        fi
+      fi
+
+      if [ "$DRIFTMARK_LINT" = fail ] && [ "$dm_lint" = 1 ]; then
+        dm_die "driftmark lint found errors in the changed documents; see the Code Quality report"
+      fi
+      # --- driftmark script ends ---
+  artifacts:
+    when: always
+    expire_in: 30 days
+    expose_as: driftmark changes
+    paths:
+      - driftmark-changes.html
+    reports:
+      codequality: driftmark-code-quality.json

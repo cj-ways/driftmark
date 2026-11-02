@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # The diff command
 
-> Short version: `driftmark diff <range>` compares the Markdown files of a git repository between two points. It prints one line per changed document with its highest level and its counts, then the totals. `--json` prints the whole change list instead, for tools, and `--json=summary` prints only each document's counts. The rules file is read at the newer side of the range. The exit code is 0 when it ran, 1 when it could not finish, and 2 when the command line is wrong.
+> Short version: `driftmark diff <range>` compares the Markdown files of a git repository between two points. It prints one line per changed document with its highest level and its counts, then the totals. `--json` prints the whole change list instead, for tools, and `--json=summary` prints only each document's counts. `--format markdown-summary` prints a short Markdown comment for a merge request. The rules file is read at the newer side of the range. The exit code is 0 when it ran, 1 when it could not finish, and 2 when the command line is wrong.
 
 ## Running it
 
@@ -34,6 +34,8 @@ driftmark diff [<options>] --since <date> [<branch>] [-- <folder>...]
 | `--base <branch>` | The branch `auto` compares with. It wins over the rules file's `[compare] default-branch`; without either, `auto` takes the first that exists of `origin/main`, `main`, `origin/master`, `master`, `origin/dev`, `dev`. Only `auto` takes it: every other range names its own points. |
 | `--json` | Print the whole change list as JSON instead of the summary. |
 | `--json=summary` | Print one JSON entry per document instead: its path, what happened to the file, its highest level and its counts. |
+| `--format <format>` | What to print: `text` (the summary, the default), `json` (as `--json`), `json-summary` (as `--json=summary`) or `markdown-summary` (a comment for a merge request; see "The Markdown summary"). When several of `--json` and `--format` are given, the last one counts. |
+| `--link <url>` | With `--format markdown-summary`: where the full rendered changes are, such as the CI job's export. It must start with `https://` or `http://`, have at most 2,048 characters, and hold no space, `<`, `>` or backslash. |
 | `--timings` | Print the time of each step on standard error. Standard output does not change. |
 | `--threads <n>` | Read, parse and compare files on `n` threads. The default is one per processor core. |
 | `--help` | Print the usage text. |
@@ -146,6 +148,36 @@ The JSON holds the plain text of every block that changed, and the full text of 
 
 30 days of the private corpus give 0.76 MB this way, against 47.0 MB for `--json`. A tool reads the summary first, then asks for the whole list only when it needs the changes.
 
+## The Markdown summary
+
+`--format markdown-summary` prints a short comment for a GitHub pull request or a GitLab merge request. The CI job posts it and updates it on every later push (`docs/features/ci.md`). For the example above, with `--link https://example.com/runs/1/artifacts/2`:
+
+```text
+<!-- driftmark:changes -->
+### Documentation changes
+
+**6 documents changed, 10 changes**: 3 decision, 5 fact, 2 wording.
+
+Highest ranked first:
+
+1. **decision**, edited · `docs/decisions/cache.md`: `status: accepted`
+2. **decision**, edited · `docs/decisions/cache.md` › `Cache rendered pages › Decision`: `Keep each rendered page in the cache for 90 minutes.`
+3. **decision**, added · `docs/decisions/cache.md` › `Cache rendered pages › Decision`: `Never cache a page with open notes.`
+4. **fact**, removed · `docs/decisions/cache.md` › `Cache rendered pages`: `Notes`
+5. **fact**, deleted document · `README.md`: `Readme`
+6. **fact**, new document · `docs/new.md`: `New`
+7. **fact**, deleted document · `docs/old.md`: `Old`
+8. **fact**, new document · `docs/readme.md`: `Readme`
+9. **wording**, removed · `docs/decisions/cache.md` › `Cache rendered pages › Notes`: `The cache lives in memory.`
+10. **wording**, edited · `docs/guide.md` › `Guide`: `Read the whole setup first.`
+
+**[Every change, rendered](<https://example.com/runs/1/artifacts/2>)**: one HTML file that opens offline in any browser, with each changed document in full.
+
+<sub>driftmark 0.0.0 compared `3828db3aa184` with `2cc1179a6f87`.</sub>
+```
+
+`crates/driftmark/tests/diff_command.rs` checks this text; only the commit ids differ, because the test makes new commits each time. `docs/features/ci.md` says how the changes are ranked, how the comment stays short, and why every text from the repository sits in a code span.
+
 ## Files that cannot be compared
 
 A version that driftmark cannot parse skips its file instead of stopping the command: a file that is not UTF-8 text, or one that nests more than 100 levels deep. The file is left out of the summary and the JSON. Standard error names it and the reason:
@@ -187,7 +219,7 @@ driftmark diff: 6 changed files, 8 versions, 7 parsed
 |---|---|
 | 0 | It ran, whether or not anything changed. Skipped files do not change this. |
 | 1 | It could not finish: the folder is not inside a git repository, a name leads to no commit, two points share no history, `auto` finds no default branch or the named one does not exist, the rules file is broken, git cannot be read, or the output cannot be written. The reason goes to standard error. |
-| 2 | The command line is wrong: an unknown option, a missing range or value, text that is not a range, a date in neither form, `--threads` below 1, `--base` with a range other than `auto`, or a folder that cannot be inside a repository. The reason and the usage text go to standard error. driftmark finds these before it opens anything. |
+| 2 | The command line is wrong: an unknown option, a missing range or value, text that is not a range, a date in neither form, `--threads` below 1, `--base` with a range other than `auto`, an unknown `--format`, `--link` without `--format markdown-summary` or with an address it does not take, or a folder that cannot be inside a repository. The reason and the usage text go to standard error. driftmark finds these before it opens anything. |
 
 Standard output is empty for codes 1 and 2. A reader that stops early, such as `driftmark diff auto | head`, does not count as a failed write; the code stays 0. Any other code, such as 101, means driftmark crashed, which is a bug.
 

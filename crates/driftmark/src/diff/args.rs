@@ -16,14 +16,37 @@ pub(crate) enum Request {
     Diff(Args),
 }
 
-/// Which JSON `--json` asks for.
+/// What `driftmark diff` prints. The last of `--json`, `--json=summary`
+/// and `--format` on the command line counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Json {
+pub(crate) enum Format {
+    /// The summary for a person: one line per document, then the totals.
+    Text,
     /// `--json`: the whole change list.
-    Full,
+    Json,
     /// `--json=summary`: one entry per document with its counts.
-    Summary,
+    JsonSummary,
+    /// `--format markdown-summary`: a short Markdown comment for a merge
+    /// request.
+    MarkdownSummary,
 }
+
+impl Format {
+    /// The format a `--format` value names.
+    fn parse(name: &str) -> Option<Format> {
+        match name {
+            "text" => Some(Format::Text),
+            "json" => Some(Format::Json),
+            "json-summary" => Some(Format::JsonSummary),
+            "markdown-summary" => Some(Format::MarkdownSummary),
+            _ => None,
+        }
+    }
+}
+
+/// The longest address `--link` takes. A browser takes about this much in
+/// its address bar, and it keeps the comment short.
+pub(crate) const MAX_LINK: usize = 2048;
 
 /// The arguments of one comparison.
 #[derive(Debug, PartialEq)]
@@ -38,9 +61,11 @@ pub(crate) struct Args {
     pub roots: Roots,
     /// A folder inside the repository.
     pub repo: PathBuf,
-    /// Print JSON instead of the text summary: the whole change list, or
-    /// only each document's counts.
-    pub json: Option<Json>,
+    /// What to print: the text summary, JSON, or a Markdown comment.
+    pub format: Format,
+    /// Where the full rendered changes are, for the Markdown comment's last
+    /// line: an `http` or `https` address.
+    pub link: Option<String>,
     /// Print the time of each step on standard error.
     pub timings: bool,
     /// How many threads read, parse and compare files; `None` means one per
@@ -61,7 +86,8 @@ pub(crate) struct Args {
 ///
 /// A sentence for the user when the command line is wrong.
 pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
-    let mut json = None;
+    let mut format = Format::Text;
+    let mut link = None;
     let mut timings = false;
     let mut repo = None;
     let mut threads = None;
@@ -97,17 +123,16 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
                     folders.push(folder.to_owned());
                 }
             }
-            "--json" => {
-                json = Some(match inline {
-                    None => Json::Full,
-                    Some("summary") => Json::Summary,
-                    Some(other) => {
-                        return Err(format!(
-                            "`--json` takes only `summary` after `=`, not `{other}`"
-                        ));
-                    }
-                });
+            "--json" => format = json_format(inline)?,
+            "--format" => {
+                let value = text_value(&mut args, name, inline)?;
+                format = Format::parse(&value).ok_or_else(|| {
+                    format!(
+                        "`--format` takes `text`, `json`, `json-summary` or `markdown-summary`, not `{value}`"
+                    )
+                })?;
             }
+            "--link" => link = Some(checked_link(text_value(&mut args, name, inline)?)?),
             "--timings" => flag(&mut timings)?,
             "--help" | "-h" => return Ok(Request::Help),
             "--repo" => repo = Some(PathBuf::from(value(&mut args, name, inline)?)),
@@ -137,12 +162,19 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Request, String> {
             "`--base` names the branch `auto` compares with; `{label}` names its own points"
         ));
     }
+    if link.is_some() && format != Format::MarkdownSummary {
+        return Err(
+            "`--link` names where the rendered changes are, for `--format markdown-summary` only"
+                .to_owned(),
+        );
+    }
     Ok(Request::Diff(Args {
         label,
         range,
         roots,
         repo: repo.unwrap_or_else(|| PathBuf::from(".")),
-        json,
+        format,
+        link,
         timings,
         threads,
         base,
@@ -198,6 +230,42 @@ fn text_value(
     })
 }
 
+/// The format `--json` asks for: the whole list, or with `=summary` one
+/// entry per document.
+fn json_format(inline: Option<&str>) -> Result<Format, String> {
+    match inline {
+        None => Ok(Format::Json),
+        Some("summary") => Ok(Format::JsonSummary),
+        Some(other) => Err(format!(
+            "`--json` takes only `summary` after `=`, not `{other}`"
+        )),
+    }
+}
+
+/// The `--link` address, when the comment can carry it safely: `http` or
+/// `https` with something after the scheme, at most [`MAX_LINK`]
+/// characters, and no white space, control character, `<`, `>` or
+/// backslash. The comment writes it between `<` and `>`, so none of those
+/// may end it early or escape a character, and no other scheme, such as
+/// `javascript:`, reaches a reader's click.
+fn checked_link(text: String) -> Result<String, String> {
+    let scheme = ["https://", "http://"].iter().any(|scheme| {
+        text.len() > scheme.len()
+            && text
+                .get(..scheme.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
+    });
+    let odd = text
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '<' | '>' | '\\'));
+    if !scheme || odd || text.chars().count() > MAX_LINK {
+        return Err(format!(
+            "`--link` takes an `https://` or `http://` address of at most {MAX_LINK} characters, without spaces, `<`, `>` or `\\`"
+        ));
+    }
+    Ok(text)
+}
+
 fn thread_count(text: &str) -> Result<NonZeroUsize, String> {
     text.parse()
         .map_err(|_| format!("`--threads` takes a whole number from 1, not `{text}`"))
@@ -236,7 +304,8 @@ mod tests {
                 range: RangeSpec::parse("main...feature").unwrap(),
                 roots: Roots::all(),
                 repo: PathBuf::from("."),
-                json: None,
+                format: Format::Text,
+                link: None,
                 timings: false,
                 threads: None,
                 base: None,
@@ -270,18 +339,57 @@ mod tests {
         assert_eq!(args.range, RangeSpec::Auto);
         assert_eq!(args.label, "auto");
         assert_eq!(args.repo, PathBuf::from("/work/docs-repo"));
-        assert_eq!(args.json, Some(Json::Full));
+        assert_eq!(args.format, Format::Json);
         assert!(args.timings);
         assert_eq!(args.threads, NonZeroUsize::new(3));
         assert_eq!(args.roots, Roots::new(["docs", "specs/api"]).unwrap());
         let args = diff(&["a..b", "--repo=elsewhere", "--threads", "1"]);
         assert_eq!(args.repo, PathBuf::from("elsewhere"));
         assert_eq!(args.threads, NonZeroUsize::new(1));
-        assert_eq!(args.json, None);
+        assert_eq!(args.format, Format::Text);
         let args = diff(&["--json=summary", "a..b"]);
-        assert_eq!(args.json, Some(Json::Summary));
+        assert_eq!(args.format, Format::JsonSummary);
         let args = diff(&["--json=summary", "a..b", "--json"]);
-        assert_eq!(args.json, Some(Json::Full), "the last one counts");
+        assert_eq!(args.format, Format::Json, "the last one counts");
+        let args = diff(&["--json", "a..b", "--format", "markdown-summary"]);
+        assert_eq!(args.format, Format::MarkdownSummary);
+        let args = diff(&["--format=json-summary", "a..b"]);
+        assert_eq!(args.format, Format::JsonSummary);
+        let args = diff(&["--format=markdown-summary", "a..b", "--format", "text"]);
+        assert_eq!(args.format, Format::Text);
+    }
+
+    #[test]
+    fn link_takes_a_plain_web_address() {
+        let args = diff(&[
+            "a...b",
+            "--format",
+            "markdown-summary",
+            "--link=https://example.com/runs/7/artifacts/9",
+        ]);
+        assert_eq!(
+            args.link.as_deref(),
+            Some("https://example.com/runs/7/artifacts/9")
+        );
+        assert!(checked_link("HTTP://EXAMPLE.COM/a".to_owned()).is_ok());
+        let longest = format!("https://example.com/{}", "a".repeat(MAX_LINK - 20));
+        assert!(checked_link(longest.clone()).is_ok());
+        for bad in [
+            format!("{longest}a"),
+            "ftp://example.com/a".to_owned(),
+            "https:/example.com".to_owned(),
+            "https://".to_owned(),
+            "https://example.com/a b".to_owned(),
+            "https://example.com/a>b".to_owned(),
+            "https://example.com/a<b".to_owned(),
+            "https://example.com/a\\)".to_owned(),
+            "https://example.com/a\nb".to_owned(),
+            "data:text/html,x".to_owned(),
+            String::new(),
+            "é".to_owned(),
+        ] {
+            assert!(checked_link(bad.clone()).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -306,7 +414,25 @@ mod tests {
 
     #[test]
     fn mistakes_are_named() {
-        let cases: [(&[&str], &str); 20] = [
+        let cases: [(&[&str], &str); 24] = [
+            (
+                &["a..b", "--format", "html"],
+                "`--format` takes `text`, `json`, `json-summary` or `markdown-summary`, not `html`",
+            ),
+            (&["a..b", "--format"], "`--format` needs a value"),
+            (
+                &["a..b", "--link", "https://example.com/r"],
+                "`--link` names where the rendered changes are, for `--format markdown-summary` only",
+            ),
+            (
+                &[
+                    "a..b",
+                    "--format=markdown-summary",
+                    "--link",
+                    "javascript:alert(1)",
+                ],
+                "`--link` takes an `https://` or `http://` address",
+            ),
             (
                 &["a...b", "--base", "dev"],
                 "`--base` names the branch `auto` compares with; `a...b` names its own points",

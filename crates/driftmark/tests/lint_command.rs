@@ -228,3 +228,149 @@ fn the_program_names_its_commands() {
     assert_eq!(code, 0);
     assert!(out.starts_with("driftmark "), "{out}");
 }
+
+/// The repo of [`repo`] with its new file committed on a branch `feature`
+/// that also edits `docs/good.md`, removes `README.md`, and changes
+/// `docs/bad.md`, which the rules file then excludes. Returns the repo and
+/// the commit of `main`.
+fn branched() -> (TestRepo, String) {
+    let repo = repo();
+    repo.write("driftmark.toml", "[lint]\nexclude = [\"docs/bad.md\"]\n");
+    let main = repo.commit("rules", support::T0 + support::DAY);
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("docs/good.md", format!("{GOOD}\nOne more line.\n"));
+    repo.write("docs/bad.md", format!("{BAD}\nStill bad.\n"));
+    repo.remove("README.md");
+    repo.commit("feature", support::T0 + 2 * support::DAY);
+    (repo, main)
+}
+
+#[test]
+fn changed_checks_only_what_the_range_added_or_changed() {
+    let (repo, _) = branched();
+    let (code, out, err) = driftmark(&repo.dir, &["lint", "--changed", "main...feature"], "");
+    assert_eq!(err, "");
+    assert_eq!(
+        out, "driftmark lint: 1 file checked, no problems found\n",
+        "docs/good.md only: notes/new.md came before the range, README.md is gone, docs/bad.md is excluded"
+    );
+    assert_eq!(code, 0);
+    let (code, out, _) = driftmark(&repo.dir, &["lint", "--changed=main~1...feature"], "");
+    assert_eq!(
+        out,
+        "\
+notes/new.md:5:1: warning code-language: this code block names no language; write it after the opening fence, such as ```sh, or ```text for plain text
+driftmark lint: 2 files checked, 0 errors and 1 warning in 1 file
+"
+    );
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn with_changed_paths_narrow_and_exclude_still_applies() {
+    let (repo, _) = branched();
+    let lint = |args: &[&str]| driftmark(&repo.dir, args, "").1;
+    let range = "main~1...feature";
+    assert_eq!(
+        lint(&["lint", "--changed", range, "docs"]),
+        "driftmark lint: 1 file checked, no problems found\n"
+    );
+    assert_eq!(
+        lint(&["lint", "--changed", range, "notes/new.md", "docs/bad.md"]),
+        "\
+notes/new.md:5:1: warning code-language: this code block names no language; write it after the opening fence, such as ```sh, or ```text for plain text
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file
+",
+        "a file named on its own is still excluded with --changed"
+    );
+    assert_eq!(
+        driftmark(
+            &repo.dir.join("docs"),
+            &["lint", "--changed", range, "."],
+            ""
+        )
+        .1,
+        "driftmark lint: 1 file checked, no problems found\n",
+        "paths are read from the current folder"
+    );
+    assert_eq!(
+        lint(&["lint", "--changed", "feature...feature"]),
+        "driftmark lint: 0 files checked, no problems found\n"
+    );
+}
+
+#[test]
+fn changed_auto_reads_the_working_tree_against_the_default_branch() {
+    let (repo, _) = branched();
+    repo.write("docs/extra.md", WARNS);
+    let (code, out, err) = driftmark(&repo.dir, &["lint", "--changed", "auto"], "");
+    assert_eq!(err, "");
+    assert_eq!(
+        out,
+        "\
+docs/extra.md:5:1: warning code-language: this code block names no language; write it after the opening fence, such as ```sh, or ```text for plain text
+driftmark lint: 2 files checked, 0 errors and 1 warning in 1 file
+"
+    );
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn ci_formats_print_annotations_or_a_code_quality_report() {
+    let (repo, _) = branched();
+    let range = "main~1...feature";
+    let (code, out, err) = driftmark(
+        &repo.dir,
+        &["lint", "--format", "github", "--changed", range, "notes"],
+        "",
+    );
+    assert_eq!(err, "");
+    assert_eq!(
+        out,
+        "\
+::warning file=notes/new.md,line=5,col=1,title=driftmark lint%3A code-language::this code block names no language; write it after the opening fence, such as ```sh, or ```text for plain text
+driftmark lint: 1 file checked, 0 errors and 1 warning in 1 file
+"
+    );
+    assert_eq!(code, 0);
+    let (code, out, _) = driftmark(&repo.dir, &["lint", "--format=gitlab", "docs/bad.md"], "");
+    assert_eq!(code, 1, "an error still exits 1");
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let issues = report.as_array().unwrap();
+    assert_eq!(issues.len(), 3);
+    assert_eq!(issues[0]["check_name"], "title");
+    assert_eq!(issues[0]["severity"], "major");
+    assert_eq!(issues[0]["location"]["path"], "docs/bad.md");
+    assert_eq!(issues[0]["location"]["lines"]["begin"], 1);
+    assert_eq!(issues[1]["severity"], "minor");
+    let (_, out, _) = driftmark(&repo.dir, &["lint", "--format", "json", "docs/good.md"], "");
+    assert!(out.starts_with("{\"files\":1,"), "{out}");
+}
+
+#[test]
+fn changed_and_format_mistakes_exit_2() {
+    let (repo, _) = branched();
+    let usage = |args: &[&str], wanted: &str| {
+        let (code, out, err) = driftmark(&repo.dir, args, "");
+        assert_eq!(code, 2, "{args:?}: {out}{err}");
+        assert!(err.contains(wanted), "{args:?}: {err}");
+        assert_eq!(out, "");
+    };
+    usage(
+        &["lint", "--format", "sarif"],
+        "`--format` takes `text`, `json`, `github` or `gitlab`, not `sarif`",
+    );
+    usage(
+        &["lint", "--changed", "main"],
+        "`--changed` takes a range such as `main...feature`",
+    );
+    usage(&["lint", "--changed", "main...nope"], "`nope`");
+    usage(
+        &["lint", "--changed", "main...feature", "missing"],
+        "there is no file or folder `missing`",
+    );
+    usage(
+        &["lint", "--hook", "claude-code", "--format", "github"],
+        "takes no path and no `--json`, `--format` or `--changed`",
+    );
+}
