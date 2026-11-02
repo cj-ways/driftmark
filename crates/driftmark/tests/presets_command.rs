@@ -540,7 +540,9 @@ fn reading_pages_show_a_status_from_spec_json() {
     assert_eq!(json["status"], "design-generated");
     let page = get(port, &format!("/doc/main/-/{path}"));
     assert!(
-        page.contains("data-pill=\"status\">Status: design-generated<"),
+        page.contains(
+            "data-pill=\"status\"><a href=\"/lifecycle/main?type=design&amp;lifecycle=current\">Status: design-generated</a>"
+        ),
         "{page}"
     );
     assert!(

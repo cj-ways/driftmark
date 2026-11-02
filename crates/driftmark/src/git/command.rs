@@ -13,8 +13,8 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
 use std::sync::{Mutex, PoisonError};
 
 use driftmark_core::git::{
-    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RepoPath, Roots,
-    Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, LastChange, LastChanges, ObjectId,
+    ObjectKind, RepoPath, Roots, Snapshot,
 };
 
 use super::worktree;
@@ -261,29 +261,10 @@ impl GitRead for CommandReader {
         ]);
         let listing = run_ok(with_roots(&mut command, roots)?)?;
         let mut changes = Vec::new();
-        // ":<old mode> <new mode> <old id> <new id> <status>" then the path.
         let mut fields = records(&listing);
         while let Some(meta) = fields.next() {
-            let path = repo_path(fields.next().ok_or_else(|| odd_output("diff-tree", meta))?)?;
-            let meta = meta.strip_prefix(b":").unwrap_or(meta);
-            let parts: Vec<&[u8]> = meta.split(|&b| b == b' ').collect();
-            let [old_mode, new_mode, old_id, new_id, _status] = parts.as_slice() else {
-                return Err(odd_output("diff-tree", meta));
-            };
-            if !roots.selects(&path) {
-                continue;
-            }
-            let side = |mode: &[u8], id: &[u8]| -> Result<Option<ObjectId>, GitError> {
-                let id = String::from_utf8_lossy(id);
-                let absent = !is_regular_file(mode) || id.bytes().all(|b| b == b'0');
-                if absent {
-                    Ok(None)
-                } else {
-                    parse_id(&id).map(Some)
-                }
-            };
-            let (old, new) = (side(old_mode, old_id)?, side(new_mode, new_id)?);
-            changes.extend(FileChange::between(path, old, new));
+            let path = fields.next().ok_or_else(|| odd_output("diff-tree", meta))?;
+            changes.extend(raw_change(meta, path, roots, "diff-tree")?);
         }
         changes.sort_by(|a, b| a.path().cmp(b.path()));
         Ok(changes)
@@ -376,6 +357,154 @@ impl GitRead for CommandReader {
     fn read_worktree_file(&self, path: &RepoPath) -> Result<Vec<u8>, GitError> {
         worktree::read(self.workdir.as_deref(), path)
     }
+
+    /// One `git log` along first parents, each commit compared with its
+    /// first parent (`-m`), the first commit with nothing (`--root`). It is
+    /// read as it runs and stopped once every file is found.
+    fn last_changes(&self, head: &ObjectId, roots: &Roots) -> Result<Vec<LastChange>, GitError> {
+        let files = self.markdown_files(&Snapshot::Commit(head.clone()), roots)?;
+        let mut found = LastChanges::new(files.into_iter().map(|file| file.path));
+        if found.is_done() {
+            return Ok(found.finish());
+        }
+        let mut command = self.git();
+        command.args([
+            "log",
+            "--first-parent",
+            "-m",
+            "--root",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--no-abbrev",
+            "--no-color",
+            "--no-show-signature",
+            "--format=%x01%H %ct",
+            head.as_hex(),
+            "--",
+        ]);
+        with_roots(&mut command, roots)?;
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = command
+            .spawn()
+            .map_err(|error| other(format!("could not run git: {error}")))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| other("git log has no output pipe".to_owned()))?;
+        let walked = walk_log(BufReader::new(stdout), roots, &mut found);
+        if found.is_done() {
+            // The rest of the history is not needed; errors mean it has
+            // already ended.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(found.finish());
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| other(format!("git log failed: {error}")))?;
+        if !output.status.success() {
+            return Err(failed("log", &output));
+        }
+        if let Some((commit, committed_at)) = walked? {
+            found.first(&commit, committed_at);
+        }
+        Ok(found.finish())
+    }
+}
+
+/// A commit of `git log` and the changes listed under it.
+type Logged = (ObjectId, i64, Vec<RepoPath>);
+
+/// Reads `git log -z --raw --format=%x01%H %ct` as it comes and tells
+/// `found` what each commit changed, until every file is found or the log
+/// ends. Returns the last commit read, which is the oldest the log reached.
+///
+/// Each commit starts with a field `\x01<id> <seconds>`; then come pairs
+/// of fields, `:<old mode> <new mode> <old id> <new id> <status>` and the
+/// path. A field may start with a line feed git writes between commits.
+fn walk_log(
+    mut log: impl BufRead,
+    roots: &Roots,
+    found: &mut LastChanges,
+) -> Result<Option<(ObjectId, i64)>, GitError> {
+    let mut current: Option<Logged> = None;
+    let mut last = None;
+    let mut field = Vec::new();
+    loop {
+        field.clear();
+        let read = log
+            .read_until(0, &mut field)
+            .map_err(|error| other(format!("git log could not be read: {error}")))?;
+        if read == 0 {
+            break;
+        }
+        let text = field.strip_suffix(&[0]).unwrap_or(&field);
+        let text = text.strip_prefix(b"\n").unwrap_or(text);
+        if let Some(header) = text.strip_prefix(b"\x01") {
+            if let Some((commit, at, paths)) = current.take() {
+                found.changed(&commit, at, paths.iter());
+                if found.is_done() {
+                    return Ok(Some((commit, at)));
+                }
+            }
+            let header = String::from_utf8_lossy(header);
+            let (id, at) = header
+                .split_once(' ')
+                .and_then(|(id, at)| Some((parse_id(id).ok()?, at.trim().parse().ok()?)))
+                .ok_or_else(|| odd_output("log", text))?;
+            last = Some((id.clone(), at));
+            current = Some((id, at, Vec::new()));
+        } else if text.starts_with(b":") {
+            let meta = text.to_vec();
+            field.clear();
+            log.read_until(0, &mut field)
+                .map_err(|error| other(format!("git log could not be read: {error}")))?;
+            let path = field.strip_suffix(&[0]).unwrap_or(&field);
+            let change = raw_change(&meta, path, roots, "log")?;
+            if let (Some((_, _, paths)), Some(change)) = (current.as_mut(), change) {
+                paths.push(change.path().clone());
+            }
+        } else if !text.is_empty() {
+            return Err(odd_output("log", text));
+        }
+    }
+    if let Some((commit, at, paths)) = current {
+        found.changed(&commit, at, paths.iter());
+    }
+    Ok(last)
+}
+
+/// One change of `--raw` output: `:<old mode> <new mode> <old id> <new id>
+/// <status>` and its path. `None` when the path is not one driftmark reads,
+/// or when no regular file's bytes changed, as [`FileChange::between`]
+/// decides.
+fn raw_change(
+    meta: &[u8],
+    path: &[u8],
+    roots: &Roots,
+    what: &str,
+) -> Result<Option<FileChange>, GitError> {
+    let path = repo_path(path)?;
+    let fields = meta.strip_prefix(b":").unwrap_or(meta);
+    let parts: Vec<&[u8]> = fields.split(|&b| b == b' ').collect();
+    let [old_mode, new_mode, old_id, new_id, _status] = parts.as_slice() else {
+        return Err(odd_output(what, meta));
+    };
+    if !roots.selects(&path) {
+        return Ok(None);
+    }
+    let side = |mode: &[u8], id: &[u8]| -> Result<Option<ObjectId>, GitError> {
+        let id = String::from_utf8_lossy(id);
+        let absent = !is_regular_file(mode) || id.bytes().all(|b| b == b'0');
+        if absent {
+            Ok(None)
+        } else {
+            parse_id(&id).map(Some)
+        }
+    };
+    let (old, new) = (side(old_mode, old_id)?, side(new_mode, new_id)?);
+    Ok(FileChange::between(path, old, new))
 }
 
 /// One `git cat-file --batch` process. It answers one object at a time:

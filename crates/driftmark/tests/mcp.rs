@@ -268,6 +268,7 @@ fn the_tools_are_listed_with_schemas_and_marked_read_only_or_not() {
             "changes_document",
             "document_read",
             "search",
+            "documents_status",
             "lint",
             "notes_list",
             "note_get",
@@ -293,8 +294,13 @@ fn the_tools_are_listed_with_schemas_and_marked_read_only_or_not() {
     }
     assert_eq!(tools[1]["inputSchema"]["required"], json!(["path"]));
     assert_eq!(tools[3]["inputSchema"]["required"], json!(["query"]));
+    assert_eq!(tools[4]["inputSchema"]["required"], Value::Null);
     assert_eq!(
-        tools[8]["inputSchema"]["required"],
+        tools[4]["inputSchema"]["properties"]["lifecycle"]["enum"],
+        json!(["current", "superseded", "archived", "none"])
+    );
+    assert_eq!(
+        tools[9]["inputSchema"]["required"],
         json!(["note", "body", "stance"])
     );
     let unknown = client.request("tools/call", json!({"name": "nope", "arguments": {}}));
@@ -1409,6 +1415,24 @@ fn the_installed_entry_starts_a_working_connector() {
 
 // ---- the documented examples ---------------------------------------------------
 
+/// A `documents_status` answer counted at the documented time: the ages
+/// depend on the day the test runs, so they are worked out again from the
+/// documented `as_of`.
+fn as_documented(got: &mut Value, documented: &Value) {
+    let Some(as_of) = documented["as_of"].as_i64() else {
+        return;
+    };
+    got["as_of"] = as_of.into();
+    let limit = got["untouched_days"].as_i64().expect("untouched_days");
+    for document in got["documents"].as_array_mut().into_iter().flatten() {
+        if let Some(at) = document["last_change"]["committed_at"].as_i64() {
+            let days = (as_of - at).div_euclid(86_400).max(0);
+            document["last_change"]["days"] = days.into();
+            document["untouched"] = (days >= limit).into();
+        }
+    }
+}
+
 #[test]
 fn the_documented_examples_hold() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/features/commands/mcp.md");
@@ -1430,7 +1454,10 @@ fn the_documented_examples_hold() {
         match expected {
             Expected::Answer(value) => {
                 assert!(!answer.is_error, "{tool} {arguments}: {}", answer.text);
-                let got: Value = serde_json::from_str(&answer.text).expect("JSON");
+                let mut got: Value = serde_json::from_str(&answer.text).expect("JSON");
+                if tool == "documents_status" {
+                    as_documented(&mut got, &value);
+                }
                 if got != value {
                     wrong.push(format!(
                         "{tool} {arguments} answers:\n{}",
@@ -1447,5 +1474,42 @@ fn the_documented_examples_hold() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n\n"));
+    client.finish();
+}
+
+#[test]
+fn documents_status_filters_and_pages() {
+    let repo = documented_repo();
+    let mut client = Client::start(&repo.dir, &[]);
+    let first = client.json("documents_status", json!({"limit": 1}));
+    assert_eq!(first["page"], json!({"offset": 0, "shown": 1, "total": 3}));
+    assert_eq!(first["totals"]["documents"], 3);
+    assert_eq!(
+        first["cut"]["next"],
+        json!({"limit": 1, "offset": 1}),
+        "{first}"
+    );
+    let rest = client.json("documents_status", json!({"limit": 5, "offset": 1}));
+    assert_eq!(rest["page"], json!({"offset": 1, "shown": 2, "total": 3}));
+    assert_eq!(rest.get("cut"), None);
+    let at_main = client.json(
+        "documents_status",
+        json!({"revision": "main", "types": ["decision"], "lifecycle": "none"}),
+    );
+    assert_eq!(at_main["revision"], "main");
+    assert_eq!(at_main["documents"][0]["status"], "proposed");
+    assert_eq!(at_main["page"]["total"], 1);
+    let untouched = client.json(
+        "documents_status",
+        json!({"untouched": true, "path": "docs/notes/"}),
+    );
+    assert_eq!(untouched["page"]["total"], 1);
+    assert_eq!(untouched["filter"]["folder"], "docs/notes/");
+    let refused = client.call("documents_status", json!({"revision": "nope"}));
+    assert!(refused.is_error);
+    assert_eq!(refused.text, "`nope` does not name a commit");
+    let small = client.call("documents_status", json!({"max_chars": 2000}));
+    assert!(!small.is_error, "{}", small.text);
+    assert!(small.text.len() <= 2_000, "{}", small.text);
     client.finish();
 }

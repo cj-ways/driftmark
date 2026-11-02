@@ -60,6 +60,7 @@ pub(crate) const TOOLS: &[Tool] = &[
     super::changes::DOCUMENT,
     super::document::READ,
     super::search::SEARCH,
+    super::status::STATUS,
     super::lint::LINT,
     super::notes::LIST,
     super::notes::GET,
@@ -73,7 +74,7 @@ pub(crate) const TOOLS: &[Tool] = &[
 const INSTRUCTIONS: &str = "\
 driftmark reads this git repository's Markdown documents. Use it to see what changed in the docs between two git points, ranked by meaning (decision, rule, fact, wording, formatting), to read a document or one section of it at any revision, to search every document, to check documents against the writing rules, and to answer the reader's notes on the documents.
 
-Start with changes_summary (range \"auto\" is this branch's work, committed or not), then changes_document for one document, document_read for the text, search to find a topic, and lint after editing. Paths run from the repository root, such as docs/guide.md. A revision is a branch, a tag, a commit or \"worktree\" for the files on disk. Every answer is JSON. When an answer is cut to fit, its \"cut\" object says what was left out, and \"cut.next\" holds the arguments of the call that continues.
+Start with changes_summary (range \"auto\" is this branch's work, committed or not), then changes_document for one document, document_read for the text, search to find a topic, documents_status to see which documents are current, superseded or archived, and lint after editing. Paths run from the repository root, such as docs/guide.md. A revision is a branch, a tag, a commit or \"worktree\" for the files on disk. Every answer is JSON. When an answer is cut to fit, its \"cut\" object says what was left out, and \"cut.next\" holds the arguments of the call that continues.
 
 The reader writes notes on sentences of these documents, on driftmark's pages. notes_list shows the notes still open; note_get reads one with where its words are now and the section around them; review_get gives a review's notes as one prompt. Discuss first: answer each note with note_reply, and suggest what to do with note_propose_decision. Edit a document only for a note the reader decided (status \"decided\", review_get round 2); commit the edit, then record each commit with note_mark_applied. Only the reader decides, edits or withdraws a note.";
 
@@ -512,6 +513,7 @@ mod tests {
                 "changes_document",
                 "document_read",
                 "search",
+                "documents_status",
                 "lint",
                 "notes_list",
                 "note_get",

@@ -3,15 +3,16 @@
 //! The speed spike found it faster than the `git` command at every step, and
 //! it starts no processes, which matters most on Windows and in a server.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::io::Read;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, PoisonError};
 
 use driftmark_core::git::{
-    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RepoPath, Roots,
-    Snapshot,
+    Branch, CommitInfo, FileChange, FileEntry, GitError, GitRead, LastChange, LastChanges,
+    ObjectId, ObjectKind, RepoPath, Roots, Snapshot,
 };
 use gix::bstr::ByteSlice;
 use gix::diff::tree::recorder::Change as Record;
@@ -27,6 +28,14 @@ const PACK_CACHE_BYTES: usize = 16 * 1024 * 1024;
 /// Bytes of recently read objects each handle keeps. Walks over commits, as
 /// for merge-bases and `--since`, read the same commits and trees again.
 const OBJECT_CACHE_BYTES: usize = 4 * 1024 * 1024;
+
+/// How many commits the history walk reads before it compares them. The
+/// commits of one window are compared on several threads; a walk that finds
+/// every file in its first window stops there.
+const WALK_WINDOW: usize = 256;
+
+/// The most threads the history walk compares commits on.
+const WALK_THREADS: usize = 16;
 
 /// The directory walk can be stopped by setting a flag; driftmark never does.
 static NEVER_INTERRUPT: AtomicBool = AtomicBool::new(false);
@@ -199,6 +208,280 @@ impl GitRead for GixReader {
 
     fn read_worktree_file(&self, path: &RepoPath) -> Result<Vec<u8>, GitError> {
         worktree::read(self.workdir(), path)
+    }
+
+    /// Walks the first parents of `head` a window of commits at a time:
+    /// the window's commits are read in order, then each is compared with
+    /// its parent on several threads, and what changed is told to
+    /// [`LastChanges`] newest first. The walk stops after the window in
+    /// which every Markdown file of `head` was found.
+    fn last_changes(&self, head: &ObjectId, roots: &Roots) -> Result<Vec<LastChange>, GitError> {
+        let head = to_gix(head)?;
+        let (files, shallow) = self.with(|repo| -> Result<_, GitError> {
+            Ok((files_at_commit(repo, head, roots)?, shallow_commits(repo)?))
+        })?;
+        let mut found = LastChanges::new(files.into_iter().map(|file| file.path));
+        let threads = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZero::get)
+            .min(WALK_THREADS);
+        let mut newest = self.with(|repo| Step::read(repo, head, &shallow))?;
+        while !found.is_done() {
+            let mut steps = vec![newest];
+            self.with(|repo| -> Result<(), GitError> {
+                while steps.len() <= WALK_WINDOW {
+                    let Some(parent) = steps.last().and_then(|step| step.parent) else {
+                        break;
+                    };
+                    steps.push(Step::read(repo, parent, &shallow)?);
+                }
+                Ok(())
+            })?;
+            let waiting = Folder::of(found.pending());
+            let changed = self.compare_steps(&steps, &waiting, threads)?;
+            for (step, paths) in steps.iter().zip(&changed) {
+                found.changed(&from_gix(step.id)?, step.committed_at, paths);
+            }
+            let Some(oldest) = steps.pop() else {
+                break;
+            };
+            if oldest.parent.is_none() {
+                found.first(&from_gix(oldest.id)?, oldest.committed_at);
+                break;
+            }
+            newest = oldest;
+        }
+        Ok(found.finish())
+    }
+}
+
+/// A commit's tree, its first parent and its committer date, read once.
+struct Step {
+    id: gix::ObjectId,
+    tree: gix::ObjectId,
+    parent: Option<gix::ObjectId>,
+    committed_at: i64,
+}
+
+impl Step {
+    /// Reads a commit. The commit's own bytes are read with the core's
+    /// [`CommitInfo`], as the `git` command's reader reads them, so both
+    /// give the same date. A commit in the shallow file has no parent here:
+    /// git cannot see past it.
+    fn read(
+        repo: &gix::Repository,
+        id: gix::ObjectId,
+        shallow: &[gix::ObjectId],
+    ) -> Result<Step, GitError> {
+        let commit = repo.find_commit(id).map_err(|error| other(&error))?;
+        let info = CommitInfo::parse(&commit.data).ok_or_else(|| GitError::Other {
+            message: format!("gix: the commit {id} cannot be read"),
+        })?;
+        let tree = commit.tree_id().map_err(|error| other(&error))?.detach();
+        let parent = match info.parents.first() {
+            Some(parent) if !shallow.contains(&id) => Some(to_gix(parent)?),
+            _ => None,
+        };
+        Ok(Step {
+            id,
+            tree,
+            parent,
+            committed_at: info.committed_at,
+        })
+    }
+}
+
+/// The commits a shallow clone holds without their parents.
+fn shallow_commits(repo: &gix::Repository) -> Result<Vec<gix::ObjectId>, GitError> {
+    Ok(repo
+        .shallow_commits()
+        .map_err(|error| other(&error))?
+        .map(|commits| commits.iter().copied().collect())
+        .unwrap_or_default())
+}
+
+/// The files the history walk still looks for, as a tree of folders, so a
+/// comparison opens only the folders that hold one.
+#[derive(Default)]
+struct Folder {
+    /// The files in this folder, by name.
+    files: HashMap<Vec<u8>, RepoPath>,
+    /// The folders in this folder that hold such files, by name.
+    folders: HashMap<Vec<u8>, Folder>,
+}
+
+impl Folder {
+    /// The folder tree of `paths`.
+    fn of<'a>(paths: impl Iterator<Item = &'a RepoPath>) -> Folder {
+        let mut root = Folder::default();
+        for path in paths {
+            let mut folder = &mut root;
+            let mut parts = path.as_bytes().split(|&b| b == b'/').peekable();
+            while let Some(part) = parts.next() {
+                if parts.peek().is_none() {
+                    folder.files.insert(part.to_vec(), path.clone());
+                    break;
+                }
+                folder = folder.folders.entry(part.to_vec()).or_default();
+            }
+        }
+        root
+    }
+}
+
+/// A tree entry's kind and object.
+type Entry = (gix::objs::tree::EntryMode, gix::ObjectId);
+
+/// The entries of a tree that `folder` looks for, by name.
+fn wanted_entries(
+    repo: &gix::Repository,
+    tree: gix::ObjectId,
+    folder: &Folder,
+) -> Result<HashMap<Vec<u8>, Entry>, GitError> {
+    let data = repo.find_tree(tree).map_err(|error| other(&error))?;
+    let mut found = HashMap::new();
+    for entry in TreeRefIter::from_bytes(&data.data, repo.object_hash()) {
+        let entry = entry.map_err(|error| other(&error))?;
+        let name = entry.filename.as_bytes();
+        if folder.files.contains_key(name) || folder.folders.contains_key(name) {
+            found.insert(name.to_vec(), (entry.mode, entry.oid.to_owned()));
+        }
+    }
+    Ok(found)
+}
+
+/// The wanted entries of the trees a run of comparisons read, kept for one
+/// comparison more: each comparison's newer tree is the one the comparison
+/// before it read as its older tree. A tree is known with the folder it was
+/// read for, because the same tree can sit in two folders that look for
+/// different names.
+#[derive(Default)]
+struct Trees {
+    this: HashMap<TreeKey, Wanted>,
+    last: HashMap<TreeKey, Wanted>,
+}
+
+/// A tree, and the folder of the walk it was read for, by its address.
+type TreeKey = (gix::ObjectId, usize);
+
+/// The entries of a tree that a folder looks for, by name.
+type Wanted = Rc<HashMap<Vec<u8>, Entry>>;
+
+impl Trees {
+    /// The entries of `tree` that `folder` looks for.
+    fn entries(
+        &mut self,
+        repo: &gix::Repository,
+        tree: gix::ObjectId,
+        folder: &Folder,
+    ) -> Result<Wanted, GitError> {
+        let key = (tree, std::ptr::from_ref(folder) as usize);
+        let found = match self.this.get(&key).or_else(|| self.last.get(&key)) {
+            Some(found) => Rc::clone(found),
+            None => Rc::new(wanted_entries(repo, tree, folder)?),
+        };
+        self.this.insert(key, Rc::clone(&found));
+        Ok(found)
+    }
+
+    /// Starts the next comparison: what this one read is kept for it.
+    fn next(&mut self) {
+        self.last = std::mem::take(&mut self.this);
+    }
+}
+
+/// Adds to `out` the files of `folder` whose blob in the tree `old` differs
+/// from the one in `new`. Every file the walk still looks for has the same
+/// blob in `new` as at the walk's tip, so only these files can count, and a
+/// folder whose tree is the same on both sides holds no change.
+fn waiting_changes(
+    repo: &gix::Repository,
+    trees: &mut Trees,
+    old: Option<gix::ObjectId>,
+    new: gix::ObjectId,
+    folder: &Folder,
+    out: &mut Vec<RepoPath>,
+) -> Result<(), GitError> {
+    if old == Some(new) {
+        return Ok(());
+    }
+    let new_entries = trees.entries(repo, new, folder)?;
+    let old_entries = match old {
+        Some(old) => trees.entries(repo, old, folder)?,
+        None => Rc::new(HashMap::new()),
+    };
+    let entry = |entries: &HashMap<Vec<u8>, Entry>, name: &[u8], tree: bool| {
+        entries
+            .get(name)
+            .filter(|(mode, _)| if tree { mode.is_tree() } else { mode.is_blob() })
+            .map(|(_, id)| *id)
+    };
+    for (name, path) in &folder.files {
+        if entry(&old_entries, name, false) != entry(&new_entries, name, false) {
+            out.push(path.clone());
+        }
+    }
+    for (name, inner) in &folder.folders {
+        if let Some(new) = entry(&new_entries, name, true) {
+            waiting_changes(
+                repo,
+                trees,
+                entry(&old_entries, name, true),
+                new,
+                inner,
+                out,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+impl GixReader {
+    /// The files of `waiting` each step changed against the next one, its
+    /// first parent: one list for every step but the last. The pairs are
+    /// split into one run per thread, each on its own repo handle.
+    fn compare_steps(
+        &self,
+        steps: &[Step],
+        waiting: &Folder,
+        threads: usize,
+    ) -> Result<Vec<Vec<RepoPath>>, GitError> {
+        let pairs: Vec<(gix::ObjectId, gix::ObjectId)> = steps
+            .windows(2)
+            .map(|pair| (pair[1].tree, pair[0].tree))
+            .collect();
+        let compare = |run: &[(gix::ObjectId, gix::ObjectId)]| {
+            self.with(|repo| {
+                let mut trees = Trees::default();
+                run.iter()
+                    .map(|&(old, new)| {
+                        let mut changed = Vec::new();
+                        waiting_changes(repo, &mut trees, Some(old), new, waiting, &mut changed)?;
+                        trees.next();
+                        Ok(changed)
+                    })
+                    .collect::<Result<Vec<Vec<RepoPath>>, GitError>>()
+            })
+        };
+        let size = pairs.len().div_ceil(threads.max(1)).max(1);
+        let runs: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = pairs
+                .chunks(size)
+                .map(|run| scope.spawn(move || compare(run)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                })
+                .collect()
+        });
+        let mut changed = Vec::with_capacity(pairs.len());
+        for run in runs {
+            changed.extend(run?);
+        }
+        Ok(changed)
     }
 }
 

@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # The serve command
 
-> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, and one document's changes, each also as JSON. `/api/search` searches every document at a revision. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default. It always has a token, which a browser presents once and then keeps in a cookie: every request that writes notes or "Seen" marks needs it, on every address, and on any address beyond this machine every request does. The reader's notes and "Seen" marks go to one SQLite file in the clone's shared git folder, through the notes routes. Each action records whether it came from the reader's own page, the MCP connector, or another program with the token (decision 0012).
+> Short version: `driftmark serve` is a small web server on the reader's own machine. It reads git when a page is opened, so a branch shows its latest commit without a rebuild. The home page lists the branches whose documents differ from the default branch. Other pages show a document at any revision, a range's change list, one document's changes, and which documents of a revision are current, each also as JSON. `/api/search` searches every document at a revision. It keeps parsed documents and finished pages in a cache keyed by blob id, capped at 128 MB. It watches the working tree, so open pages reload when a file changes. It listens on `127.0.0.1` by default. It always has a token, which a browser presents once and then keeps in a cookie: every request that writes notes or "Seen" marks needs it, on every address, and on any address beyond this machine every request does. The reader's notes and "Seen" marks go to one SQLite file in the clone's shared git folder, through the notes routes. Each action records whether it came from the reader's own page, the MCP connector, or another program with the token (decision 0012).
 
 ## Running it
 
@@ -97,6 +97,7 @@ Every page has a short address that stays the same. It names a revision or a ran
 | `/doc/<revision>/-/<path>` | A document at a revision. |
 | `/changes/<range>` | A range's change list. |
 | `/changes/<range>/-/<path>` | One document's changes in a range. |
+| `/lifecycle/<revision>` | Which documents are current, superseded, archived or untouched for long: the status page. |
 
 The separator is `/-/` because branch names hold `/`, as in `feature/login`. The path comes last, so a relative link in a document leads to the other document at the same revision without being rewritten: on `/doc/feature/login/-/docs/guide.md`, the link `setup.md` opens `/doc/feature/login/-/docs/setup.md`.
 
@@ -129,6 +130,8 @@ The separator is `/-/` because branch names hold `/`, as in `feature/login`. The
 | `GET /changes/<range>/-/<path>` | One document's changes, HTML. |
 | `GET /api/changes/<range>/-/<path>` | One document's changes, JSON: a change list with that one document. |
 | `GET /api/search?q=<query>` | Full-text search over every document at a revision, JSON. |
+| `GET /lifecycle/<revision>` | The status page, HTML. |
+| `GET /api/lifecycle/<revision>` | The status view, JSON. |
 | `GET /events` | The working tree's changes, as server-sent events. |
 | `GET /static/<hash>/<name>` | The files the pages load, built into the program: the page script, the style sheet, the diagram font, Prism and mermaid.js (see "Static files"). |
 | `GET /api/status` | The cache's counts and the watcher's state, JSON. |
@@ -382,6 +385,10 @@ A page writes each piece as text, never as HTML: a snippet holds the document's 
 - **The working tree's index** is built on the first search of `worktree`, then kept up to date from the change signal that reloads open pages (see "Live reload"): the files that changed are read again, and the next search finds their new text. When more than 256 files changed since the last full build, or `driftmark.toml` changed, the whole working tree is indexed again in the background. Searches meanwhile use the last index.
 - A query with more than 32 words, a `limit` outside 1 to 100, or a parameter that is not valid text answers `400`.
 
+### The status page
+
+`/lifecycle/<revision>` shows every document of a revision by type, with its lifecycle, its status, what superseded it and how many days ago a commit last changed it; `/api/lifecycle/<revision>` gives the same as JSON. Both take the filters `type`, `lifecycle`, `folder` and `untouched`, and the page also `offset`. `docs/features/status-page.md` states the page, the JSON and the rules. The address is not `status`, because `/api/status` is the server's own state, below.
+
 ### Status
 
 `/api/status` shows what the cache holds and what the watcher does, for a person checking memory or a test:
@@ -416,7 +423,7 @@ A page writes each piece as text, never as HTML: a snippet holds the document's 
 }
 ```
 
-A kind of entry shows once it was asked for: `rules`, `documents`, `pages`, `ranges`, `branches` or `search`. `worktree` is `null` in a bare repository. Its `files` are the Markdown files watched, `changes` counts the changes announced, `listeners` the open event streams, and `count_ms` how long the last count took. `search.worktree` is the working tree's search index: the documents it searches, the files read again since its last full build, and its estimated memory. It is `null` before the first search of the working tree, and in a bare repository.
+A kind of entry shows once it was asked for: `rules`, `documents`, `pages`, `ranges`, `branches`, `search` or `status`. `worktree` is `null` in a bare repository. Its `files` are the Markdown files watched, `changes` counts the changes announced, `listeners` the open event streams, and `count_ms` how long the last count took. `search.worktree` is the working tree's search index: the documents it searches, the files read again since its last full build, and its estimated memory. It is `null` before the first search of the working tree, and in a bare repository.
 
 ## Notes
 
@@ -613,7 +620,7 @@ Decision 0012: only the reader decides, and an agent with a shell on the same ma
 
 | Status | When | Example message |
 |---|---|---|
-| 400 | A search's parameters are wrong: a query with more than 32 words, a `limit` outside 1 to 100, or a parameter that is not valid text. | `` `limit` must be a number from 1 to 100 `` |
+| 400 | A search's parameters are wrong: a query with more than 32 words, a `limit` outside 1 to 100, or a parameter that is not valid text. Or a status page's filter is: a `lifecycle`, `untouched` or `offset` that means nothing. | `` `limit` must be a number from 1 to 100 `` |
 | 401 | A write without the token cookie, or with an old one; it answers JSON, whose `error` the page shows in place of the failed save. A read that needs the token gets an HTML page that says the same. | `Saving notes and seen marks needs the reader's token. Open the address that driftmark serve printed when it started, the one that ends in ?token=, in this browser, then try again. A new tab keeps this page as it is. A program without a browser sends the token in the cookie driftmark-4170.` |
 | 404 | The address names nothing: an unknown revision, text that is not a range, a date in neither form, two points without a common history, a path that is not a Markdown file in the repository, a document missing at that revision, a document that did not change in the range, a named default branch that does not exist, or a working tree in a bare repository. | `` `nope` does not name a commit `` |
 | 500 | Reading git failed, or the rules file is broken. The message names the cause. | ``git could not be read: object 3f2a… is not in the repo`` |
@@ -678,11 +685,12 @@ The server keeps what it read between requests, keyed by what fixes its content:
 | `ranges` | The two commit ids. | Each document's counts. |
 | `branches` | The default branch's tip and the branch's tip. | The branch's counts. |
 | `search` | The commit's tree id. | The search index of every Markdown file in it. |
+| `status` | The commit id and the rules version; or the commit id; or the watcher's count of changes, `HEAD` and the rules version. | Every document of the commit, classified, for the status page; or when each of its Markdown files last changed; or the working tree's documents for the status page. |
 
 The rules version is part of a document's key because the rules file's masthead keys change how a title and a summary are read. The path is part of a page's key because the page shows it.
 
 - **Nothing goes stale.** A branch name never keys an entry, because a branch moves. Each request resolves the name, then looks up what that commit holds. A branch with a new commit gets new entries; the old ones stay correct for the old commit.
-- **The working tree is never cached.** Its bytes can change while its name stays. A document at `worktree`, the `auto` range and its documents are read and compared on every request.
+- **The working tree is never cached by name.** Its bytes can change while its name stays. A document at `worktree`, the `auto` range and its documents are read and compared on every request. The one exception is the status page's list of the working tree's documents: it is kept under the watcher's count of the changes it announced, so it holds only until a file changes (`docs/features/status-page.md`).
 - **Drawings have a cache of their own**, 32 MB, keyed by a hash of the diagram's language and text (`docs/features/pages.md`, "Diagrams"). A document read again from the working tree, or another document with the same diagram, draws nothing again.
 - **The cap is 128 MB**, counted as the estimated heap memory of each entry: a document's text, each block's plain text, spans and details, and the heading paths and containers that blocks share, counted once. When the entries add up to more, the least recently used go first. A value larger than the whole cap is used once and not kept.
 - **Search indexes share the cap.** A revision's index is one entry, about a fifth of the cap for a corpus of 3,500 documents (see "Speed"). It stays while the reader keeps searching, because each search uses it again; pages read since push it out only when they are used more recently. A dropped index is built again on the next search, in well under a second. The working tree's index is not in the cache, like every working-tree read; `/api/status` shows its size.

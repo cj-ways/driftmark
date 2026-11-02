@@ -17,7 +17,7 @@ A preset is a rules file in the format of `docs/features/engine/rules-file.md`. 
 - which headings open decision sections;
 - for some layouts, extra masthead keys to read (decision 0009).
 
-With a preset, the change list ranks a change under a decision heading as "decision" (`docs/features/engine/change-list.md`). The reading pages, the MCP connector and the coming status page show each document's type, status, lifecycle and date.
+With a preset, the change list ranks a change under a decision heading as "decision" (`docs/features/engine/change-list.md`). The reading pages, the MCP connector and the status page (`docs/features/status-page.md`) show each document's type, status, lifecycle and date.
 
 A preset gives only its `[[type]]` entries and its `[masthead]` table. The writing check's `[lint]` settings and the `[compare]` table come from the repository's own `driftmark.toml`, never from a preset. The starter preset's text also holds a `[lint]` table, because `driftmark init` writes that text as the repository's `driftmark.toml`. The table writes out the defaults, and a test keeps them equal, so naming the preset gives the same settings.
 

@@ -31,6 +31,7 @@ use super::assets::Assets;
 use super::cache::{Key, Sized, Stats};
 use super::compare::Skipped;
 use super::guard::{self, Access, Verdict};
+use super::lifecycle::{Params as StatusParams, ViewJson};
 use super::marker::{self, Markers};
 use super::notes;
 use super::page::{self, Frame, Live, Tab, WorktreeLine};
@@ -85,6 +86,8 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route("/changes/{*rest}", get(changes_page))
         .route("/api/changes/{*rest}", get(changes_json))
         .route("/api/search", get(search_json))
+        .route("/lifecycle/{*rest}", get(lifecycle_page))
+        .route("/api/lifecycle/{*rest}", get(lifecycle_json))
         .route("/api/positions/{*rest}", get(positions_json))
         .route("/api/notes", get(notes::list).post(notes::create))
         .route("/api/notes/{id}", get(notes::one).patch(notes::edit))
@@ -288,7 +291,7 @@ impl From<BadAddress> for Problem {
 
 async fn not_found(State(app): Shared, uri: Uri) -> Response {
     let problem = Problem::missing(format!(
-        "nothing is at `{}`; the pages are /, /doc/<revision>/-/<path>, /changes/<range> and /changes/<range>/-/<path>",
+        "nothing is at `{}`; the pages are /, /doc/<revision>/-/<path>, /changes/<range>, /changes/<range>/-/<path> and /lifecycle/<revision>",
         uri.path()
     ));
     refuse(&app, &problem, uri.path().starts_with("/api/"))
@@ -1127,6 +1130,86 @@ async fn search_json(State(app): Shared, uri: Uri) -> Response {
     let work = Arc::clone(&app);
     match blocking(move || search::answer(&work.repo, work.search.as_deref(), &params)).await {
         Ok(answer) => json(&answer),
+        Err(problem) => refuse(&app, &problem, true),
+    }
+}
+
+// ---- the status view -------------------------------------------------------
+
+/// How many changes the watcher announced, once it has listed the working
+/// tree: the status view keeps the working tree's documents until it
+/// changes.
+fn watched(app: &App) -> Option<u64> {
+    let (changes, _, listed) = app.watch.as_ref()?.state();
+    listed.then_some(changes)
+}
+
+async fn lifecycle_page(State(app): Shared, uri: Uri) -> Response {
+    let revision = match address::revision(after(&uri, "/lifecycle/")) {
+        Ok(revision) => revision,
+        Err(bad) => return problem_page(&app, &bad.into()),
+    };
+    let params = match StatusParams::read(uri.query()) {
+        Ok(params) => params,
+        Err(message) => {
+            return html(
+                StatusCode::BAD_REQUEST,
+                full_page(
+                    &app,
+                    &Frame::plain("Bad address", app.watch.is_some()),
+                    &page::problem(false, &message),
+                ),
+            );
+        }
+    };
+    let now = page::now();
+    let work = Arc::clone(&app);
+    let asked = revision.clone();
+    let watched = watched(&app);
+    match blocking(move || work.repo.status(&asked, now, watched)).await {
+        Ok(status) => {
+            let content = page::lifecycle::render(&page::lifecycle::StatusPage {
+                revision: revision.label(),
+                status: &status,
+                params: &params,
+            });
+            let frame = Frame {
+                title: "Which documents are current",
+                live: if status.commit.is_some() {
+                    Live::No
+                } else {
+                    Live::Worktree
+                },
+                tab: Tab::None,
+                worktree: app.watch.is_some(),
+                revision: Some(revision.label()),
+            };
+            html(StatusCode::OK, full_page(&app, &frame, &content))
+        }
+        Err(problem) => problem_page(&app, &problem),
+    }
+}
+
+async fn lifecycle_json(State(app): Shared, uri: Uri) -> Response {
+    let revision = match address::revision(after(&uri, "/api/lifecycle/")) {
+        Ok(revision) => revision,
+        Err(bad) => return json_problem(StatusCode::NOT_FOUND, &bad.0),
+    };
+    let params = match StatusParams::read(uri.query()) {
+        Ok(params) => params,
+        Err(message) => return json_problem(StatusCode::BAD_REQUEST, &message),
+    };
+    let now = page::now();
+    let work = Arc::clone(&app);
+    let asked = revision.clone();
+    let watched = watched(&app);
+    match blocking(move || work.repo.status(&asked, now, watched)).await {
+        Ok(status) => json(&ViewJson::of(
+            &status,
+            revision.label(),
+            &params.filter,
+            now,
+        )),
         Err(problem) => refuse(&app, &problem, true),
     }
 }

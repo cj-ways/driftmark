@@ -5,7 +5,8 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use driftmark_core::git::{
-    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, RepoPath, Roots, Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, LastChange, ObjectId, RepoPath, Roots,
+    Snapshot,
 };
 
 use super::{CommandReader, GixReader};
@@ -216,6 +217,14 @@ impl GitRead for Git {
             "read a working-tree file",
             |g| g.read_worktree_file(path),
             |c| c.read_worktree_file(path),
+        )
+    }
+
+    fn last_changes(&self, head: &ObjectId, roots: &Roots) -> Result<Vec<LastChange>, GitError> {
+        self.ask(
+            "walk the history",
+            |g| g.last_changes(head, roots),
+            |c| c.last_changes(head, roots),
         )
     }
 }

@@ -1,0 +1,26 @@
+# Each lifecycle, read from front matter, a masthead and a section, and a
+# type's default lifecycle.
+
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+status = { front-matter = "status", masthead = "Status", section = "Status" }
+current = ["accepted"]
+superseded = ["superseded"]
+archived = ["rejected"]
+other-statuses = ["proposed"]
+date = { front-matter = "date", masthead = "Date" }
+superseded-by = { front-matter = "superseded-by", masthead = "Superseded by" }
+
+[[type]]
+name = "feature"
+paths = ["docs/features/*.md"]
+status = { front-matter = "status" }
+current = ["target", "shipped"]
+archived = ["dropped"]
+lifecycle = "current"
+
+[[type]]
+name = "archive"
+paths = ["docs/archive/**"]
+lifecycle = "archived"

@@ -1,0 +1,10 @@
+# A chain: A is superseded by B, B by C. Each names the next its own way: a
+# file name in front matter, a title in a "Status" section, a number.
+
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+status = { front-matter = "status", section = "Status" }
+current = ["accepted"]
+superseded = ["superseded"]
+superseded-by = { front-matter = "superseded-by" }

@@ -28,6 +28,7 @@ pub(crate) struct FakeGit {
     files: HashMap<Option<ObjectId>, Vec<FileEntry>>,
     branches: Vec<Branch>,
     branches_fail: bool,
+    missing: Option<ObjectId>,
 }
 
 impl FakeGit {
@@ -39,6 +40,7 @@ impl FakeGit {
             files: HashMap::new(),
             branches: Vec::new(),
             branches_fail: false,
+            missing: None,
         }
     }
 
@@ -117,6 +119,14 @@ impl FakeGit {
         self
     }
 
+    /// A comparison with this commit on either side fails because the
+    /// commit is not in the repo, as a shallow clone's missing parents are
+    /// not.
+    pub(crate) fn missing(mut self, digit: char) -> Self {
+        self.missing = Some(id(digit));
+        self
+    }
+
     pub(crate) fn branches_fail(mut self) -> Self {
         self.branches_fail = true;
         self
@@ -159,6 +169,13 @@ impl GitRead for FakeGit {
         head: &ObjectId,
         roots: &Roots,
     ) -> Result<Vec<FileChange>, GitError> {
+        if let Some(id) = self
+            .missing
+            .as_ref()
+            .filter(|id| *id == base || *id == head)
+        {
+            return Err(GitError::MissingObject { id: id.clone() });
+        }
         let old = self.markdown_files(&Snapshot::Commit(base.clone()), roots)?;
         let new = self.markdown_files(&Snapshot::Commit(head.clone()), roots)?;
         Ok(diff_files(&old, &new))

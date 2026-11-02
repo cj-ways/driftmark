@@ -594,7 +594,8 @@ fn reading_pages_draw_diagrams_and_say_which_branches_wait() {
         "{page}"
     );
     assert!(
-        page.contains("<li class=\"pill\" data-pill=\"status\">Status: draft</li>"),
+        page.contains("<li class=\"pill\" data-pill=\"status\"><a href=\"/lifecycle/")
+            && page.contains(">Status: draft</a></li>"),
         "{page}"
     );
     assert!(page.contains("Dated 2026-10-18"), "{page}");
@@ -612,7 +613,9 @@ fn reading_pages_draw_diagrams_and_say_which_branches_wait() {
         "{read}"
     );
     assert!(
-        read.contains("<li class=\"pill\" data-pill=\"type\">Decision</li>"),
+        read.contains(
+            "<li class=\"pill\" data-pill=\"type\"><a href=\"/lifecycle/main?type=decision\">Decision</a></li>"
+        ),
         "{read}"
     );
     assert!(

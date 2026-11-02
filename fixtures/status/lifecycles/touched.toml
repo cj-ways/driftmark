@@ -1,0 +1,14 @@
+# Whole days between each file's last commit and `now`, or "uncommitted"
+# for a file no commit holds. `now` is 2026-07-01 00:00 UTC.
+now = 1782864000
+
+[days]
+"docs/decisions/0001-write-docs-in-markdown.md" = 170
+"docs/decisions/0002-keep-docs-in-a-wiki.md" = 160
+"docs/decisions/0003-try-a-database.md" = 12
+"docs/decisions/0004-one-big-file.md" = 120
+"docs/decisions/0005-many-small-files.md" = 120
+"docs/features/export.md" = 3
+"docs/features/sharing-links.md" = 150
+"docs/archive/2026-01-first-plan.md" = 170
+"notes/ideas.md" = 0

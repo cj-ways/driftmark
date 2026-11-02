@@ -1,0 +1,16 @@
+# Documents untouched for 90 days or more, whatever their lifecycle. The
+# day count comes from the rules file; without it, it is 180.
+
+[status-view]
+untouched-days = 90
+
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+status = { front-matter = "status" }
+current = ["accepted"]
+
+[[type]]
+name = "archive"
+paths = ["docs/archive/**"]
+lifecycle = "archived"

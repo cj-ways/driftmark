@@ -1,0 +1,17 @@
+untouched-days 90
+
+decision: 3 documents, 3 current, 0 superseded, 0 archived, 0 none, 2 untouched
+archive: 1 documents, 0 current, 0 superseded, 1 archived, 0 none, 1 untouched
+document: 1 documents, 0 current, 0 superseded, 0 archived, 1 none, 0 untouched
+all: 5 documents, 3 current, 0 superseded, 1 archived, 1 none, 3 untouched
+
+## decision
+docs/decisions/0001-short-ids.md | current | status accepted | by - | 89 days
+docs/decisions/0002-long-ids.md | current | status accepted | by - | 90 days, untouched
+docs/decisions/0003-no-ids.md | current | status accepted | by - | 400 days, untouched
+
+## archive
+docs/archive/2025-old-plan.md | archived | status - | by - | 500 days, untouched
+
+## document
+notes/draft.md | none | status - | by - | uncommitted

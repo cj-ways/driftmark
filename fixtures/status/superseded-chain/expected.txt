@@ -1,0 +1,10 @@
+untouched-days 180
+
+decision: 4 documents, 1 current, 3 superseded, 0 archived, 0 none, 2 untouched
+all: 4 documents, 1 current, 3 superseded, 0 archived, 0 none, 2 untouched
+
+## decision
+docs/decisions/0003-keep-pages-in-a-cache.md | current | status accepted | by - | 30 days
+  docs/decisions/0002-keep-pages-on-disk.md | superseded | status Superseded by 3. Keep pages in a cache | by "3. Keep pages in a cache": found docs/decisions/0003-keep-pages-in-a-cache.md | 200 days, untouched
+    docs/decisions/0001-keep-pages-in-memory.md | superseded | status superseded | by "0002-keep-pages-on-disk.md": found docs/decisions/0002-keep-pages-on-disk.md | 300 days, untouched
+  docs/decisions/0004-render-pages-at-build-time.md | superseded | status Superseded by ADR 3 | by "ADR 3": found docs/decisions/0003-keep-pages-in-a-cache.md | 30 days

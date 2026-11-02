@@ -1,18 +1,18 @@
 doc/adr/0001-record-architecture-decisions.md
-    Classification { doc_type: "adr", status: Some("Superceded by 2. Record decisions in the wiki"), lifecycle: Some(Superseded), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [6, 7] }
+    Classification { doc_type: "adr", status: Some("Superceded by 2. Record decisions in the wiki"), status_links: [], lifecycle: Some(Superseded), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [6, 7] }
 docs/archive/2026-01-old-plan.md
-    Classification { doc_type: "archive", status: None, lifecycle: Some(Archived), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
+    Classification { doc_type: "archive", status: None, status_links: [], lifecycle: Some(Archived), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
 docs/decisions/0001-use-markdown.md
-    Classification { doc_type: "decision", status: Some("accepted"), lifecycle: Some(Current), date: Some("2026-01-05"), superseded_by: None, superseded_by_links: [], decision_blocks: [5, 6, 7, 8] }
+    Classification { doc_type: "decision", status: Some("accepted"), status_links: [], lifecycle: Some(Current), date: Some("2026-01-05"), superseded_by: None, superseded_by_links: [], decision_blocks: [5, 6, 7, 8] }
 docs/decisions/0002-one-big-file.md
-    Classification { doc_type: "decision", status: Some("Superseded"), lifecycle: Some(Superseded), date: Some("2026-01-10"), superseded_by: Some("0003 Many small files"), superseded_by_links: ["0003-many-small-files.md"], decision_blocks: [2, 3] }
+    Classification { doc_type: "decision", status: Some("Superseded"), status_links: [], lifecycle: Some(Superseded), date: Some("2026-01-10"), superseded_by: Some("0003 Many small files"), superseded_by_links: ["0003-many-small-files.md"], decision_blocks: [2, 3] }
 docs/decisions/0003-many-small-files.md
-    Classification { doc_type: "decision", status: Some("proposed"), lifecycle: None, date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [2, 3] }
+    Classification { doc_type: "decision", status: Some("proposed"), status_links: [], lifecycle: None, date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [2, 3] }
 docs/features/export.md
-    Classification { doc_type: "feature", status: None, lifecycle: Some(Current), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
+    Classification { doc_type: "feature", status: None, status_links: [], lifecycle: Some(Current), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
 docs/features/search/search.md
-    Classification { doc_type: "feature", status: Some("target"), lifecycle: Some(Current), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
+    Classification { doc_type: "feature", status: Some("target"), status_links: [], lifecycle: Some(Current), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
 docs/standards/writing.md
-    Classification { doc_type: "standard", status: None, lifecycle: Some(Current), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
+    Classification { doc_type: "standard", status: None, status_links: [], lifecycle: Some(Current), date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
 notes/ideas.md
-    Classification { doc_type: "document", status: None, lifecycle: None, date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }
+    Classification { doc_type: "document", status: None, status_links: [], lifecycle: None, date: None, superseded_by: None, superseded_by_links: [], decision_blocks: [] }

@@ -170,6 +170,11 @@ pub(crate) fn document(revision: &str, path: &RepoPath) -> String {
     format!("/doc/{}{SEPARATOR}{}", target(revision), encode_path(path))
 }
 
+/// The address of a revision's status view.
+pub(crate) fn lifecycle(revision: &str) -> String {
+    format!("/lifecycle/{}", target(revision))
+}
+
 /// The address of a range's change list.
 pub(crate) fn changes(range: &str) -> String {
     format!("/changes/{}", target(range))

@@ -156,6 +156,7 @@ fn pills_come_from_the_rules_or_the_front_matter() {
     let mut class = Classification {
         doc_type: "decision".into(),
         status: Some("accepted".into()),
+        status_links: Vec::new(),
         lifecycle: Some(Lifecycle::Current),
         date: None,
         superseded_by: Some("0009 <x>".into()),
@@ -202,6 +203,41 @@ fn pills_come_from_the_rules_or_the_front_matter() {
     assert_eq!(pills(Some(&class), &[]), "");
     assert_eq!(pills(None, &[]), "");
     assert_eq!(capitalized(""), "");
+}
+
+#[test]
+fn reading_pages_link_their_pills_to_the_status_page() {
+    let class = Classification {
+        doc_type: "decision record".into(),
+        status: Some("accepted".into()),
+        status_links: Vec::new(),
+        lifecycle: Some(Lifecycle::Current),
+        date: Some("2026-10-18".into()),
+        superseded_by: None,
+        superseded_by_links: Vec::new(),
+        decision_blocks: Vec::new(),
+    };
+    assert_eq!(
+        linked_pills(Some(&class), &[], "feature/x"),
+        "<ul class=\"pills\" data-gen aria-label=\"About this document\"><li class=\"pill\" data-pill=\"type\"><a href=\"/lifecycle/feature/x?type=decision%20record\">Decision record</a></li><li class=\"pill\" data-pill=\"status\"><a href=\"/lifecycle/feature/x?type=decision%20record&amp;lifecycle=current\">Status: accepted</a></li><li class=\"pill\" data-pill=\"lifecycle\" data-lifecycle=\"current\"><a href=\"/lifecycle/feature/x?type=decision%20record&amp;lifecycle=current\">Current</a></li><li class=\"pill\" data-pill=\"date\">Dated 2026-10-18</li></ul>\n"
+    );
+    let plain = Classification {
+        doc_type: "document".into(),
+        status: None,
+        lifecycle: None,
+        date: None,
+        ..class
+    };
+    assert_eq!(linked_pills(Some(&plain), &[], "main"), "");
+    assert_eq!(linked_pills(None, &[], "main"), "");
+    assert_eq!(
+        link_pill("<li data-pill=\"type\">", "type", "x"),
+        "<li data-pill=\"type\">"
+    );
+    assert_eq!(
+        link_pill("<li data-pill=\"type\"", "type", "x"),
+        "<li data-pill=\"type\""
+    );
 }
 
 #[test]

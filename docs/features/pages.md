@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Pages
 
-> Short version: `driftmark serve` shows three kinds of page in the review-first design of decision 0010. The inbox lists the branches whose documents changed and says where to start. A change page has a rail with every change and one card per change, with its level, what happened, how it is drawn and why it ranks there. A reading page shows a document with its status, its sections and the changes waiting on open branches. Every page keeps the same readability rules on a computer and a phone, in light and dark. Diagrams are drawn on the server, code is coloured in the browser, and pages that show the working tree update themselves. Reading and change pages carry the reader's notes and "Seen" marks (`docs/features/notes.md`).
+> Short version: `driftmark serve` shows three kinds of page in the review-first design of decision 0010. The inbox lists the branches whose documents changed and says where to start. A change page has a rail with every change and one card per change, with its level, what happened, how it is drawn and why it ranks there. A reading page shows a document with its status, its sections and the changes waiting on open branches. Every page keeps the same readability rules on a computer and a phone, in light and dark. Diagrams are drawn on the server, code is coloured in the browser, and pages that show the working tree update themselves. Reading and change pages carry the reader's notes and "Seen" marks (`docs/features/notes.md`). The status page, `docs/features/status-page.md`, shows which documents are current.
 
 ## Every page
 
@@ -38,6 +38,8 @@ The search box and the theme button need the page script, so they stay hidden in
 ## The inbox
 
 Address: `/`.
+
+Under its title, a link leads to the status page of the default branch: "Which documents are current on `origin/main` →" (`docs/features/status-page.md`).
 
 1. **This checkout.** The working tree compared with where its branch left the default branch: its highest level, its counts and when they were made. While the server counts, the card says so. It links to `/changes/auto`.
 2. **One group per highest level**, decision first: "Decisions changed: review these first", "Rules changed", "Facts changed", "Only wording changed", "Only formatting changed". Inside a group, the newest branch comes first.
@@ -110,7 +112,7 @@ Address: `/doc/<revision>/-/<path>`; `worktree` is the files on disk.
 2. **The path and the revision**, with a link to the JSON.
 3. **"On this page"**: the document's sections (levels 2 and 3), each with a count of the changes waiting in it. On a large screen it sits beside the text and stays in view; on a smaller one it is a folded list above the text.
 4. **The document**:
-   - its title, then its **pills**: its type from the rules file, its status, its lifecycle (current, superseded, archived), its date and what superseded it. When the rules file names no place for the status or the date, the document's own `status` and `date` fields are used;
+   - its title, then its **pills**: its type from the rules file, its status, its lifecycle (current, superseded, archived), its date and what superseded it. When the rules file names no place for the status or the date, the document's own `status` and `date` fields are used. The type pill links to the status page of the same revision with that type; the status and lifecycle pills add the document's lifecycle;
    - its summary, the quote under the title, in larger text;
    - its sections. A heading with changes waiting carries a flag, "3 changes wait", that links to the first branch's changes.
 

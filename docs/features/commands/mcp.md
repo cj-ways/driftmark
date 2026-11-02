@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # The MCP connector
 
-> Short version: `driftmark mcp` is the same program, started by an agent such as Claude Code, Codex or Cursor. It answers over MCP (the Model Context Protocol) on standard input and output. Five tools let the agent see what changed in the docs between two git points, read one document's changes, read a document or one section of it, search every document, and run the writing check. Six more close the notes loop: the agent lists and reads the reader's notes, answers them, proposes a decision, and records the commits that applied one; only the reader decides. Every answer is JSON, holds at most 16,000 characters unless the call asks for up to 40,000, and says what it cut and how to ask for the rest. The connector reads only through git and the repository's files, never writes a document, writes only to the notes file `driftmark serve` keeps, and runs no program but git. `driftmark mcp install` adds it to a repository's `.mcp.json`.
+> Short version: `driftmark mcp` is the same program, started by an agent such as Claude Code, Codex or Cursor. It answers over MCP (the Model Context Protocol) on standard input and output. Six tools let the agent see what changed in the docs between two git points, read one document's changes, read a document or one section of it, search every document, see which documents are current, and run the writing check. Six more close the notes loop: the agent lists and reads the reader's notes, answers them, proposes a decision, and records the commits that applied one; only the reader decides. Every answer is JSON, holds at most 16,000 characters unless the call asks for up to 40,000, and says what it cut and how to ask for the rest. The connector reads only through git and the repository's files, never writes a document, writes only to the notes file `driftmark serve` keeps, and runs no program but git. `driftmark mcp install` adds it to a repository's `.mcp.json`.
 
 ## Running it
 
@@ -82,6 +82,7 @@ Each tool takes its arguments as one JSON object. A call with an argument the to
 | `changes_document` | How one document changed: every change, its level, its signals and its words. |
 | `document_read` | One document at a revision: metadata, outline and text, whole or for one section. |
 | `search` | The documents that hold every word of a query, best first, with snippets. |
+| `documents_status` | Which documents are current, superseded or archived, by type, and how many days ago each last changed. |
 | `lint` | The writing check on given files and folders, or on the files changed since the last commit. |
 | `notes_list` | The reader's notes, filtered, each in a few fields. |
 | `note_get` | One note in full: where its words are now, the section around them, the thread and the decision. |
@@ -90,7 +91,7 @@ Each tool takes its arguments as one JSON object. A call with an argument the to
 | `note_propose_decision` | The agent's proposal for a note: change, modify or keep, with a summary. |
 | `note_mark_applied` | The commits that applied a decided note. |
 
-The first eight tools only read. The last three write to the notes file, and to nothing else. The tool list says so to the client: a tool that only reads carries `readOnlyHint: true` and `idempotentHint: true`; the three that write carry `readOnlyHint: false` and `idempotentHint: false`, because each call adds a reply, a proposal or a commit. Every tool carries `destructiveHint: false` and `openWorldHint: false`.
+The first nine tools only read. The last three write to the notes file, and to nothing else. The tool list says so to the client: a tool that only reads carries `readOnlyHint: true` and `idempotentHint: true`; the three that write carry `readOnlyHint: false` and `idempotentHint: false`, because each call adds a reply, a proposal or a commit. Every tool carries `destructiveHint: false` and `openWorldHint: false`.
 
 ### `changes_summary`
 
@@ -547,6 +548,101 @@ It answers:
   "skipped": [],
   "page": {"offset": 0, "shown": 2, "total": 2}
 }
+```
+
+### `documents_status`
+
+The status view of `/api/lifecycle/<revision>` (`docs/features/status-page.md`): every document of a revision with its type, lifecycle, status, date, what superseded it, and when a commit last changed it.
+
+| Argument | Meaning |
+|---|---|
+| `revision` | As for `document_read`. The default is `worktree`, or `HEAD` in a bare repository. |
+| `types` | Keep only documents of these types from the rules file, such as `["decision"]`. A file that no type matches has the type `document`. |
+| `lifecycle` | Keep only `current`, `superseded`, `archived` or `none` documents. |
+| `path` | Keep only documents whose path starts with this text, such as `docs/decisions/`. |
+| `untouched` | `true` keeps only documents no commit changed for the rules file's `untouched-days`, 180 by default. |
+| `offset` | How many documents to skip. The default is 0. |
+| `limit` | The most documents to list, from 1 to 500. The default is 50: each costs about 200 characters. |
+
+The answer is the JSON of `/api/lifecycle/<revision>` with the filter: `totals` and `types` count every document, whatever the filter, and `documents` lists those the filter keeps, by path, from `offset` on. Then come `skipped`, at most 20 of them, `page` and, when cut, `cut`. A document's `superseded_by.state` says whether its successor was `found`, and `last_change` is `null` for a file not committed yet.
+
+The connector has no watcher, so it lists the working tree on every call; a commit's documents and history stay in its cache.
+
+Call `documents_status` with:
+
+```json
+{}
+```
+
+It answers:
+
+```json
+{
+  "schema_version": 1,
+  "revision": "worktree",
+  "commit": "worktree",
+  "as_of": 1793577600,
+  "untouched_days": 180,
+  "filter": {"types": [], "lifecycle": null, "folder": null, "untouched": false},
+  "totals": {"documents": 3, "current": 1, "superseded": 0, "archived": 0, "none": 2, "untouched": 2},
+  "types": [
+    {"type": "decision", "documents": 1, "current": 1, "superseded": 0, "archived": 0, "none": 0, "untouched": 1},
+    {"type": "document", "documents": 2, "current": 0, "superseded": 0, "archived": 0, "none": 2, "untouched": 1}
+  ],
+  "documents": [
+    {
+      "path": "docs/decisions/0002-cache-rendered-pages.md",
+      "title": "Cache rendered pages",
+      "type": "decision",
+      "status": "accepted",
+      "lifecycle": "current",
+      "last_change": {
+        "commit": "59f1a26ed292405ee4ef67182b681d68723d2726",
+        "committed_at": 1767312000,
+        "days": 304
+      },
+      "untouched": true
+    },
+    {
+      "path": "docs/guide.md",
+      "title": "Cache guide",
+      "type": "document",
+      "lifecycle": "none",
+      "last_change": null,
+      "untouched": false
+    },
+    {
+      "path": "docs/notes/cache-sizes.md",
+      "title": "Cache sizes",
+      "type": "document",
+      "lifecycle": "none",
+      "last_change": {
+        "commit": "59f1a26ed292405ee4ef67182b681d68723d2726",
+        "committed_at": 1767312000,
+        "days": 304
+      },
+      "untouched": true
+    }
+  ],
+  "skipped": [],
+  "page": {"offset": 0, "shown": 3, "total": 3}
+}
+```
+
+The guide has an edit not committed yet, so its `last_change` is `null`. The other two last changed in the commit that made `feature`. `as_of` is the time the ages were counted at; `crates/driftmark/tests/mcp.rs` works the ages out again from the documented `as_of`, because they grow every day.
+
+A lifecycle it does not know is refused.
+
+Call `documents_status` with:
+
+```json
+{"lifecycle": "draft"}
+```
+
+It refuses:
+
+```text
+`lifecycle` must be current, superseded, archived or none
 ```
 
 ### `lint`
@@ -1070,7 +1166,7 @@ The connector itself acts as the agent in every call. The store under it checks 
 Claude Code shows a warning when one tool answer passes 10,000 tokens. It saves a text answer longer than 50,000 characters to a file, and the agent sees only the file's name (code.claude.com/docs/en/mcp, "MCP output limits and warnings", read on 2026-10-18). So every answer has a limit.
 
 - **The limit** is 16,000 characters. The answers measured 2.0 to 2.7 characters a token with Claude's tokenizer (see below), so that is about 6,000 to 8,000 tokens, under the warning. A call may ask for another limit with `max_chars`, from 2,000 to 40,000. Characters are counted as Claude Code counts them, in UTF-16 units, so an emoji outside the basic plane counts two.
-- **Lists are cut.** `changes_summary`, `changes_document`, `search`, `lint` and `notes_list` list as many items as fit, from `offset` on, and at most `limit`. Counts such as `totals`, `total` and `errors` always cover the whole list.
+- **Lists are cut.** `changes_summary`, `changes_document`, `search`, `documents_status`, `lint` and `notes_list` list as many items as fit, from `offset` on, and at most `limit`. Counts such as `totals`, `total` and `errors` always cover the whole list.
 - **Text is cut after a whole line.** `document_read` keeps the outline to at most 40% of the limit, leaving out the deepest headings first, and gives the rest to the text. The text ends after the last whole line that fits. Only a single line longer than the room left is cut inside, at a character.
 - **A prompt is cut after a whole line.** `review_get` gives as much of the prompt as fits, and `cut.next` reads on from the byte where it stopped.
 - **A note keeps its own words.** `note_get` never cuts the note, its point or its quote. It leaves out the thread's oldest replies first, then cuts the section's text after a whole line, and says how to read the rest.

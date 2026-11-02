@@ -1,0 +1,10 @@
+# "Superseded by" values that lead to no document, and two records that
+# name each other.
+
+[[type]]
+name = "decision"
+paths = ["docs/decisions/*.md"]
+status = { front-matter = "status", masthead = "Status" }
+current = ["accepted"]
+superseded = ["superseded"]
+superseded-by = { front-matter = "superseded-by", masthead = "Superseded by" }

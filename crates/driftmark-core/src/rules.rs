@@ -9,7 +9,8 @@
 //! repository uses. The file's `[lint]` table holds the writing check's
 //! settings; [`crate::lint`] reads it. Its `[masthead]` table adds masthead
 //! keys to the known ones, and its `[compare]` table names the branch `auto`
-//! and the home page compare with.
+//! and the home page compare with. Its `[status-view]` table says after how
+//! many days without a commit the status view calls a document untouched.
 
 use std::fmt;
 
@@ -23,6 +24,16 @@ use crate::lint::{LintSettings, RawLint};
 
 /// The type of a document that no rule matches.
 pub const DEFAULT_TYPE: &str = "document";
+
+/// After how many days without a commit the status view calls a document
+/// untouched, when the rules file's `[status-view]` table does not say.
+/// About half a year: long enough that a document changed with the work of
+/// one season is not called untouched.
+pub const DEFAULT_UNTOUCHED_DAYS: u32 = 180;
+
+/// The most days `untouched-days` may be: about a hundred years, past any
+/// repository's history.
+pub const MAX_UNTOUCHED_DAYS: u32 = 36_500;
 
 /// How path patterns match: case matters, `*` and `?` never cross a `/`, and
 /// `*` matches names that start with a dot. The lint's `exclude` patterns
@@ -63,6 +74,7 @@ pub struct Rules {
     masthead_extra: Vec<String>,
     default_branch: Option<String>,
     presets: Vec<String>,
+    untouched_days: Option<u32>,
 }
 
 /// One `[[type]]` entry of a rules file.
@@ -176,6 +188,11 @@ pub struct Classification {
     /// The status as written, when the type says where it lives and the
     /// document has one.
     pub status: Option<String>,
+    /// The targets of the links in the status, when it was read from the
+    /// masthead, as in `Status: Superseded by [0004](0004-x.md)`. The status
+    /// view uses them to find the document that replaced this one when no
+    /// "superseded by" value names it.
+    pub status_links: Vec<String>,
     /// What the status means, or the type's default lifecycle when the status
     /// is missing or not in any list.
     pub lifecycle: Option<Lifecycle>,
@@ -241,6 +258,37 @@ struct RawRules {
     masthead: RawMasthead,
     #[serde(default)]
     compare: RawCompare,
+    #[serde(default, rename = "status-view")]
+    status_view: RawStatusView,
+}
+
+/// The `[status-view]` table: settings of the status view.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct RawStatusView {
+    untouched_days: Option<UntouchedDays>,
+}
+
+/// A day count from the rules file. It must be a whole number from 1 to
+/// [`MAX_UNTOUCHED_DAYS`]; the TOML reader then names its line.
+#[derive(Deserialize)]
+#[serde(try_from = "i64")]
+struct UntouchedDays(u32);
+
+impl TryFrom<i64> for UntouchedDays {
+    type Error = String;
+
+    fn try_from(days: i64) -> Result<UntouchedDays, String> {
+        u32::try_from(days)
+            .ok()
+            .filter(|days| (1..=MAX_UNTOUCHED_DAYS).contains(days))
+            .map(UntouchedDays)
+            .ok_or_else(|| {
+                format!(
+                    "`untouched-days` is {days}; write a whole number of days from 1 to {MAX_UNTOUCHED_DAYS}, such as {DEFAULT_UNTOUCHED_DAYS}"
+                )
+            })
+    }
 }
 
 /// The name of a built-in preset. A name driftmark does not know is refused
@@ -397,6 +445,10 @@ impl Rules {
             masthead_extra,
             default_branch: raw.compare.default_branch.map(|BranchName(name)| name),
             presets,
+            untouched_days: raw
+                .status_view
+                .untouched_days
+                .map(|UntouchedDays(days)| days),
         })
     }
 
@@ -409,9 +461,9 @@ impl Rules {
     }
 
     /// Adds a preset's types after these rules' own, and its masthead keys to
-    /// theirs. The preset's `[lint]` and `[compare]` tables are not used: the
-    /// writing check's settings and the default branch belong to the
-    /// repository's own file.
+    /// theirs. The preset's `[lint]`, `[compare]` and `[status-view]` tables
+    /// are not used: the writing check's settings, the default branch and the
+    /// day count belong to the repository's own file.
     pub(crate) fn append(&mut self, preset: Rules) {
         self.types.extend(preset.types);
         self.masthead_extra.extend(preset.masthead_extra);
@@ -432,6 +484,14 @@ impl Rules {
     #[must_use]
     pub fn default_branch(&self) -> Option<&str> {
         self.default_branch.as_deref()
+    }
+
+    /// After how many days without a commit the status view calls a
+    /// document untouched: the `[status-view]` table's `untouched-days`, or
+    /// [`DEFAULT_UNTOUCHED_DAYS`].
+    #[must_use]
+    pub fn untouched_days(&self) -> u32 {
+        self.untouched_days.unwrap_or(DEFAULT_UNTOUCHED_DAYS)
     }
 
     /// The writing check's settings from the `[lint]` table, or the defaults
@@ -487,6 +547,7 @@ impl Rules {
             None => Classification {
                 doc_type: DEFAULT_TYPE.to_owned(),
                 status: None,
+                status_links: Vec::new(),
                 lifecycle: None,
                 date: None,
                 superseded_by: None,
@@ -699,9 +760,11 @@ impl TypeRule {
             .collect();
         let (superseded_by, superseded_by_links) =
             superseded_by.map(|found| (found.text, found.links)).unzip();
+        let (status, status_links) = status.map(|found| (found.text, found.links)).unzip();
         Classification {
             doc_type: self.name.clone(),
-            status: status.map(|found| found.text),
+            status,
+            status_links: status_links.unwrap_or_default(),
             lifecycle,
             date: date.map(|found| found.text),
             superseded_by,
@@ -1016,6 +1079,54 @@ current = ["accepted"]
         );
         assert!(unreadable("[masthead]\nkeys = [\" \"]\n").contains("cannot match"));
         assert!(unreadable("[masthead]\nother = 1\n").contains("other"));
+    }
+
+    #[test]
+    fn the_status_view_table_sets_the_untouched_days() {
+        assert_eq!(Rules::default().untouched_days(), DEFAULT_UNTOUCHED_DAYS);
+        assert_eq!(Rules::parse("").expect("valid").untouched_days(), 180);
+        let rules = Rules::parse("[status-view]\nuntouched-days = 90\n").expect("valid");
+        assert_eq!(rules.untouched_days(), 90);
+        for days in [1, MAX_UNTOUCHED_DAYS] {
+            let text = format!("[status-view]\nuntouched-days = {days}\n");
+            assert_eq!(Rules::parse(&text).expect("valid").untouched_days(), days);
+        }
+        for bad in ["0", "-3", "36501", "4294967297"] {
+            let message = unreadable(&format!("[status-view]\nuntouched-days = {bad}\n"));
+            assert!(
+                message.contains(&format!(
+                    "`untouched-days` is {bad}; write a whole number of days from 1 to 36500, such as 180"
+                )),
+                "{message}"
+            );
+            assert!(message.contains("line 2"), "{message}");
+        }
+        let text = unreadable("[status-view]\nuntouched-days = \"90\"\n");
+        assert!(text.contains("invalid type: string"), "{text}");
+        assert!(unreadable("[status-view]\ndays = 90\n").contains("unknown field `days`"));
+        let mut own = Rules::parse("[status-view]\nuntouched-days = 30\n").expect("valid");
+        let preset = Rules::parse("[status-view]\nuntouched-days = 7\n").expect("valid");
+        own.append(preset);
+        assert_eq!(own.untouched_days(), 30);
+    }
+
+    #[test]
+    fn a_masthead_status_keeps_its_links() {
+        let rules = Rules::parse(DECISIONS).expect("valid");
+        let found = rules.classify(
+            "docs/decisions/0002-a.md",
+            &document("# A\n\n> Status: Superseded by [B](0003-b.md) and [C](../c.md)\n"),
+        );
+        assert_eq!(found.status.as_deref(), Some("Superseded by B and C"));
+        assert_eq!(found.status_links, ["0003-b.md", "../c.md"]);
+        assert_eq!(found.lifecycle, Some(Lifecycle::Superseded));
+        let front = rules.classify(
+            "docs/decisions/0002-a.md",
+            &document("---\nstatus: superseded\n---\n\n# A\n"),
+        );
+        assert_eq!(front.status_links, Vec::<String>::new());
+        let none = rules.classify("docs/other.md", &document("> Status: [x](y.md)\n"));
+        assert_eq!(none.status_links, Vec::<String>::new());
     }
 
     #[test]

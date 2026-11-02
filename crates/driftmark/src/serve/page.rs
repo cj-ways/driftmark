@@ -369,9 +369,24 @@ pub(crate) fn home(home: &Home, worktree: &WorktreeLine<'_>, now: i64) -> String
         ),
         None => "No default branch".to_owned(),
     };
+    let status = match &home.default {
+        Some(default) => format!(
+            "<a href=\"{}\">Which documents are current on <code>{}</code> →</a>",
+            escape(&address::lifecycle(&default.name)),
+            escape(&default.name)
+        ),
+        None if !matches!(worktree, WorktreeLine::None) => format!(
+            "<a href=\"{}\">Which documents are current in this checkout →</a>",
+            escape(&address::lifecycle(address::WORKTREE))
+        ),
+        None => format!(
+            "<a href=\"{}\">Which documents are current at <code>HEAD</code> →</a>",
+            escape(&address::lifecycle("HEAD"))
+        ),
+    };
     let _ = writeln!(
         out,
-        "<p class=\"kicker\">{kicker}</p><h1>Inbox</h1></header>"
+        "<p class=\"kicker\">{kicker}</p><h1>Inbox</h1><p class=\"status-link\">{status}</p></header>"
     );
     worktree_card(&mut out, home, worktree, now);
     let Some(default) = &home.default else {
@@ -666,6 +681,58 @@ pub(crate) fn pills(classification: Option<&Classification>, fields: &[Field]) -
     )
 }
 
+/// The pills of a reading page with the type, status and lifecycle pills
+/// linked to the status page of `revision`: the type pill shows that type,
+/// and the status and lifecycle pills that type in the document's
+/// lifecycle (`docs/features/status-page.md`). An exported page keeps
+/// plain pills, because it has no server to link to.
+fn linked_pills(
+    classification: Option<&Classification>,
+    fields: &[Field],
+    revision: &str,
+) -> String {
+    let mut html = pills(classification, fields);
+    let Some(class) = classification else {
+        return html;
+    };
+    let of_type = format!(
+        "{}?type={}",
+        address::lifecycle(revision),
+        percent_encoding::utf8_percent_encode(&class.doc_type, percent_encoding::NON_ALPHANUMERIC)
+    );
+    let stage = driftmark_core::status::Stage::of(class.lifecycle);
+    let of_stage = format!("{of_type}&lifecycle={}", stage.name());
+    for (pill, href) in [
+        ("type", &of_type),
+        ("status", &of_stage),
+        ("lifecycle", &of_stage),
+    ] {
+        html = link_pill(&html, pill, href);
+    }
+    html
+}
+
+/// The words of one pill wrapped in a link to `href`, or the pills as they
+/// are when there is no such pill.
+fn link_pill(html: &str, pill: &str, href: &str) -> String {
+    let opening = format!("data-pill=\"{pill}\"");
+    let words = html.find(&opening).and_then(|at| {
+        let start = at + html[at..].find('>')? + 1;
+        let end = start + html[start..].find("</li>")?;
+        Some((start, end))
+    });
+    match words {
+        Some((start, end)) => format!(
+            "{}<a href=\"{}\">{}</a>{}",
+            &html[..start],
+            escape(href),
+            &html[start..end],
+            &html[end..]
+        ),
+        None => html.to_owned(),
+    }
+}
+
 fn capitalized(text: &str) -> String {
     let mut chars = text.chars();
     chars.next().map_or_else(String::new, |first| {
@@ -739,7 +806,7 @@ pub(crate) fn reading(page: &Reading<'_>, now: i64) -> String {
     );
     toc(&mut out, page.outline, &counts);
     let title = page.outline.iter().find(|section| section.level == 1);
-    let pills = pills(page.classification, page.fields);
+    let pills = linked_pills(page.classification, page.fields, page.revision);
     let body = if page.readable {
         let href = page.waiting.first().map_or_else(String::new, |branch| {
             address::document_changes(&branch.range, page.path)
@@ -1230,6 +1297,8 @@ pub(crate) fn token_needed(wrong: bool) -> String {
         "<main id=\"Main\" class=\"plain\">\n<h1>Token needed</h1>\n<p>{first} Open the address that <code>driftmark serve</code> printed when it started; it ends in <code>?token=</code> and the token. This browser then remembers it.</p>\n</main>\n"
     )
 }
+
+pub(crate) mod lifecycle;
 
 #[cfg(test)]
 mod tests;

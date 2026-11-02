@@ -4,8 +4,8 @@
 //!
 //! The tools read what `driftmark serve` reads, through the same git
 //! reader, cache and comparisons: what changed in a range, one document's
-//! changes, a document or one of its sections, a search, the writing check,
-//! and the reader's notes. Three note tools write to the notes file that
+//! changes, a document or one of its sections, a search, which documents
+//! are current, the writing check, and the reader's notes. Three note tools write to the notes file that
 //! `serve` writes, as the agent: a reply, a proposed decision, and the
 //! commits that applied a decision. No tool writes a document or runs a
 //! program other than git. `docs/features/commands/mcp.md` is the contract
@@ -24,6 +24,7 @@ mod lint;
 mod notes;
 mod protocol;
 mod search;
+mod status;
 mod tools;
 
 use std::ffi::OsString;

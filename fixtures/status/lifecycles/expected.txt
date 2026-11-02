@@ -1,0 +1,24 @@
+untouched-days 180
+
+decision: 5 documents, 2 current, 1 superseded, 1 archived, 1 none, 0 untouched
+feature: 2 documents, 1 current, 0 superseded, 1 archived, 0 none, 0 untouched
+archive: 1 documents, 0 current, 0 superseded, 1 archived, 0 none, 0 untouched
+document: 1 documents, 0 current, 0 superseded, 0 archived, 1 none, 0 untouched
+all: 9 documents, 3 current, 1 superseded, 3 archived, 2 none, 0 untouched
+
+## decision
+docs/decisions/0001-write-docs-in-markdown.md | current | status accepted | by - | 170 days
+docs/decisions/0002-keep-docs-in-a-wiki.md | archived | status Rejected | by - | 160 days
+docs/decisions/0003-try-a-database.md | none | status Proposed | by - | 12 days
+docs/decisions/0005-many-small-files.md | current | status accepted | by - | 120 days
+  docs/decisions/0004-one-big-file.md | superseded | status Superseded | by "0005 Many small files": found docs/decisions/0005-many-small-files.md | 120 days
+
+## feature
+docs/features/export.md | current | status - | by - | 3 days
+docs/features/sharing-links.md | archived | status dropped | by - | 150 days
+
+## archive
+docs/archive/2026-01-first-plan.md | archived | status - | by - | 170 days
+
+## document
+notes/ideas.md | none | status - | by - | 0 days

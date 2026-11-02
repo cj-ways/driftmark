@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Rules file
 
-> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. A value can also come from a JSON or YAML file beside the document, such as cc-sdd's `spec.json`. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset is a rules file in this same format, built into driftmark: `presets = [...]` names the ones a repository uses, and a repository with no rules file uses the ones whose layout it has (`docs/features/presets.md`). An optional `[lint]` table holds the writing check's settings, an optional `[masthead]` table adds masthead keys to the known ones, and an optional `[compare]` table names the branch `auto` and the home page compare with.
+> Short version: `driftmark.toml` tells driftmark which documents are which type. For each type it says where the status, the date and "superseded by" are written, what each status value means, and which headings mark decisions. A value can also come from a JSON or YAML file beside the document, such as cc-sdd's `spec.json`. The first type whose paths match a file wins. A file that no type matches is a `document` with no status. A preset is a rules file in this same format, built into driftmark: `presets = [...]` names the ones a repository uses, and a repository with no rules file uses the ones whose layout it has (`docs/features/presets.md`). An optional `[lint]` table holds the writing check's settings, an optional `[masthead]` table adds masthead keys to the known ones, an optional `[compare]` table names the branch `auto` and the home page compare with, and an optional `[status-view]` table says after how many days without a commit the status page calls a document untouched.
 
 ## Who reads it
 
@@ -76,7 +76,7 @@ What it gives for a few files of that project:
 
 ## The format
 
-The file is TOML. It holds an optional `presets` list, a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes, one `[masthead]` table and one `[compare]` table. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
+The file is TOML. It holds an optional `presets` list, a list of `[[type]]` tables and, optionally, one `[lint]` table, which `docs/features/lint.md` describes, one `[masthead]` table, one `[compare]` table and one `[status-view]` table. Nothing else may be in it. An unknown key anywhere is an error, so a typo such as `stauts` is caught, not ignored.
 
 ### Presets
 
@@ -89,7 +89,7 @@ presets = ["openspec", "adr"]
 - The file's own types come first, then each preset's, in the order named. A file can therefore type some of a preset's paths its own way.
 - The names are `openspec`, `spec-kit`, `adr`, `kiro` and `starter`. A name driftmark does not know is a `Syntax` error with its line: ``driftmark has no preset "backlog"; the presets are "openspec", "spec-kit", "adr", "kiro", "starter"``. A name written twice counts once.
 - The masthead keys of every named preset are known too.
-- A preset gives types and masthead keys only. The `[lint]` and `[compare]` tables come from this file. A preset's own `[lint]` table, which only the starter preset has, is not applied; it writes out the defaults.
+- A preset gives types and masthead keys only. The `[lint]`, `[compare]` and `[status-view]` tables come from this file. A preset's own `[lint]` table, which only the starter preset has, is not applied; it writes out the defaults.
 - A rules file with no `presets` key uses no preset, even where a preset's markers are. With no rules file at all, driftmark uses every preset whose markers it finds.
 
 `docs/features/presets.md` describes each preset, its markers and how to copy one into this file.
@@ -199,6 +199,20 @@ default-branch = "origin/dev"
 - A name that no branch has is not an error in the file. Comparing then fails with ``the default branch `dev`, named by `--base` or the rules file, does not name a commit``.
 - `rules.default_branch()` returns the name, or `None` without one.
 
+### Untouched documents
+
+The status page (`docs/features/status-page.md`) calls a document untouched when no commit changed it for this many days:
+
+```toml
+[status-view]
+untouched-days = 90
+```
+
+- Without it, the count is 180 (`DEFAULT_UNTOUCHED_DAYS`).
+- It is a whole number from 1 to 36,500. Any other value is a `Syntax` error with its line: ``the rules file could not be read: TOML parse error at line 2, column 18 … `untouched-days` is 0; write a whole number of days from 1 to 36500, such as 180``.
+- `rules.untouched_days()` returns it.
+- Untouched is shown beside a document as a fact. Nothing is ranked by it.
+
 ### Status values and lifecycles
 
 A status value means current, superseded or archived when one of the three lists holds it.
@@ -239,7 +253,7 @@ Here `status: proposed` is allowed and has no lifecycle. `status: draft` gets a 
 
 | Error | When |
 |---|---|
-| `Syntax` | The file is not valid TOML, a key is unknown or missing, a value has the wrong shape, a `[masthead]` key cannot match a line, `default-branch` cannot name a branch, or `presets` names a preset driftmark does not have. The TOML reader's message names the line and column and shows the line. |
+| `Syntax` | The file is not valid TOML, a key is unknown or missing, a value has the wrong shape, a `[masthead]` key cannot match a line, `default-branch` cannot name a branch, `untouched-days` is not a number from 1 to 36,500, or `presets` names a preset driftmark does not have. The TOML reader's message names the line and column and shows the line. |
 | `Invalid` | A type is valid TOML but says something impossible. The message names the type by its position and name, as in `the rules file's type 2 ("feature"): it lists no paths`. |
 | `Lint` | The `[lint]` table is valid TOML but names an HTML element that cannot exist, as in ``the rules file's [lint] table: `allowed-html` holds "<b>", …``. An unknown rule id or a limit of 0 is a `Syntax` error instead, because the TOML reader catches it with its line. |
 
@@ -270,6 +284,7 @@ A type is invalid when:
 |---|---|
 | `doc_type` | The matching type's name, or `document`. |
 | `status` | The status as written, when the type has a `status` location and the document has a value there. |
+| `status_links` | The targets of the links in the status, when it came from the masthead, such as `Status: Superseded by [0004](0004-x.md)`. The status page finds a successor by them when no "superseded by" names one. |
 | `lifecycle` | `Current`, `Superseded` or `Archived`, by the rules above. |
 | `date` | The date as written. driftmark does not read it as a date. |
 | `superseded_by` | The text naming the document that replaced this one. |

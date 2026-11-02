@@ -24,6 +24,8 @@ pub(crate) mod assets;
 mod cache;
 pub(crate) mod compare;
 mod guard;
+// The status view; the MCP connector's `documents_status` answers from it.
+pub(crate) mod lifecycle;
 mod marker;
 mod notes;
 pub(crate) mod page;

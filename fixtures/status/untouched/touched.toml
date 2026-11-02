@@ -1,0 +1,10 @@
+# Whole days between each file's last commit and `now`, or "uncommitted"
+# for a file no commit holds. `now` is 2026-07-01 00:00 UTC.
+now = 1782864000
+
+[days]
+"docs/decisions/0001-short-ids.md" = 89
+"docs/decisions/0002-long-ids.md" = 90
+"docs/decisions/0003-no-ids.md" = 400
+"docs/archive/2025-old-plan.md" = 500
+"notes/draft.md" = "uncommitted"

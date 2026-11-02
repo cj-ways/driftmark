@@ -20,3 +20,4 @@ pub mod notes;
 pub mod presets;
 pub mod search;
 pub mod serve;
+pub mod status;

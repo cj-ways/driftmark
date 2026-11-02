@@ -1,0 +1,9 @@
+# Whole days between each file's last commit and `now`, or "uncommitted"
+# for a file no commit holds. `now` is 2026-07-01 00:00 UTC.
+now = 1782864000
+
+[days]
+"docs/decisions/0001-keep-pages-in-memory.md" = 300
+"docs/decisions/0002-keep-pages-on-disk.md" = 200
+"docs/decisions/0003-keep-pages-in-a-cache.md" = 30
+"docs/decisions/0004-render-pages-at-build-time.md" = 30

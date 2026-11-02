@@ -1,0 +1,5 @@
+---
+status: superseded
+---
+
+# Daily reports

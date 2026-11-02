@@ -5,7 +5,7 @@ date: 2026-10-18
 
 # Git ranges and readers
 
-> Short version: driftmark asks a git repo seven kinds of question through one interface, `GitRead`, in `driftmark-core`. Two readers in the `driftmark` program answer them: gix, and the `git` command. Both must give identical answers. A range is written as `<base>..<head>`, `<base>...<head>`, `--since <date>` or `auto`. `auto` includes changes not committed yet. Only `.md` and `.markdown` files count, and renames are not detected.
+> Short version: driftmark asks a git repo eight kinds of question through one interface, `GitRead`, in `driftmark-core`. Two readers in the `driftmark` program answer them: gix, and the `git` command. Both must give identical answers. A range is written as `<base>..<head>`, `<base>...<head>`, `--since <date>` or `auto`. `auto` includes changes not committed yet. Only `.md` and `.markdown` files count, and renames are not detected.
 
 ## What driftmark asks git
 
@@ -21,6 +21,7 @@ The interface is `driftmark_core::git::GitRead`. Every method has one answer, an
 | Which file is at this path in a commit? | `blob_at(commit, path)` | The blob id of the regular file there, or none when the path is missing, a folder, a symbolic link or a submodule. It finds any file, not only Markdown, such as the rules file. A path through a file or a submodule finds none. |
 | What is in this file? | `read_blob(id)` | The blob's bytes, exactly as stored. |
 | What is in this working-tree file? | `read_worktree_file(path)` | The bytes on disk now. |
+| When did each file last change? | `last_changes(head, roots)` | For every Markdown file of `head`, the newest commit, following first parents only, whose version of the file differs from its first parent's, with its committer date. The first commit of the history changes every file it holds, and so does a shallow clone's oldest commit. A new mode alone is no change. The status page uses it (`docs/features/status-page.md`). |
 | Which branches are there? | `branches()` | Every local branch, then every remote-tracking branch, each sorted by name, with the commit at its tip and whether `HEAD` points at it. A local branch is named like `main`, a remote-tracking one like `origin/main`. Symbolic refs such as `origin/HEAD`, refs whose tip is not a commit, refs that cannot be read and names that are not UTF-8 are left out. |
 
 Every list comes back sorted by path, in byte order, with each path once.
@@ -167,12 +168,15 @@ Both readers hash every listed file on every call. For about 3,400 files that re
 
 **gix reader** (`GixReader`). It reads the repo inside the process, so it starts no other program. It keeps one repo handle per thread in a small pool, so many threads can read at once. Each handle caches up to 16 MB of pack data, capped by bytes, and 4 MB of recent objects. The byte cap avoids gix's default cache, which needs an MPL-2.0 crate. gix is pinned to one version, because each 0.x release may change its interface.
 
+For `last_changes`, gix reads 256 commits along first parents at a time, then compares each with its parent on up to 16 threads, and stops after the window in which every file was found. A comparison looks only for the files still waiting: such a file still holds its tip's blob in every commit the walk reaches, so the walk asks only whether the parent holds the same blob. It opens a folder only when the folder holds a waiting file and its tree changed, and a thread keeps the trees of its last comparison for the next one. On a 3,724-file repository with 3,254 first-parent commits it took 104 to 171 ms on 12 threads in the runs of 2026-11-02.
+
 **`git` command reader** (`CommandReader`). It runs `git` with plumbing commands whose output is meant for programs:
 
 - `rev-parse --verify` to resolve names;
 - `merge-base --all` for merge-bases;
 - `ls-tree -r -z` to list files at a commit, and `ls-tree -z` without `-r` to find one file;
 - `diff-tree -r -z --no-renames` to list changes;
+- one `log --first-parent -m --root --raw -z --no-renames` for the last changes, read as it runs and stopped once every file is found;
 - one long-lived `cat-file --batch` process to read commits and blobs;
 - `for-each-ref` on `refs/heads` and `refs/remotes` to list branches;
 - `ls-files` and `hash-object` for the working tree.
@@ -200,6 +204,8 @@ Tests build small repos with the `git` command in a temporary folder, then ask g
 - local, remote-tracking and symbolic refs, a ref to a tag object, and a detached `HEAD`;
 - uncommitted edits, deletions, staged and untracked files, ignored files, links, and line-ending conversion;
 - a bare repo.
+
+The same repos check `last_changes` for every commit against the core's own walk, which asks `read_commit` and `markdown_changes` once per commit, and a shallow clone checks where the walk ends.
 
 Fallback tests cover a SHA-256 repo, which gix cannot open; a partial clone, where the `git` command fetches a missing file; and an object deleted from the repo.
 

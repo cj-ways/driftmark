@@ -6,8 +6,8 @@ mod support;
 use std::collections::BTreeSet;
 
 use driftmark_core::git::{
-    Branch, FileChange, FileEntry, GitError, GitRead, ObjectId, ObjectKind, RangeSpec, RepoPath,
-    Roots, Snapshot,
+    Branch, FileChange, FileEntry, GitError, GitRead, LastChange, ObjectId, ObjectKind, RangeSpec,
+    RepoPath, Roots, Snapshot,
 };
 use support::{DAY, Readers, T0, TestRepo};
 
@@ -645,4 +645,151 @@ fn a_bare_repo_has_no_working_tree() {
     assert_eq!(read, Err(GitError::NoWorktree));
     let commits = check_everything(&readers, &["main", "feature", "v2"]);
     assert_eq!(commits.len(), 3);
+}
+
+/// A reader that answers `last_changes` with the core's own walk, one
+/// commit read and one comparison per commit, to check the readers' faster
+/// walks against it.
+struct Plain<'a>(&'a dyn GitRead);
+
+impl GitRead for Plain<'_> {
+    fn resolve(&self, name: &str) -> Result<ObjectId, GitError> {
+        self.0.resolve(name)
+    }
+    fn merge_bases(&self, a: &ObjectId, b: &ObjectId) -> Result<Vec<ObjectId>, GitError> {
+        self.0.merge_bases(a, b)
+    }
+    fn read_commit(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
+        self.0.read_commit(id)
+    }
+    fn markdown_files(&self, at: &Snapshot, roots: &Roots) -> Result<Vec<FileEntry>, GitError> {
+        self.0.markdown_files(at, roots)
+    }
+    fn markdown_changes(
+        &self,
+        a: &ObjectId,
+        b: &ObjectId,
+        roots: &Roots,
+    ) -> Result<Vec<FileChange>, GitError> {
+        self.0.markdown_changes(a, b, roots)
+    }
+    fn blob_at(&self, commit: &ObjectId, path: &RepoPath) -> Result<Option<ObjectId>, GitError> {
+        self.0.blob_at(commit, path)
+    }
+    fn branches(&self) -> Result<Vec<Branch>, GitError> {
+        self.0.branches()
+    }
+    fn read_blob(&self, id: &ObjectId) -> Result<Vec<u8>, GitError> {
+        self.0.read_blob(id)
+    }
+    fn read_worktree_file(&self, path: &RepoPath) -> Result<Vec<u8>, GitError> {
+        self.0.read_worktree_file(path)
+    }
+}
+
+/// `(path, commit, seconds after T0)` for each last change.
+fn lasts(changes: &[LastChange]) -> Vec<(String, String, i64)> {
+    changes
+        .iter()
+        .map(|change| {
+            (
+                change.path.to_lossy().into_owned(),
+                change.commit.as_hex().to_owned(),
+                change.committed_at - T0,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn every_reader_finds_the_same_last_changes() {
+    let h = history();
+    let readers = h.repo.readers();
+    let roots = [
+        Roots::all(),
+        Roots::new(["docs"]).expect("roots"),
+        Roots::new(["docs/sub", "README.md", "missing"]).expect("roots"),
+    ];
+    for commit in [&h.c1, &h.c2, &h.f1, &h.f2, &h.m3, &h.merge, &h.m5, &h.other] {
+        let commit = id(commit);
+        for root in &roots {
+            let found = readers
+                .same("last_changes", |g| g.last_changes(&commit, root))
+                .expect("an answer");
+            let files = readers
+                .command
+                .markdown_files(&Snapshot::Commit(commit.clone()), root)
+                .expect("files");
+            assert_eq!(
+                found.iter().map(|change| &change.path).collect::<Vec<_>>(),
+                files.iter().map(|file| &file.path).collect::<Vec<_>>(),
+                "one entry per file of the commit"
+            );
+            assert_eq!(
+                Plain(&readers.command).last_changes(&commit, root),
+                Ok(found),
+                "the core's walk agrees"
+            );
+        }
+    }
+    let at_main = readers
+        .same("last_changes", |g| {
+            g.last_changes(&id(&h.m5), &Roots::all())
+        })
+        .expect("an answer");
+    assert_eq!(
+        lasts(&at_main),
+        [
+            ("README.md".into(), h.m3.clone(), 4 * DAY),
+            ("docs/UPPER.MD".into(), h.c1.clone(), 0),
+            ("docs/a.md".into(), h.merge.clone(), 5 * DAY),
+            ("docs/moved.md".into(), h.m5.clone(), 6 * DAY),
+            ("docs/new.md/inner.md".into(), h.merge.clone(), 5 * DAY),
+            ("docs/run.md".into(), h.c1.clone(), 0),
+            ("docs/sub/b.markdown".into(), h.merge.clone(), 5 * DAY),
+        ],
+        "a merge counts for what it brought in; a new mode alone is no change"
+    );
+    let unknown = id("0123456789abcdef0123456789abcdef01234567");
+    for reader in [&readers.gix as &dyn GitRead, &readers.command] {
+        assert!(reader.last_changes(&unknown, &Roots::all()).is_err());
+    }
+}
+
+#[test]
+fn a_shallow_clone_stops_at_its_oldest_commit() {
+    let h = history();
+    let clone = support::TempDir::new("shallow");
+    let target = clone.path().join("shallow");
+    let source = format!("file://{}", h.repo.dir.to_string_lossy());
+    h.repo.git(&[
+        "clone",
+        "-q",
+        "--depth",
+        "2",
+        "--branch",
+        "main",
+        &source,
+        &target.to_string_lossy(),
+    ]);
+    let readers = support::readers_at(&target);
+    let found = readers
+        .same("shallow last_changes", |g| {
+            g.last_changes(&id(&h.m5), &Roots::all())
+        })
+        .expect("an answer");
+    // With depth 2 the clone holds m5 and the merge; the merge has no
+    // parent there, so it holds every file not changed since.
+    assert_eq!(
+        lasts(&found),
+        [
+            ("README.md".into(), h.merge.clone(), 5 * DAY),
+            ("docs/UPPER.MD".into(), h.merge.clone(), 5 * DAY),
+            ("docs/a.md".into(), h.merge.clone(), 5 * DAY),
+            ("docs/moved.md".into(), h.m5.clone(), 6 * DAY),
+            ("docs/new.md/inner.md".into(), h.merge.clone(), 5 * DAY),
+            ("docs/run.md".into(), h.merge.clone(), 5 * DAY),
+            ("docs/sub/b.markdown".into(), h.merge.clone(), 5 * DAY),
+        ]
+    );
 }

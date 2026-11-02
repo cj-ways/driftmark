@@ -134,7 +134,7 @@ pub fn build(
 /// among them, and returns the results in the order of the items. The
 /// threads take items in order, so once `stop` holds for a result, no later
 /// item is started, and every earlier item has its result.
-fn parallel<T: Sync, R: Send>(
+pub(crate) fn parallel<T: Sync, R: Send>(
     items: &[T],
     threads: usize,
     work: impl Fn(&T) -> R + Sync,

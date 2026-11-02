@@ -69,6 +69,16 @@ pub(crate) enum Key {
     /// with the same tree hold the same files and the same rules file, so
     /// they share one index.
     Search(ObjectId),
+    /// Every document of a commit, classified with a rules file, for the
+    /// status view.
+    Statuses(ObjectId, RulesId),
+    /// When each Markdown file of a commit last changed.
+    LastChanges(ObjectId),
+    /// The working tree's documents for the status view, while the watcher
+    /// has announced this many changes, `HEAD` is at this commit and the
+    /// rules are these. A working-tree file is read again whenever it
+    /// changes, so only the watcher's count can key it.
+    WorktreeStatus(u64, Option<ObjectId>, RulesId),
 }
 
 impl Key {
@@ -81,6 +91,7 @@ impl Key {
             Key::Range(..) => Kind::Ranges,
             Key::Branch(..) => Kind::Branches,
             Key::Search(_) => Kind::Search,
+            Key::Statuses(..) | Key::LastChanges(_) | Key::WorktreeStatus(..) => Kind::Status,
         }
     }
 }
@@ -101,6 +112,8 @@ pub(crate) enum Kind {
     Branches,
     /// Search indexes of revisions.
     Search,
+    /// The status view's documents and their last changes, per commit.
+    Status,
 }
 
 /// A value and the bytes it holds. The load function of
@@ -476,6 +489,9 @@ mod tests {
             (Key::Range(None, id('4')), Kind::Ranges),
             (Key::Branch(id('4'), id('5')), Kind::Branches),
             (Key::Search(id('6')), Kind::Search),
+            (Key::Statuses(id('7'), RulesId::Default), Kind::Status),
+            (Key::LastChanges(id('7')), Kind::Status),
+            (Key::WorktreeStatus(3, None, RulesId::Default), Kind::Status),
         ];
         for (key, _) in &keys {
             cache.get_or_load(key, || sized("v", 10)).unwrap();

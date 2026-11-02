@@ -624,3 +624,65 @@ main.read .dm-review { max-width: var(--measure); }
 
 /* A block a search result or a link points at. */
 .dm-found { background: var(--accent-bg); border-radius: 4px; }
+
+/* ---------- the status page: which documents are current
+   A table counts each type's documents by lifecycle; every lifecycle shows
+   as a word as well as a colour. "Untouched" is plain text, never a
+   warning colour: it is a fact, not a fault. */
+
+.status-link { margin: -0.5rem 0 1.25rem; font-weight: 600; }
+main.lifecycle { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1.5rem 5rem; }
+.lc-lede { max-width: 38rem; color: var(--text-soft); margin: 0 0 1.5rem; }
+.lc-table { margin: 0 0 1.5rem; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); }
+.lc-table table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 1rem; line-height: 1.5; }
+.lc-table th, .lc-table td { text-align: right; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+.lc-table th[scope="row"], .lc-table thead th:first-child { text-align: left; }
+.lc-table tbody tr:last-child :is(th, td) { border-bottom: 0; font-weight: 700; }
+.lc-table thead th { position: sticky; top: var(--bar); z-index: 2; background: var(--surface-2); font-size: 0.875rem; font-weight: 700; color: var(--text-soft); border-bottom: 2px solid var(--rule-strong); }
+.lc-table thead th:first-child { border-top-left-radius: var(--radius); }
+.lc-table thead th:last-child { border-top-right-radius: var(--radius); }
+.lc-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem 1rem; margin: 0 0 1.25rem; padding: 0.85rem 1rem; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); font-size: 0.9375rem; }
+.lc-filters label { display: flex; flex-direction: column; gap: 0.25rem; font-weight: 600; color: var(--text-soft); }
+.lc-filters label.lc-check { flex-direction: row; align-items: center; gap: 0.4rem; padding-bottom: 0.45rem; }
+.lc-filters :is(select, input:not([type="checkbox"])) { font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--rule-strong); border-radius: 8px; padding: 0.4rem 0.55rem; min-width: 10rem; }
+.lc-filters input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--accent); }
+.lc-filters button { font: 700 0.9375rem/1 var(--font-ui); color: var(--surface); background: var(--accent); border: 0; border-radius: 8px; padding: 0.6rem 1rem; cursor: pointer; }
+.lc-filters a { padding-bottom: 0.55rem; }
+.lc-shown, .lc-more { color: var(--text-soft); font-size: 0.9375rem; }
+.lc-more { display: flex; flex-wrap: wrap; gap: 1rem; font-weight: 600; }
+.lc-group { margin: 0 0 2rem; }
+.lc-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); }
+.lc-doc { padding: 0.7rem 1rem; border-bottom: 1px solid var(--rule); min-width: 0; }
+.lc-doc:last-child { border-bottom: 0; }
+.lc-top { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.6rem; }
+.lc-title { font-weight: 700; overflow-wrap: anywhere; }
+.lc-word { font: 700 0.8125rem/1 var(--font-ui); padding: 0.3em 0.55em; border-radius: 6px; border: 1px solid currentColor; white-space: nowrap; }
+.lc-word[data-lifecycle="current"] { color: var(--ins-line); }
+.lc-word[data-lifecycle="superseded"] { color: var(--warn-line); }
+.lc-word[data-lifecycle="archived"] { color: var(--text-faint); }
+.lc-meta, .lc-succ { margin: 0.25rem 0 0; font-size: 0.9375rem; color: var(--text-soft); overflow-wrap: anywhere; }
+.lc-meta code a { color: inherit; }
+.lc-old { font-style: italic; }
+.lc-succ a { font-weight: 600; }
+.lc-list .lc-list { margin: 0.5rem 0 0; background: var(--surface-2); }
+:is(.lc-replaced, .lc-archive, .lc-plain, .lc-skipped) > summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+.lc-replaced { margin: 0.4rem 0 0; font-size: 0.9375rem; }
+.lc-archive, .lc-plain { margin: 0.75rem 0 0; }
+.lc-plain > summary { margin-bottom: 0.5rem; }
+.lc-archive > summary { margin-bottom: 0.5rem; }
+.pill a { color: inherit; text-decoration: none; }
+.pill a:hover { text-decoration: underline; }
+
+@media (max-width: 47.5em) {
+  main.lifecycle { padding: 1rem 1rem 4rem; }
+  /* The counts become one card per type; each count carries its column's
+     name (data-label). */
+  .lc-table { background: none; border: 0; }
+  .lc-table :is(table, tbody, tr, th, td) { display: block; }
+  .lc-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .lc-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: 0.1rem 1rem; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.5rem 0.85rem; margin: 0 0 0.6rem; }
+  .lc-table :is(th, td) { border: 0; padding: 0.2rem 0; text-align: left; }
+  .lc-table th[scope="row"] { grid-column: 1 / -1; font-size: 1.0625rem; }
+  .lc-table td[data-label]::before { content: attr(data-label); display: block; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
+  .lc-filters :is(label, select, input:not([type="checkbox"])) { width: 100%; }
+}

@@ -1,0 +1,17 @@
+untouched-days 180
+
+decision: 7 documents, 1 current, 6 superseded, 0 archived, 0 none, 0 untouched
+document: 1 documents, 0 current, 0 superseded, 0 archived, 1 none, 0 untouched
+all: 8 documents, 1 current, 6 superseded, 0 archived, 1 none, 0 untouched
+
+## decision
+docs/decisions/0001-send-email-reports.md | superseded | status superseded | by "0009-send-chat-reports.md": missing docs/decisions/0009-send-chat-reports.md | 40 days
+docs/decisions/0002-weekly-reports.md | superseded | status Superseded | by "the new plan": missing docs/plans/reports.md | 40 days
+docs/decisions/0003-monthly-reports.md | superseded | status superseded | by "the plan we wrote in March": unmatched | 40 days
+docs/decisions/0004-daily-reports.md | superseded | status superseded | by: unnamed | 40 days
+docs/decisions/0005-reports-in-pdf.md | superseded | status superseded | by "0006-reports-in-html.md": circle docs/decisions/0006-reports-in-html.md | 20 days
+docs/decisions/0006-reports-in-html.md | superseded | status superseded | by "0005-reports-in-pdf.md": circle docs/decisions/0005-reports-in-pdf.md | 20 days
+docs/decisions/0007-one-report-page.md | current | status accepted | by - | 5 days
+
+## document
+docs/plans/README.md | none | status - | by - | 5 days

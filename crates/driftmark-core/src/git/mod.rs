@@ -1,10 +1,10 @@
 //! What driftmark asks of a git repo, and the rules for reading the answers.
 //!
-//! driftmark needs seven answers from git: which commit a name points to, where
-//! two branches parted, which Markdown files exist at a commit, which of them
-//! changed between two points, where one other file is, such as the rules
-//! file, which branches exist, and the bytes of a file. [`GitRead`] states
-//! those questions. The `driftmark` program answers them twice, with gix and
+//! driftmark needs eight answers from git: which commit a name points to,
+//! where two branches parted, which Markdown files exist at a commit, which of
+//! them changed between two points, where one other file is, such as the rules
+//! file, which branches exist, the bytes of a file, and when each file last
+//! changed. [`GitRead`] states those questions. The `driftmark` program answers them twice, with gix and
 //! with the `git` command, and checks the two against each other.
 //!
 //! Everything that is a rule rather than a lookup lives here, so both readers
@@ -16,6 +16,7 @@
 mod branches;
 mod commit;
 mod date;
+mod history;
 mod path;
 mod range;
 
@@ -24,6 +25,7 @@ use std::fmt;
 pub use branches::{BranchInbox, DefaultBranch, OpenBranch, inbox};
 pub use commit::{CommitInfo, tree_of};
 pub use date::parse_date;
+pub use history::{LastChange, LastChanges, walk as walk_last_changes};
 pub use path::{BadRoot, RepoPath, Roots};
 pub use range::{
     AUTO_BASES, BaseBranch, RangeError, RangeNote, RangeSpec, ResolvedRange, diff_files, merge_base,
@@ -366,6 +368,24 @@ pub trait GitRead: Send + Sync {
     /// when no regular file is at that path. A path that passes through a
     /// symbolic link counts as missing, so nothing outside the repo is read.
     fn read_worktree_file(&self, path: &RepoPath) -> Result<Vec<u8>, GitError>;
+
+    /// When each Markdown file under `roots` at `head` last changed: the
+    /// newest commit, following first parents only, whose version of the
+    /// file differs from its first parent's. The first commit of the
+    /// history changes every file it holds, and so does a shallow clone's
+    /// oldest commit. One entry per file of `head`, sorted by path.
+    ///
+    /// The history is walked once, and the walk stops when every file is
+    /// found. By default it asks [`GitRead::read_commit`] and
+    /// [`GitRead::markdown_changes`] once per commit ([`walk_last_changes`]);
+    /// a reader may answer faster, with the same answer.
+    ///
+    /// # Errors
+    ///
+    /// When a commit or a tree on the way cannot be read.
+    fn last_changes(&self, head: &ObjectId, roots: &Roots) -> Result<Vec<LastChange>, GitError> {
+        history::walk(self, head, roots)
+    }
 }
 
 #[cfg(test)]
