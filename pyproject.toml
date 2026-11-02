@@ -1,0 +1,41 @@
+# PyPI wheels: maturin builds the driftmark program and puts it in a wheel, so
+# `pip install driftmark`, `uv tool install driftmark` and `uvx driftmark` put
+# it on PATH. No Python code.
+#
+# The version, description, keywords and readme are left to crates/driftmark/Cargo.toml
+# (`dynamic` below), so PyPI shows the same texts as crates.io and npm.
+# THIRD-PARTY-NOTICES is written by scripts/notices/third-party-notices.mjs
+# before maturin runs; it is not in git.
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "driftmark"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE", "THIRD-PARTY-NOTICES"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Rust",
+    "Topic :: Documentation",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+dynamic = ["version", "description", "keywords", "readme"]
+
+[project.urls]
+Homepage = "https://github.com/cj-ways/driftmark"
+Documentation = "https://github.com/cj-ways/driftmark/blob/main/docs/README.md"
+Changelog = "https://github.com/cj-ways/driftmark/blob/main/CHANGELOG.md"
+Issues = "https://github.com/cj-ways/driftmark/issues"
+Repository = "https://github.com/cj-ways/driftmark"
+
+[tool.maturin]
+manifest-path = "crates/driftmark/Cargo.toml"
+bindings = "bin"

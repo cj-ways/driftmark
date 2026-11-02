@@ -1,0 +1,30 @@
+# cargo-about settings for THIRD-PARTY-NOTICES (scripts/third-party-notices.sh).
+# Only crates that end up inside the program count: dev and build dependencies
+# are left out, and so are crates used only on systems driftmark is not built for.
+
+# The order matters: for a crate offered under several licences, the notices
+# carry the first one listed here. This is the allow-list of deny.toml.
+accepted = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "Zlib",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "MPL-2.0",
+  "EPL-2.0",
+]
+
+# The six systems of .github/workflows/release.yml.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-pc-windows-msvc",
+  "x86_64-pc-windows-msvc",
+]
+
+ignore-build-dependencies = true
+ignore-dev-dependencies = true

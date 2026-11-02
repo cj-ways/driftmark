@@ -3,3 +3,7 @@
 /STATUS.md
 /private/
 node_modules/
+
+# Release files, written by the scripts in scripts/ (release.yml).
+/THIRD-PARTY-NOTICES
+/dist/

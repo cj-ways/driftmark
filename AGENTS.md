@@ -26,6 +26,8 @@ A Rust tool for a git folder of Markdown that AI agents keep editing. It shows w
 | `docs/decisions/` | Decision records, written once. A later decision supersedes an earlier one; it never edits it |
 | `docs/working/<topic>/` | Active work: a plan and its status |
 | `.github/workflows/ci.yml` | Format, Clippy, tests on Linux, macOS and Windows, the minimum Rust version, core coverage, cargo-deny |
+| `.github/workflows/release.yml` | The release: a `v*` tag builds six systems and publishes to GitHub, crates.io, PyPI and npm; run by hand, it publishes nothing (`docs/features/install.md`) |
+| `scripts/`, `npm/`, `pyproject.toml` | What the release workflow runs: the notices file, the archives, the npm packages and their launcher, the Python wheel, the Homebrew formula |
 | `.github/actions/driftmark/` | The GitHub Action other repositories use on pull requests (`docs/features/ci.md`) |
 | `ci/gitlab/` | The GitLab CI template for merge requests (`docs/features/ci.md`) |
 | `STATUS.md` | Current state and log; out of git, on the maintainer's machines only |

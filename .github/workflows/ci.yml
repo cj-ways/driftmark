@@ -20,7 +20,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -33,7 +33,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        # Explicit labels, not *-latest, so a label moving to a new image does not
+        # change CI by surprise (ubuntu-latest moves to Ubuntu 26.04 in November
+        # 2026). macOS runs on Intel: GitHub's macOS arm64 runners are short of
+        # capacity, and four macos-latest jobs waited 15 minutes and were
+        # cancelled without a runner on 2026-11-02. The tests check macOS
+        # behaviour, not the processor; the release workflow starts the arm64
+        # program on an arm64 runner.
+        os: [macos-15-intel, ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -44,21 +51,21 @@ jobs:
   # commits. This is the only job that uses the network; the test job above
   # leaves these tests out.
   presets-public:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked -p driftmark --test presets_public -- --ignored
 
   msrv:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.95
       - run: cargo build --locked --workspace
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -71,7 +78,7 @@ jobs:
       - run: cargo llvm-cov --locked -p driftmark-core --fail-under-lines 100 --fail-under-functions 100 --fail-under-regions 100
 
   deny:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
