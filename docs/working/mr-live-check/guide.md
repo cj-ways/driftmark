@@ -4,4 +4,4 @@
 
 ## Build
 
-Run the build first.
+Run the build first, then the tests.
