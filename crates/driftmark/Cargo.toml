@@ -9,13 +9,29 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
+# What crates.io gets: the code, the files the program builds in, and the
+# licences. The readme above is added by cargo. Tests stay in the repository:
+# they read fixtures outside this folder.
+include = ["/src/", "/assets/", "/LICENSE-MIT", "/LICENSE-APACHE"]
 
 [[bin]]
 name = "driftmark"
 path = "src/main.rs"
 
+# `cargo binstall driftmark` downloads the release archive instead of building.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/driftmark-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.aarch64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [dependencies]
-driftmark-core = { path = "../driftmark-core", version = "0.0.0" }
+driftmark-core = { path = "../driftmark-core", version = "0.1.0" }
 # Reads git without starting processes (decision 0008, item 1). Pinned: each
 # 0.x release may break the API. Default features are off because they pull in
 # a pack cache under MPL-2.0; `pack-cache-lru-dynamic` caps the cache by bytes

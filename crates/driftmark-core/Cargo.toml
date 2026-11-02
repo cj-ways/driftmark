@@ -4,6 +4,10 @@ description = "The rules of driftmark: document blocks, change detection and ran
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+# What crates.io gets: the code, the starter files and the browser script it
+# builds in, and the licences. Tests stay in the repository: they read
+# fixtures outside this folder.
+include = ["/src/", "/starter/", "/web/", "/LICENSE-MIT", "/LICENSE-APACHE"]
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
